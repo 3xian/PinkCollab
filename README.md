@@ -10,6 +10,53 @@ A remote control plane for **Oh My Pi (OMP)**. Manage agent tasks across compute
 
 The Gateway uses **Rust / Tokio / Axum / SQLite**. The Android client uses **Kotlin / Jetpack Compose / Material 3**. The Gateway ships as a standalone executable; each host still needs OMP and its runtime dependencies. Model provider credentials remain on the host.
 
+## Module flow
+
+```mermaid
+flowchart TB
+    subgraph Android[Android client]
+        UI["Compose UI / CollabViewModel"]
+        Data["GatewayRepository / GatewayApi"]
+        UI -->|User actions| Data
+        Data -->|StateFlow updates| UI
+    end
+
+    subgraph Host[Each host]
+        subgraph Gateway[Rust Gateway]
+            API["api: REST / WebSocket<br/>Pairing and authentication"]
+            Workspace["workspace: Browser<br/>Allowlists, path checks, Git status"]
+            Session["session: Registry<br/>Task lifecycle and in-memory timeline"]
+            Runtime["omp: Runtime<br/>Process transport and request correlation"]
+            Events["events: normalize / Bus<br/>States, streaming text, tools, input requests"]
+            Store[("storage: Store / SQLite<br/>Host identity, credentials, session metadata")]
+            API -->|Browse directories| Workspace
+            API -->|Create, Prompt / Steer, Interrupt, Stop, Respond| Session
+            API -->|Pair / authenticate| Store
+            Session -->|Validate working directory| Workspace
+            Session <-->|Load / save metadata| Store
+            Session -->|Spawn / send commands| Runtime
+            Runtime -->|Process output| Session
+            Session -->|Normalize / publish updates| Events
+            Events -->|Live events| API
+            Session -->|Initial snapshot| API
+        end
+
+        OMP["OMP: omp --mode rpc-ui<br/>One independent process per task"]
+        Files[("OMP JSONL session files<br/>Branch-aware conversation history")]
+        Runtime -->|NDJSON stdin| OMP
+        OMP -->|NDJSON stdout| Runtime
+        OMP -->|Write transcript| Files
+        Session -->|Read history on demand| Files
+    end
+
+    Data -->|HTTPS REST requests| API
+    API -->|REST responses / WSS snapshots and events| Data
+```
+
+Commands travel from Android through the API and session registry to OMP; process output is normalized into session updates and streamed back over WebSocket. Each paired host runs its own Gateway and OMP processes, while Android aggregates their task states. Model provider credentials stay on the host.
+
+SQLite stores management metadata, not conversation transcripts. Live activity is buffered in memory; historical messages are read on demand from OMP's JSONL files. `config` supplies startup settings and `model` defines the shared protocol types.
+
 ## Implemented MVP
 
 - Persistent host identity, single-use QR pairing, client authentication, and credential revocation.
