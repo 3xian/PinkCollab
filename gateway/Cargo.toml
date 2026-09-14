@@ -1,0 +1,48 @@
+[package]
+name = "pinkcollab-gateway"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+
+[features]
+test-fixtures = []
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+futures-util = "0.3"
+hex = "0.4"
+image = { version = "=0.25.6", default-features = false, features = ["png"] }
+qrcode = "0.14"
+rand = "0.9"
+rusqlite = { version = "0.37", features = ["bundled"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-tungstenite = "0.28"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[[bin]]
+name = "omp-fixture"
+path = "tests/fixtures/omp.rs"
+required-features = ["test-fixtures"]

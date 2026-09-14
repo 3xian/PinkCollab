@@ -32,3 +32,11 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Rust and local artifacts
+target/
+/dist/
+pairing*.png
+.pinkcollab/
+
+AGENTS.md

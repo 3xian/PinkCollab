@@ -1,0 +1,10 @@
+listen: 127.0.0.1:8787
+public_url: https://dev-server.example.com
+name: dev-server
+workspaces:
+  - ~/projects
+omp: omp
+omp_args: []
+tls_cert: null
+tls_key: null
+max_sessions: 8
