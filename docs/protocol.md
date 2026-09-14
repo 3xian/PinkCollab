@@ -1,27 +1,29 @@
 # PinkCollab Protocol v1
 
-Android 只依赖本协议。OMP 适配依据 [官方 RPC 定义](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md) 与 [rpc-types.ts](https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts)。当前使用 v1 NDJSON（每帧最多 1 MiB），不协商 OMP v2 chunk 传输。
+[English](protocol.md) · [简体中文](protocol_cn.md)
 
-除配对外，每个 REST 请求与 WebSocket 握手均须携带 `Authorization: Bearer <credential>`。凭据不支持 URL query 传入，不启用浏览器跨域访问。所有响应 `Cache-Control: no-store`。
+Android depends only on this protocol. The OMP adapter follows the [official RPC specification](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md) and [rpc-types.ts](https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts). It currently uses v1 NDJSON (up to 1 MiB per frame) and does not negotiate OMP v2 chunk transport.
+
+Except for pairing, every REST request and WebSocket handshake must include `Authorization: Bearer <credential>`. Credentials cannot be passed through URL query parameters, and browser cross-origin access is not enabled. All responses include `Cache-Control: no-store`.
 
 ## REST
 
-| 方法 | 地址 | 请求 / 响应 |
+| Method | Path | Request / response |
 | --- | --- | --- |
-| POST | `/api/v1/pair` | `{token,name}` → `{clientId,credential,host,protocolVersion}`，201 |
-| GET | `/api/v1/host` | 本机 Host |
+| POST | `/api/v1/pair` | `{token,name}` → `{clientId,credential,host,protocolVersion}`, 201 |
+| GET | `/api/v1/host` | Local Host |
 | GET | `/api/v1/workspaces` | `[{name,path}]` |
 | GET | `/api/v1/fs/list?path=...` | `{path,parent?,directories:[{name,path}],git?:{branch,status}}` |
-| GET | `/api/v1/sessions` | Session 数组，按更新时间倒序 |
+| GET | `/api/v1/sessions` | Session array, sorted by update time in descending order |
 | GET | `/api/v1/sessions/:id` | `{session,timeline}` |
-| POST | `/api/v1/sessions` | `{hostId,cwd,prompt,title?}` → Session，201 |
-| DELETE | `/api/v1/sessions/:id` | 只删除已无 runtime 的管理元数据，204；不删除 OMP 原始数据 |
-| POST | `/api/v1/sessions/:id/prompt` | `{message}`，运行中自动指定 OMP streamingBehavior=steer |
-| POST | `/api/v1/sessions/:id/interrupt` | 无请求字段，OMP abort，进入 idle |
-| POST | `/api/v1/sessions/:id/stop` | 无请求字段，关闭 stdin，3 秒后未退出则终止 OMP |
-| POST | `/api/v1/sessions/:id/respond` | 见下方输入回复 |
+| POST | `/api/v1/sessions` | `{hostId,cwd,prompt,title?}` → Session, 201 |
+| DELETE | `/api/v1/sessions/:id` | Deletes management metadata only when no runtime remains, 204; does not delete original OMP data |
+| POST | `/api/v1/sessions/:id/prompt` | `{message}`; automatically sets OMP streamingBehavior=steer while running |
+| POST | `/api/v1/sessions/:id/interrupt` | No request fields; sends OMP abort and transitions to idle |
+| POST | `/api/v1/sessions/:id/stop` | No request fields; closes stdin and terminates OMP if it has not exited after 3 seconds |
+| POST | `/api/v1/sessions/:id/respond` | See input responses below |
 
-命令成功返回 `{ok:true}`。命令拒绝返回 409，创建拒绝返回 422，目录越界返回 403，鉴权失败返回 401。业务错误返回 `{error:string}`；JSON 解码错误由 HTTP 框架返回 400/415/422。请求体上限 512 KiB，Prompt 和输入值最多 256 KiB。
+Successful commands return `{ok:true}`. Rejected commands return 409, rejected session creation returns 422, out-of-bounds directories return 403, and authentication failures return 401. Business errors return `{error:string}`; the HTTP framework returns 400/415/422 for JSON decoding errors. Request bodies are limited to 512 KiB, and prompts and input values to 256 KiB.
 
 ## Session
 
@@ -40,9 +42,9 @@ Android 只依赖本协议。OMP 适配依据 [官方 RPC 定义](https://github
 }
 ```
 
-状态：starting、running、needs_input、idle、completed、failed、stopped、offline。只有 `agent_end` 完成整个 Agent 执行，`turn_end` 不结束任务。`runtimeAttached` 表示当前仍能向 runtime 发送指令；completed 任务可能仍有 runtime，Gateway 重启后此值为 false。
+Statuses: starting, running, needs_input, idle, completed, failed, stopped, offline. Only `agent_end` completes the entire agent execution; `turn_end` does not end the task. `runtimeAttached` indicates whether commands can still be sent to the runtime. A completed task may still have a runtime; this value becomes false after the Gateway restarts.
 
-有输入请求时包含 `attention: {id,type,text,options}`。`type` 为 select / confirm / input / editor，`needsAttention=true`。响应须带原请求 id，过期或不匹配的 id 被拒绝。
+When input is requested, the session includes `attention: {id,type,text,options}`. `type` is select / confirm / input / editor, and `needsAttention=true`. Responses must include the original request id; expired or mismatched ids are rejected.
 
 ```json
 {"id":"request-id","value":"selected option or input text"}
@@ -56,11 +58,11 @@ Android 只依赖本协议。OMP 适配依据 [官方 RPC 定义](https://github
 {"id":"request-id","cancelled":true}
 ```
 
-select 的 value 必须是 options 中的原字符串。输入完成后重新进入 running；存在未回答的输入请求时不能发送 Prompt。
+For select requests, value must be an exact string from options. After input is resolved, the session returns to running. Prompts cannot be sent while an input request remains unanswered.
 
 ## WebSocket
 
-连接 `/api/v1/events` 后，Gateway 先注册订阅，再发送 snapshot，消除初始 REST 与增量流之间的空窗。
+After a connection to `/api/v1/events`, the Gateway registers the subscription before sending a snapshot, eliminating the gap between the initial REST state and the incremental event stream.
 
 ```json
 {
@@ -71,20 +73,20 @@ select 的 value 必须是 options 中的原字符串。输入完成后重新进
 }
 ```
 
-后续事件统一 `{sequence,type,timestamp,payload}`，sequence 是当前 Gateway 进程内递增序号；snapshot 使用 0。
+Subsequent events use `{sequence,type,timestamp,payload}`. sequence is an increasing number within the current Gateway process; snapshots use 0.
 
 | type | payload |
 | --- | --- |
-| session.updated | 完整 Session |
+| session.updated | Full Session |
 | session.deleted | `{sessionId}` |
 | timeline.updated | `{sessionId,item:{id,kind,text,detail,timestamp}}` |
-| message.delta | `{sessionId,text}`，当前助手消息的文本增量 |
+| message.delta | `{sessionId,text}`; text delta for the current assistant message |
 | attention.created | `{sessionId,attention}` |
 
-客户端以 session/item id 合并事件，按 updatedAt 防止快照之后排队的旧状态回退。timeline 同 id 更新是 upsert；助手最终消息覆盖当前流式草稿。Timeline kind 为 user / assistant / tool / subagent / error / notice。
+Clients merge events by session/item id and use updatedAt to prevent older states queued after the snapshot from overwriting newer states. Timeline updates with the same id are upserts; the final assistant message replaces the current streaming draft. Timeline kind is user / assistant / tool / subagent / error / notice.
 
-Gateway 每 25 秒发送 Ping，70 秒未收到心跳回复则断开。慢客户端超过 256 条积压时断开，客户端应重新连接获取快照，并重新加载打开的任务详情。本版本不提供持久事件重放。
+The Gateway sends a Ping every 25 seconds and disconnects if no heartbeat response is received for 70 seconds. Slow clients are disconnected when their backlog exceeds 256 events. Clients should reconnect to obtain a snapshot and reload the details of any open task. This version does not provide persistent event replay.
 
-## 数据所有权
+## Data ownership
 
-SQLite 只保存 Host ID、客户端 token 哈希、配对令牌哈希、Session 管理元数据和 OMP session 文件定位信息。供应商凭据由 OMP 保管。前台实时 Timeline 最近 500 项只放在内存；历史对话按 OMP entry 的 parentId 重建当前分支。
+SQLite stores only the Host ID, client token hashes, pairing token hashes, Session management metadata, and OMP session file location information. OMP manages provider credentials. Only the latest 500 live Timeline items are kept in memory; historical conversations are reconstructed for the current branch using parentId from OMP entries.
