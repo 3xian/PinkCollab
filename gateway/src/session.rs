@@ -98,7 +98,7 @@ impl Registry {
     pub async fn list(&self) -> Vec<Session> {
         let state = self.state.lock().await;
         let mut list: Vec<_> = state.entries.values().map(|e| e.session.clone()).collect();
-        list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        list.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
         list
     }
     pub async fn detail(&self, id: &str) -> Result<Detail> {
@@ -476,22 +476,21 @@ impl Registry {
                 ensure!(a.id == response.id, "attention is no longer pending");
                 ensure!(response.value.len() <= 262144, "answer too large");
                 let mut frame = json!({"type":"extension_ui_response","id":a.id});
-                let text;
-                if response.cancelled {
+                let text = if response.cancelled {
                     frame["cancelled"] = json!(true);
-                    text = "Input cancelled".into();
+                    "Input cancelled".into()
                 } else if a.kind == "confirm" {
                     let confirmed = response.confirmed.context("confirmed boolean required")?;
                     frame["confirmed"] = json!(confirmed);
-                    text = format!("Confirmed: {confirmed}");
+                    format!("Confirmed: {confirmed}")
                 } else {
                     ensure!(
                         a.kind != "select" || a.options.contains(&response.value),
                         "answer must match a select option"
                     );
                     frame["value"] = json!(response.value);
-                    text = format!("Answered: {}", response.value);
-                }
+                    format!("Answered: {}", response.value)
+                };
                 runtime.write(frame).await?;
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(id).unwrap();
