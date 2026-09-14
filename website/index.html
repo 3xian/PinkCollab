@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f9f7fc">
+  <meta name="description" content="PinkCollab brings your Oh My Pi agents within reach. Manage tasks across your computers and servers from Android, with a Rust gateway on each host.">
+  <meta property="og:title" content="PinkCollab — Your agents. Within reach.">
+  <meta property="og:description" content="An open-source Android control plane for Oh My Pi agents across your computers and servers.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://3xian.github.io/PinkCollab/">
+  <link rel="canonical" href="https://3xian.github.io/PinkCollab/">
+  <link rel="icon" type="image/png" href="assets/logo.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+  <title>PinkCollab — Your agents. Within reach.</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="PinkCollab home"><img src="assets/logo.png" width="42" height="42" alt=""><span>PinkCollab<span class="brand-dot">.</span></span></a>
+      <nav aria-label="Main navigation"><a href="#features">Features</a><a href="#how-it-works">How it works</a><a class="nav-source" href="https://github.com/3xian/PinkCollab">GitHub <span aria-hidden="true">↗</span></a></nav>
+    </header>
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> OPEN SOURCE. ALWAYS WITHIN REACH.</p>
+          <h1 id="hero-title">Your agents.<br><span>Within reach.</span></h1>
+          <p class="hero-description">Your agents work across your machines.<br>Keep the conversation going from your phone.</p>
+          <p class="hero-detail">An Android control plane for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a>, powered by a Rust gateway on each host.</p>
+          <div class="hero-actions"><a class="button button-primary" href="#get-started">Get started <span aria-hidden="true">↗</span></a><a class="button button-text" href="https://github.com/3xian/PinkCollab">Explore the source <span aria-hidden="true">→</span></a></div>
+          <div class="hero-platforms"><span>Android client</span><i aria-hidden="true"></i><span>Rust gateway</span><i aria-hidden="true"></i><span>Your own hosts</span></div>
+        </div>
+        <div class="hero-scene" aria-label="Illustrative PinkCollab task view">
+          <div class="scene-orbit orbit-one" aria-hidden="true"></div><div class="scene-orbit orbit-two" aria-hidden="true"></div>
+          <div class="host-chip host-home"><span class="host-icon" aria-hidden="true">⌘</span><div><strong>home-pc</strong><span><b></b> Connected</span></div></div>
+          <div class="host-chip host-server"><span class="host-icon" aria-hidden="true">▤</span><div><strong>dev-server</strong><span><b></b> Connected</span></div></div>
+          <div class="phone">
+            <div class="phone-top" aria-hidden="true"><span>9:41</span><div class="camera"></div><span>▰</span></div>
+            <div class="phone-content">
+              <div class="phone-heading"><img src="assets/logo.png" width="34" height="34" alt=""><span>PinkCollab</span><span class="avatar">P</span></div>
+              <div class="phone-title"><div><span class="phone-overline">YOUR CONTROL PLANE</span><h2>Tasks</h2></div><span class="host-count">2 hosts</span></div>
+              <div class="task-tabs" role="tablist" aria-label="Demo task groups">
+                <button id="tab-attention" class="task-tab active" role="tab" aria-selected="true" aria-controls="demo-tasks" data-group="attention">Attention <span>1</span></button>
+                <button id="tab-running" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="running">Running <span>2</span></button>
+                <button id="tab-recent" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="recent">Recent</button>
+              </div>
+              <div id="demo-tasks" role="tabpanel" aria-labelledby="tab-attention" tabindex="0">
+                <article class="demo-task attention-task"><div class="task-label"><span class="status-dot"></span> NEEDS YOUR INPUT <span class="task-time">now</span></div><h3>Review database migration</h3><p class="task-path">dev-server <span>/</span> projects/api</p><div class="task-message"><span aria-hidden="true">↳</span><p>Ready to apply the migration.<br>Would you like to proceed?</p></div><span class="task-footnote">Continue the conversation in the app <span aria-hidden="true">→</span></span></article>
+                <p class="demo-context">A decision from you keeps work moving.</p>
+              </div>
+              <div class="phone-bottom-nav" aria-hidden="true"><span class="selected"><b>▦</b>Tasks</span><span><b>▱</b>Workspaces</span><span><b>▤</b>Hosts</span></div>
+            </div>
+            <div class="home-indicator" aria-hidden="true"></div>
+          </div>
+          <div class="event-chip"><span class="event-check" aria-hidden="true">✓</span><div><strong>You’re in the loop.</strong><span>Live replies. Clear task states.</span></div></div>
+          <span class="scene-caption">Illustrative task view · try the tabs</span>
+        </div>
+      </section>
+      <div class="principles-strip"><p>One phone.<br><strong>Every workspace.</strong></p><span>Follow the work</span><span>Make the call</span><span>Keep it moving <b aria-hidden="true">↗</b></span></div>
+      <section class="features section" id="features" aria-labelledby="features-title">
+        <div class="section-heading"><p class="eyebrow">A LITTLE DISTANCE. NO DISCONNECT.</p><h2 id="features-title">Stay close to the work.</h2><p>The useful parts of agent control,<br>made for the screen in your hand.</p></div>
+        <div class="feature-grid">
+          <article class="feature feature-wide"><div class="feature-icon" aria-hidden="true">▦</div><h3>All your hosts.<br> One task list.</h3><p>See what needs your attention, what’s running, and what’s recently finished across your computers and servers.</p><div class="mini-states" aria-hidden="true"><span><i class="pink-dot"></i>Needs attention</span><span><i class="green-dot"></i>Running</span><span><i class="purple-dot"></i>Recent</span></div></article>
+          <article class="feature"><div class="feature-icon" aria-hidden="true">↳</div><h3>A conversation,<br> wherever you are.</h3><p>Follow streaming replies and tool details. Send a new prompt, steer ongoing work, or answer when your agent asks.</p><div class="mini-conversation" aria-hidden="true"><span>Focus on the failing tests first.</span><span>On it. Checking the test output…</span></div></article>
+          <article class="feature"><div class="feature-icon" aria-hidden="true">▱</div><h3>Start in the<br> right directory.</h3><p>Browse allowed workspaces, pick a project, and start a fresh OMP session with the working directory already set.</p><div class="mini-path" aria-hidden="true"><span>projects</span><b>/</b><span>api</span><b>↗</b></div></article>
+        </div>
+        <div class="ownership-note"><span aria-hidden="true">⌁</span><p><strong>Your machines stay yours.</strong> OMP runs on your hosts. Model provider credentials stay there, too. Pair devices with a single-use QR code and revoke access when you need to.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment guide <span aria-hidden="true">↗</span></a></div>
+      </section>
+      <section class="workflow section" id="how-it-works" aria-labelledby="workflow-title">
+        <div class="section-heading"><p class="eyebrow">FROM YOUR DESK TO YOUR POCKET</p><h2 id="workflow-title">Three steps. Then you’re connected.</h2></div>
+        <div class="steps"><article><span class="step-number">01</span><h3>Bring a host online.</h3><p>Run the Rust gateway alongside OMP. Choose the workspace roots your phone can browse.</p></article><article><span class="step-number">02</span><h3>Scan. Pair. Done.</h3><p>Connect the Android app using a single-use QR code over your HTTPS connection.</p></article><article><span class="step-number">03</span><h3>Start a task. Stay in touch.</h3><p>Pick a directory and send a prompt. Follow replies, answer questions, and interrupt or stop when needed.</p></article></div>
+      </section>
+      <section class="getting-started section" id="get-started" aria-labelledby="start-title">
+        <div class="start-copy"><p class="eyebrow">LET’S GET YOU CONNECTED</p><h2 id="start-title">Built for your setup.<br>Open from the start.</h2><p>Install OMP on your host, build the gateway, and connect the Android client.</p><p class="requirements">Rust 1.89+ · JDK 17+ · Android SDK 36</p><a class="button button-primary" href="https://github.com/3xian/PinkCollab#quick-start">Read the setup guide <span aria-hidden="true">↗</span></a><a class="build-link" href="https://github.com/3xian/PinkCollab/actions/workflows/ci.yml">Android APK build artifacts <span aria-hidden="true">↗</span></a><span class="build-note">Available from successful CI runs; GitHub sign-in is required.</span></div>
+        <div class="install-panel"><div class="install-top"><span class="terminal-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Build the gateway</span><button id="copy-command" class="copy-button" type="button" aria-label="Copy gateway build commands">Copy <span aria-hidden="true">⧉</span></button></div><pre><code id="install-command">git clone https://github.com/3xian/PinkCollab.git
+cd PinkCollab/gateway
+cargo build --release --locked \
+  --bin pinkcollab-gateway</code></pre><div class="install-next"><span>Next step</span><p>Configure your workspace roots and expose the gateway over HTTPS.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment instructions <span aria-hidden="true">→</span></a></div><p id="copy-status" class="copy-status" role="status" aria-live="polite"></p></div>
+      </section>
+      <section class="closing"><img src="assets/logo.png" width="72" height="72" alt=""><p>Work keeps moving.<br><strong>So can you.</strong></p><a href="https://github.com/3xian/PinkCollab">Made in the open. Join us on GitHub <span aria-hidden="true">↗</span></a></section>
+    </main>
+    <footer><a class="brand footer-brand" href="./"><span>PinkCollab<span class="brand-dot">.</span></span></a><p>A remote control plane for Oh My Pi.</p><div><a href="https://github.com/3xian/PinkCollab">GitHub</a><a href="https://github.com/3xian/PinkCollab/blob/main/docs/protocol.md">API docs</a><a href="https://github.com/3xian/PinkCollab/blob/main/LICENSE">License</a></div></footer>
+  </div>
+</body>
+</html>
