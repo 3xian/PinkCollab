@@ -11,7 +11,7 @@ A remote control plane for **Oh My Pi (OMP)**. Manage agent tasks across compute
 The Gateway uses **Rust / Tokio / Axum / SQLite**. The Android client uses **Kotlin / Jetpack Compose / Material 3**. The Gateway ships as a standalone executable; each host still needs OMP and its runtime dependencies. Model provider credentials remain on the host.
 
 <p align="center">
-  <img src="docs/assets/pinkcollab-better-life.webp" width="1000" alt="Before PinkCollab: late-night work at a desk. With PinkCollab: relaxing while managing agent tasks from a phone." />
+  <img src="docs/assets/pinkcollab-better-life.webp" width="640" alt="Before PinkCollab: late-night work at a desk. With PinkCollab: relaxing while managing agent tasks from a phone." />
   <br />
   <em>Same code. Brighter tomorrow. Keep your agents close, and enjoy life beyond the desk.</em>
 </p>
