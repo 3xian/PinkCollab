@@ -32,8 +32,17 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      # ubuntu runners already ship the Android SDK, so only the packages this
+      # project needs are installed here. (why: android-actions/setup-android@v3
+      # still requests the retired `tools` package, which current cmdline-tools
+      # cannot resolve, and fails the job before Gradle ever runs.)
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdkmanager" ] || sdkmanager="$(command -v sdkmanager)"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" 'platforms;android-36' 'build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
       - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain
