@@ -6,9 +6,10 @@ import org.json.JSONObject
 data class Host(val id: String, val name: String, val os: String, val ompVersion: String, val gatewayVersion: String)
 data class PairedHost(val host: Host, val url: String, val credential: String, val clientId: String)
 data class Attention(val id: String, val type: String, val text: String, val options: List<String>)
+data class ModelInfo(val provider: String, val id: String, val name: String)
 data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean)
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String)
-data class SessionDetail(val session: Session, val timeline: List<TimelineItem>, val streaming: String = "")
+data class SessionDetail(val session: Session, val timeline: List<TimelineItem>, val streaming: String = "", val model: ModelInfo? = null)
 data class Workspace(val name: String, val path: String)
 data class Listing(val path: String, val parent: String?, val directories: List<Workspace>, val branch: String?, val gitStatus: String?)
 data class HostState(val paired: PairedHost, val connected: Boolean = false, val sessions: List<Session> = emptyList(), val workspaces: List<Workspace> = emptyList(), val revision: Long = 0)
@@ -21,6 +22,8 @@ fun JSONObject.session(): Session {
     return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), getString("status"), getString("activity"), getBoolean("needsAttention"), a, getString("createdAt"), getString("updatedAt"), optBoolean("runtimeAttached"))
 }
 fun JSONObject.item() = TimelineItem(getString("id"), getString("kind"), getString("text"), optString("detail"), getString("timestamp"))
+fun JSONObject.modelInfo() = ModelInfo(getString("provider"), getString("id"), getString("name"))
+
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
 fun JSONArray.strings(): List<String> = (0 until length()).map { getString(it) }
 fun JSONObject.workspace() = Workspace(getString("name"), getString("path"))

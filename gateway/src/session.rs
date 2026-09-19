@@ -1,6 +1,6 @@
 use crate::{
     events::{self, Bus},
-    model::{Detail, Session, TimelineItem},
+    model::{Detail, ModelInfo, Session, TimelineItem},
     omp::{self, Output, Runtime},
     storage::{self, Store},
     workspace::{self, Browser},
@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 struct Entry {
     session: Session,
     timeline: VecDeque<TimelineItem>,
+    model: Option<ModelInfo>,
     runtime: Option<Arc<Runtime>>,
     command: Arc<Mutex<()>>,
     stopping: bool,
@@ -74,6 +75,7 @@ impl Registry {
                 Entry {
                     session,
                     timeline: VecDeque::new(),
+                    model: None,
                     runtime: None,
                     command: Arc::new(Mutex::new(())),
                     stopping: false,
@@ -102,12 +104,13 @@ impl Registry {
         list
     }
     pub async fn detail(&self, id: &str) -> Result<Detail> {
-        let (session, timeline) = {
+        let (session, timeline, model) = {
             let state = self.state.lock().await;
             let e = state.entries.get(id).context("session not found")?;
             (
                 e.session.clone(),
                 e.timeline.iter().cloned().collect::<Vec<_>>(),
+                e.model.clone(),
             )
         };
         // OMP owns transcripts. Read its branch-aware session log on demand instead of copying it to SQLite.
@@ -118,7 +121,53 @@ impl Registry {
         } else {
             timeline
         };
-        Ok(Detail { session, timeline })
+        Ok(Detail {
+            session,
+            timeline,
+            model,
+        })
+    }
+    pub async fn cycle_model(&self, id: &str) -> Result<ModelInfo> {
+        let (gate, runtime) = self.runtime(id).await?;
+        let _guard = gate.lock().await;
+        let response = runtime.request(json!({"type":"cycle_model"})).await?;
+        let model = response["data"]
+            .get("model")
+            .filter(|model| !model.is_null())
+            .context("no alternative model is configured")?;
+        let model = model_info(model)?;
+        self.set_model(id, Some(model.clone())).await;
+        Ok(model)
+    }
+    /// OMP can switch models without Gateway involvement, so re-read its state to keep the cache canonical.
+    async fn refresh_model(&self, id: &str) -> Result<()> {
+        let (gate, runtime) = self.runtime(id).await?;
+        let _guard = gate.lock().await;
+        let response = runtime.request(json!({"type":"get_state"})).await?;
+        self.set_model(id, state_model(&response)).await;
+        Ok(())
+    }
+    async fn set_model(&self, id: &str, model: Option<ModelInfo>) {
+        let mut state = self.state.lock().await;
+        let Some(e) = state.entries.get_mut(id) else {
+            return;
+        };
+        if e.model == model {
+            return;
+        }
+        e.model = model.clone();
+        self.bus
+            .publish("model.updated", json!({"sessionId":id,"model":model}));
+    }
+    async fn runtime(&self, id: &str) -> Result<(Arc<Mutex<()>>, Arc<Runtime>)> {
+        let state = self.state.lock().await;
+        let e = state.entries.get(id).context("session not found")?;
+        let runtime = e
+            .runtime
+            .clone()
+            .filter(|runtime| runtime.alive())
+            .context("session has no attached OMP runtime")?;
+        Ok((e.command.clone(), runtime))
     }
     fn save(&self, e: &mut Entry) -> Result<()> {
         e.session.updated_at = Utc::now();
@@ -146,6 +195,14 @@ impl Registry {
             "timeline.updated",
             events::timeline_payload(&e.session.id, &item),
         );
+    }
+    async fn handle(&self, id: &str, frame: Value) -> Result<()> {
+        let model_changed = omp::string(&frame, "type") == "model_changed";
+        let result = self.apply(id, frame).await;
+        if model_changed && let Err(err) = self.refresh_model(id).await {
+            eprintln!("Model refresh error: {err}");
+        }
+        result
     }
     async fn apply(&self, id: &str, f: Value) -> Result<()> {
         let mut state = self.state.lock().await;
@@ -221,6 +278,7 @@ impl Registry {
             return Ok(());
         };
         e.runtime = None;
+        e.model = None;
         e.session.runtime_attached = false;
         e.session.attention = None;
         e.session.needs_attention = false;
@@ -306,6 +364,7 @@ impl Registry {
                 Entry {
                     session,
                     timeline: VecDeque::new(),
+                    model: None,
                     runtime: None,
                     command: command.clone(),
                     stopping: false,
@@ -336,7 +395,7 @@ impl Registry {
                     break;
                 };
                 let result = match event {
-                    Output::Frame(f) => registry.apply(&event_id, f).await,
+                    Output::Frame(f) => registry.handle(&event_id, f).await,
                     Output::Exited(err) => registry.exit(&event_id, err).await,
                 };
                 if let Err(err) = result {
@@ -351,6 +410,7 @@ impl Registry {
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(&session_id).unwrap();
                 e.session.session_file = omp::string(&response["data"], "sessionFile").into();
+                e.model = state_model(&response);
                 self.item(e, events::item("user", &prompt, ""));
                 self.save(e)?;
             }
@@ -547,6 +607,28 @@ impl Registry {
             }
         }
     }
+}
+
+fn state_model(response: &Value) -> Option<ModelInfo> {
+    response["data"]
+        .get("model")
+        .filter(|model| !model.is_null())
+        .and_then(|model| model_info(model).ok())
+}
+
+fn model_info(value: &Value) -> Result<ModelInfo> {
+    let provider = omp::string(value, "provider");
+    let id = omp::string(value, "id");
+    let name = omp::string(value, "name");
+    ensure!(
+        !provider.is_empty() && !id.is_empty() && !name.is_empty(),
+        "OMP returned an invalid model"
+    );
+    Ok(ModelInfo {
+        provider: provider.into(),
+        id: id.into(),
+        name: name.into(),
+    })
 }
 
 pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {

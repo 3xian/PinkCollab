@@ -1,19 +1,23 @@
 package dev.pinkcollab.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.*
 import org.json.JSONObject
 
 @Composable
-fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPrompt: (String, () -> Unit) -> Unit, onCommand: (String) -> Unit, onRespond: (JSONObject) -> Unit) {
+fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPrompt: (String, () -> Unit) -> Unit, onCommand: (String) -> Unit, onRespond: (JSONObject) -> Unit, onCycleModel: () -> Unit) {
     if (detail == null) { Text(if (loading) "正在加载任务…" else "无法加载任务，请返回重试。", Modifier.padding(24.dp)); return }
     val session = detail.session
     var prompt by rememberSaveable(session.id) { mutableStateOf("") }
@@ -22,7 +26,15 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
         Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(session.title, style = MaterialTheme.typography.titleLarge)
             Text("${host?.paired?.host?.name.orEmpty()} · ${session.cwd}", style = MaterialTheme.typography.bodySmall)
-            Text(if (host?.connected != true) "Host 离线 · 正在尝试重连" else session.activity, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text(if (host?.connected != true) "Host 离线 · 正在尝试重连" else session.activity, Modifier.weight(1f), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                val model = detail.model?.takeIf { attached }
+                if (model != null) TextButton(onClick = onCycleModel, enabled = !loading, modifier = Modifier.widthIn(max = 220.dp)) {
+                    Icon(Icons.Outlined.SwapHoriz, "切换模型")
+                    Spacer(Modifier.width(4.dp))
+                    Text("${model.provider} · ${model.name}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
         HorizontalDivider()
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

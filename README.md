@@ -73,7 +73,7 @@ Each paired host runs its own Gateway and OMP processes; Android aggregates thei
 - An independent `omp --mode rpc-ui` process for each task, with startup handshakes and correlated requests.
 - Session registry, normalized states, REST endpoints, and WebSocket snapshots and live events.
 - Tasks grouped into Needs Attention, Running, and Recent across multiple hosts.
-- Task creation in a selected directory, streaming replies, expandable tool details, Prompt / Steer, and Interrupt / Stop.
+- Task creation in a selected directory, streaming replies, expandable tool details, Prompt / Steer, model cycling, and Interrupt / Stop.
 - OMP select, confirm, input, and editor requests and responses.
 - SQLite management metadata; transcripts read per branch from OMP's JSONL session files.
 - A Windows Service entry point, Linux systemd user-service template, and macOS launchd template.

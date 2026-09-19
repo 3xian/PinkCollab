@@ -31,6 +31,17 @@ fn main() {
         .unwrap()
         .join("fixture-session.jsonl");
     let mut parent = String::new();
+    let all_models = [
+        json!({"provider":"fixture","id":"fast","name":"Fixture Fast"}),
+        json!({"provider":"fixture","id":"smart","name":"Fixture Smart"}),
+    ];
+    // `--single-model` mirrors a host whose model scope has no alternative for `cycle_model` to pick.
+    let models: &[Value] = if std::env::args().any(|arg| arg == "--single-model") {
+        &all_models[..1]
+    } else {
+        &all_models
+    };
+    let mut model_index = 0;
     emit(json!({"type":"ready","protocolVersion":1}));
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else {
@@ -45,7 +56,19 @@ fn main() {
             )
         };
         match frame["type"].as_str().unwrap_or_default() {
-            "get_state" => ack(json!({"sessionFile":log,"sessionId":"fixture"})),
+            "get_state" => {
+                ack(json!({"sessionFile":log,"sessionId":"fixture","model":models[model_index]}))
+            }
+            "cycle_model" => {
+                if models.len() == 1 {
+                    ack(Value::Null)
+                } else {
+                    model_index = (model_index + 1) % models.len();
+                    ack(
+                        json!({"model":models[model_index],"thinkingLevel":"medium","isScoped":true}),
+                    );
+                }
+            }
             "prompt" => {
                 let message = frame["message"].as_str().unwrap_or_default();
                 if message == "fail" {
@@ -86,7 +109,12 @@ fn main() {
                 ack(json!({}));
                 emit(json!({"type":"agent_end"}));
             }
-            "extension_ui_response" => finish("Answer received", &log, &mut parent),
+            "extension_ui_response" => {
+                // OMP can also switch models on its own; announce it so the Gateway re-reads its state.
+                model_index = (model_index + 1) % models.len();
+                emit(json!({"type":"model_changed"}));
+                finish("Answer received", &log, &mut parent);
+            }
             _ => ack(json!({})),
         }
     }

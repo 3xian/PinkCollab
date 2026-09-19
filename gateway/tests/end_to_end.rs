@@ -24,6 +24,9 @@ struct Harness {
 }
 impl Harness {
     async fn new(max: usize) -> Self {
+        Self::with_args(max, vec![]).await
+    }
+    async fn with_args(max: usize, args: Vec<String>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("projects");
         std::fs::create_dir_all(&root).unwrap();
@@ -44,7 +47,7 @@ impl Harness {
             browser.clone(),
             host.id.clone(),
             env!("CARGO_BIN_EXE_omp-fixture").into(),
-            vec![],
+            args,
             max,
         )
         .unwrap();
@@ -171,6 +174,37 @@ async fn phone_to_gateway_to_omp_closed_loop() {
     assert_eq!(response.status(), 201);
     let session: Value = response.json().await.unwrap();
     let id = session["id"].as_str().unwrap();
+    let command = format!("{}/api/v1/sessions/{id}", h.url);
+    let current: Value = client
+        .get(&command)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(current["model"]["id"], "fast");
+    let cycled: Value = client
+        .post(format!("{command}/model/cycle"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cycled["model"]["id"], "smart");
+    let cycled: Value = client
+        .get(&command)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(cycled["model"]["id"], "smart");
     h.wait_status(id, "needs_input").await;
     let mut saw_attention = false;
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -189,7 +223,6 @@ async fn phone_to_gateway_to_omp_closed_loop() {
     .await
     .unwrap();
     assert!(saw_attention);
-    let command = format!("{}/api/v1/sessions/{id}", h.url);
     assert_eq!(
         client
             .post(format!("{command}/respond"))
@@ -241,6 +274,8 @@ async fn phone_to_gateway_to_omp_closed_loop() {
             .any(|item| item["text"] == "Answer received")
     );
     assert_eq!(detail["session"]["needsAttention"], false);
+    // The fixture switched models on its own before answering, so the Gateway must have re-read OMP state.
+    assert_eq!(detail["model"]["id"], "fast");
     let running = h
         .registry
         .create(
@@ -334,6 +369,36 @@ async fn phone_to_gateway_to_omp_closed_loop() {
             .is_err()
     );
 }
+#[tokio::test]
+async fn cycling_without_an_alternative_model_is_rejected() {
+    let h = Harness::with_args(1, vec!["--single-model".into()]).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let response = client
+        .post(format!("{}/api/v1/sessions", h.url))
+        .bearer_auth(&credential)
+        .json(&json!({"hostId":h.host.id,"cwd":h.cwd("single"),"prompt":"hold"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let session: Value = response.json().await.unwrap();
+    let response = client
+        .post(format!(
+            "{}/api/v1/sessions/{}/model/cycle",
+            h.url,
+            session["id"].as_str().unwrap()
+        ))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(body["error"], "no alternative model is configured");
+    h.registry.close().await;
+}
+
 trait AddPath {
     fn add_path(self, path: &str) -> String;
 }

@@ -105,6 +105,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                 val id = payload.getString("sessionId")
                 mutable.update { app -> val d = app.details[id] ?: return@update app; app.copy(details = app.details + (id to d.copy(streaming = (d.streaming + payload.getString("text")).takeLast(100000)))) }
             }
+            "model.updated" -> setModel(payload.getString("sessionId"), payload.optJSONObject("model")?.modelInfo())
             "session.deleted" -> {
                 val id = payload.getString("sessionId")
                 mutable.update { app ->
@@ -130,8 +131,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     suspend fun listing(hostId: String, path: String): Listing { val p = paired(hostId); return JSONObject(api.request(p.url, p.credential, "/api/v1/fs/list", query = "path" to path)).listing() }
     suspend fun create(hostId: String, cwd: String, prompt: String): Session {
         val p = paired(hostId)
-        val s = JSONObject(api.request(p.url, p.credential, "/api/v1/sessions", "POST", JSONObject().put("hostId", hostId).put("cwd", cwd).put("prompt", prompt))).session()
-        detail(hostId, s.id); return s
+        return JSONObject(api.request(p.url, p.credential, "/api/v1/sessions", "POST", JSONObject().put("hostId", hostId).put("cwd", cwd).put("prompt", prompt))).session()
     }
     suspend fun detail(hostId: String, id: String) {
         val p = paired(hostId)
@@ -142,9 +142,20 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             val current = app.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
             val merged = mergeTimeline(timeline, old?.timeline.orEmpty())
             val latest = if (current != null && compareTimestamps(current.updatedAt, s.updatedAt) > 0) current else s
-            app.copy(details = app.details + (id to SessionDetail(latest, merged, if (latest.status in listOf("completed", "failed", "stopped", "idle", "offline")) "" else old?.streaming.orEmpty())))
+            app.copy(details = app.details + (id to SessionDetail(latest, merged, if (latest.status in listOf("completed", "failed", "stopped", "idle", "offline")) "" else old?.streaming.orEmpty(), raw.optJSONObject("model")?.modelInfo())))
         }
     }
+    suspend fun cycleModel(hostId: String, id: String) {
+        val p = paired(hostId)
+        api.request(p.url, p.credential, "/api/v1/sessions/$id/model/cycle", "POST")
+    }
+    private fun setModel(id: String, model: ModelInfo?) {
+        mutable.update { app ->
+            val detail = app.details[id] ?: return@update app
+            app.copy(details = app.details + (id to detail.copy(model = model)))
+        }
+    }
+
     suspend fun command(hostId: String, id: String, command: String, body: JSONObject = JSONObject()) {
         val p = paired(hostId); api.request(p.url, p.credential, "/api/v1/sessions/$id/$command", "POST", body); detail(hostId, id)
     }

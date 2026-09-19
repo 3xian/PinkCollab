@@ -15,15 +15,18 @@ Except for pairing, every REST request and WebSocket handshake must include `Aut
 | GET | `/api/v1/workspaces` | `[{name,path}]` |
 | GET | `/api/v1/fs/list?path=...` | `{path,parent?,directories:[{name,path}],git?:{branch,status}}` |
 | GET | `/api/v1/sessions` | Session array, sorted by update time in descending order |
-| GET | `/api/v1/sessions/:id` | `{session,timeline}` |
+| GET | `/api/v1/sessions/:id` | `{session,timeline,model?}` |
 | POST | `/api/v1/sessions` | `{hostId,cwd,prompt,title?}` → Session, 201 |
 | DELETE | `/api/v1/sessions/:id` | Deletes management metadata only when no runtime remains, 204; does not delete original OMP data |
 | POST | `/api/v1/sessions/:id/prompt` | `{message}`; automatically sets OMP streamingBehavior=steer while running |
 | POST | `/api/v1/sessions/:id/interrupt` | No request fields; sends OMP abort and transitions to idle |
 | POST | `/api/v1/sessions/:id/stop` | No request fields; closes stdin and terminates OMP if it has not exited after 3 seconds |
 | POST | `/api/v1/sessions/:id/respond` | See input responses below |
+| POST | `/api/v1/sessions/:id/model/cycle` | Cycles OMP's model scope and returns `{model:{provider,id,name}}` |
 
-Successful commands return `{ok:true}`. Rejected commands return 409, rejected session creation returns 422, out-of-bounds directories return 403, and authentication failures return 401. Business errors return `{error:string}`; the HTTP framework returns 400/415/422 for JSON decoding errors. Request bodies are limited to 512 KiB, and prompts and input values to 256 KiB.
+Unless the table specifies a response, successful commands return `{ok:true}`. Rejected commands return 409, rejected session creation returns 422, out-of-bounds directories return 403, and authentication failures return 401. Business errors return `{error:string}`; the HTTP framework returns 400/415/422 for JSON decoding errors. Request bodies are limited to 512 KiB, and prompts and input values to 256 KiB.
+
+The Gateway owns model state: `GET /api/v1/sessions/:id` carries it as `model`, which is present only while a runtime is attached and OMP reports a model. Clients must treat `model` as optional — a Gateway that omits the field offers no model control — and follow `model.updated` events for changes it did not initiate. Cycling requires an attached runtime and uses OMP's `cycle_model` command, which cycles the model scope configured on that Host, or every available model when no scope is configured. When OMP reports no alternative model, the command is rejected with 409.
 
 ## Session
 
@@ -81,6 +84,7 @@ Subsequent events use `{sequence,type,timestamp,payload}`. sequence is an increa
 | session.deleted | `{sessionId}` |
 | timeline.updated | `{sessionId,item:{id,kind,text,detail,timestamp}}` |
 | message.delta | `{sessionId,text}`; text delta for the current assistant message |
+| model.updated | `{sessionId,model}`; `model` may be null when OMP has no active model |
 | attention.created | `{sessionId,attention}` |
 
 Clients merge events by session/item id and use updatedAt to prevent older states queued after the snapshot from overwriting newer states. Timeline updates with the same id are upserts; the final assistant message replaces the current streaming draft. Timeline kind is user / assistant / tool / subagent / error / notice.

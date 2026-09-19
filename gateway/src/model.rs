@@ -39,6 +39,14 @@ pub struct Session {
     #[serde(skip)]
     pub session_file: String,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub provider: String,
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimelineItem {
     pub id: String,
@@ -52,6 +60,8 @@ pub struct TimelineItem {
 pub struct Detail {
     pub session: Session,
     pub timeline: Vec<TimelineItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelInfo>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Event {

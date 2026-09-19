@@ -90,13 +90,14 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                     "hosts" -> HostsPage(app, { page = "pair" }, { id -> vm.run { repo.refreshHost(id) } }, { id -> vm.run { repo.forget(id) } }, ::openSession)
                     "workspaces" -> WorkspacePage(app, ::browse, { page = "pair" })
                     "browser" -> BrowserPage(listing, app.hosts[hostId]?.paired?.host?.name.orEmpty(), app.loading, { path -> browse(hostId, path) }, { path -> cwd = path; page = "create" })
-                    "create" -> CreatePage(app.hosts[hostId], cwd, app.loading, { page = "browser" }, { prompt -> vm.run { val s = repo.create(hostId, cwd, prompt); sessionId = s.id; page = "session" } })
+                    "create" -> CreatePage(app.hosts[hostId], cwd, app.loading, { page = "browser" }, { prompt -> vm.run { val s = repo.create(hostId, cwd, prompt); sessionId = s.id; page = "session"; repo.detail(hostId, s.id) } })
                     "session" -> {
                         val detail = app.details[sessionId]
                         SessionPage(detail, app.hosts[hostId], app.loading,
                             onPrompt = { message, onSent -> vm.run { repo.command(hostId, sessionId, "prompt", JSONObject().put("message", message)); onSent() } },
                             onCommand = { command -> vm.run { repo.command(hostId, sessionId, command) } },
-                            onRespond = { body -> vm.run { repo.command(hostId, sessionId, "respond", body) } })
+                            onRespond = { body -> vm.run { repo.command(hostId, sessionId, "respond", body) } },
+                            onCycleModel = { vm.run { repo.cycleModel(hostId, sessionId) } })
                     }
                     "pair" -> PairPage(pairURL, pairToken, app.loading, { pairURL = it }, { pairToken = it }, { scanner.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE).setPrompt("扫描 Gateway 生成的配对码").setBeepEnabled(false).setOrientationLocked(false)) }, { vm.run { repo.pair(pairURL, pairToken); pairToken = ""; page = "hosts"; rootPage = "hosts" } })
                 }

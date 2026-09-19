@@ -50,6 +50,7 @@ pub fn router(app: App) -> Router {
         .route("/api/v1/sessions/{id}/interrupt", post(interrupt))
         .route("/api/v1/sessions/{id}/stop", post(stop))
         .route("/api/v1/sessions/{id}/respond", post(respond))
+        .route("/api/v1/sessions/{id}/model/cycle", post(cycle_model))
         .route("/api/v1/events", get(stream))
         .route_layer(middleware::from_fn_with_state(app.clone(), authenticate));
     Router::new()
@@ -225,6 +226,11 @@ async fn respond(
         .map_err(invalid)?;
     Ok(Json(json!({"ok":true})))
 }
+async fn cycle_model(State(app): State<App>, Path(id): Path<String>) -> ApiResult {
+    let model = app.registry.cycle_model(&id).await.map_err(invalid)?;
+    Ok(Json(json!({"model":model})))
+}
+
 async fn stream(State(app): State<App>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
     let token = credential(&headers).unwrap_or_default().to_owned();
     upgrade
