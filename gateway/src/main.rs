@@ -139,7 +139,6 @@ async fn serve_until(
     store: Arc<Store>,
     stop: impl std::future::Future<Output = ()>,
 ) -> Result<()> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
     let browser = Arc::new(Browser::new(&config.workspaces)?);
     let host_id = store.host_id()?;
     let bus = Arc::new(Bus::default());
@@ -190,29 +189,13 @@ async fn serve_until(
     if config.public_url.is_empty() {
         println!("public_url is empty; pair with --url https://<host>");
     } else {
-        println!(
-            "Public URL {} (TLS {})",
-            config.public_url,
-            if config.tls_cert.is_some() {
-                "at the Gateway"
-            } else {
-                "terminated upstream"
-            }
-        );
+        println!("Public URL {} (TLS terminated upstream)", config.public_url);
     }
     let task = tokio::spawn(async move {
-        if let (Some(cert), Some(key)) = (config.tls_cert, config.tls_key) {
-            let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;
-            axum_server::bind_rustls(config.listen, tls)
-                .handle(server_handle)
-                .serve(app.into_make_service())
-                .await?;
-        } else {
-            axum_server::bind(config.listen)
-                .handle(server_handle)
-                .serve(app.into_make_service())
-                .await?;
-        }
+        axum_server::bind(config.listen)
+            .handle(server_handle)
+            .serve(app.into_make_service())
+            .await?;
         Ok::<(), anyhow::Error>(())
     });
     tokio::pin!(task);

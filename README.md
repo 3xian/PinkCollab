@@ -4,16 +4,23 @@
 
 # PinkCollab
 
-[![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)](#connect-android)
+[![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)](#build-android)
 [![Min SDK: API 26+](https://img.shields.io/badge/Min_SDK-API_26%2B-3DDC84?logo=android&logoColor=white)](android/app/build.gradle.kts)
 [![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white)](android/)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-4285F4?logo=jetpackcompose&logoColor=white)](android/app/src/main/java/dev/pinkcollab/ui/)
 
 [Website](https://3xian.github.io/PinkCollab/) · [Setup guide](#quick-start) · [API documentation](docs/protocol.md)
 
-A remote control plane for **Oh My Pi (OMP)**. Manage agent tasks across computers and servers from Android: choose a project directory, create an OMP session, follow streaming replies and tool execution, and send Prompt / Steer, Interrupt, Stop, or interactive responses.
+A remote control plane for **Oh My Pi (OMP)**: start and follow agent tasks on your computers from an Android phone.
 
-The Gateway uses **Rust / Tokio / Axum / SQLite**. The Android client uses **Kotlin / Jetpack Compose / Material 3**. The Gateway ships as a standalone executable; each host still needs OMP and its runtime dependencies. Model provider credentials remain on the host.
+- Browse an allowed project directory and create a task in it.
+- Watch streaming replies, tool activity, and questions the agent asks.
+- Send **Prompt / Steer**, answer those questions, **Interrupt**, or **Stop**.
+- See tasks from several hosts at once, grouped into **Needs Attention**, **Running**, and **Recent**.
+
+Gateway: **Rust / Tokio / Axum / SQLite**, shipped as one standalone executable.
+Android: **Kotlin / Jetpack Compose / Material 3**.
+Model provider credentials stay on the host. *(why: the Gateway only forwards prompts to a local OMP process — the phone never talks to a model provider, so no API key ever leaves the machine.)*
 
 <p align="center">
   <img src="docs/assets/pinkcollab-better-life.webp" width="480" alt="Before PinkCollab: late-night work at a desk. With PinkCollab: relaxing while managing agent tasks from a phone." />
@@ -21,75 +28,22 @@ The Gateway uses **Rust / Tokio / Axum / SQLite**. The Android client uses **Kot
   <em>Same code. Brighter tomorrow. Keep your agents close, and enjoy life beyond the desk.</em>
 </p>
 
-## Module flow
+## How a task runs
 
 ```mermaid
-flowchart TB
-    subgraph Android[Android client]
-        UI["Compose UI / CollabViewModel"]
-        Data["GatewayRepository / GatewayApi"]
-        UI -->|User actions| Data
-        Data -->|StateFlow updates| UI
-    end
-
-    subgraph Host[Each host]
-        subgraph Gateway[Rust Gateway]
-            API["api: REST / WebSocket<br/>Pairing and authentication"]
-            Workspace["workspace: Browser<br/>Allowlists, path checks, Git status"]
-            Session["session: Registry<br/>Task lifecycle and in-memory timeline"]
-            Runtime["omp: Runtime<br/>Process transport and request correlation"]
-            Events["events: normalize / Bus<br/>States, streaming text, tools, input requests"]
-            Store[("storage: Store / SQLite<br/>Host identity, credentials, session metadata")]
-            API -->|Browse directories| Workspace
-            API -->|Create, Prompt / Steer, Interrupt, Stop, Respond| Session
-            API -->|Pair / authenticate| Store
-            Session -->|Validate working directory| Workspace
-            Session <-->|Load / save metadata| Store
-            Session -->|Spawn / send commands| Runtime
-            Runtime -->|Process output| Session
-            Session -->|Normalize / publish updates| Events
-            Events -->|Live events| API
-            Session -->|Initial snapshot| API
-        end
-
-        OMP["OMP: omp --mode rpc-ui<br/>One independent process per task"]
-        Files[("OMP JSONL session files<br/>Branch-aware conversation history")]
-        Runtime -->|NDJSON stdin| OMP
-        OMP -->|NDJSON stdout| Runtime
-        OMP -->|Write transcript| Files
-        Session -->|Read history on demand| Files
-    end
-
-    Data -->|HTTPS REST requests| API
-    API -->|REST responses / WSS snapshots and events| Data
+flowchart LR
+    A[Android] -->|HTTPS / WSS| B[Gateway] -->|NDJSON| C[OMP]
 ```
 
-Each paired host runs its own Gateway and OMP processes; Android aggregates their task states. SQLite stores management metadata only — live activity is buffered in memory, while transcripts stay in OMP's JSONL files and are read on demand. `config` supplies startup settings and `model` defines the shared protocol types.
+- **Android** sends REST requests and keeps one WebSocket open for live updates.
+- **Gateway** authenticates the caller, enforces the workspace allowlist, and owns the task lifecycle.
+- **OMP** runs as one subprocess per task (`omp --mode rpc-ui`); the Gateway speaks NDJSON to it over stdin/stdout.
 
-## Implemented MVP
-
-- Persistent host identity, single-use QR pairing, client authentication, and credential revocation.
-- Workspace allowlists, directory browsing, symlink boundary checks, and Git branch/status information.
-- An independent `omp --mode rpc-ui` process for each task, with startup handshakes and correlated requests.
-- Session registry, normalized states, REST endpoints, and WebSocket snapshots and live events.
-- Tasks grouped into Needs Attention, Running, and Recent across multiple hosts.
-- Task creation in a selected directory, streaming replies, expandable tool details, Prompt / Steer, model cycling, and Interrupt / Stop.
-- OMP select, confirm, input, and editor requests and responses.
-- SQLite management metadata; transcripts read per branch from OMP's JSONL session files.
-- A Windows Service entry point, Linux systemd user-service template, and macOS launchd template.
-- Density-specific Android launcher icons using the original white-background logo with rounded corners, centered on the C.
+*Why one subprocess per task: it isolates failures — a crashed task cannot take down the others, and each keeps its own conversation history.*
 
 ## Quick start
 
-Build prerequisites: **Rust 1.89+** for the Gateway, and **JDK 17+ / Android SDK 36** for Android. Install and configure OMP on every host where tasks will run.
-
-The whole setup is five steps:
-
-1. Build the Gateway binary.
-2. `init` once — it creates `~/.pinkcollab/config.yaml` seeded with your first `--workspace`.
-3. Edit the configuration if you need more roots, an absolute `omp` path, or HTTPS.
-4. Run it, either in the foreground or as a background service.
-5. `pair` and scan the QR code from Android, then create your first task.
+Prerequisites: **Rust 1.89+** for the Gateway, **JDK 17+ / Android SDK 36** for Android, and **OMP installed on every host** that will run tasks.
 
 ```sh
 cd gateway
@@ -98,114 +52,207 @@ cargo build --release --locked --bin pinkcollab-gateway
 ./target/release/pinkcollab-gateway serve
 ```
 
-On Windows, run `target\release\pinkcollab-gateway.exe` instead of the `./target/release/...` paths shown above.
+On Windows, use `target\release\pinkcollab-gateway.exe`.
 
-### What these commands mean
+The five steps, in order:
 
-`init` is a one-time bootstrap: it creates `~/.pinkcollab` (mode `0700`) and writes `config.yaml` (mode `0600`) with your `--workspace` as its single allowed root. It never starts the server, and refuses to overwrite an existing `config.yaml` — add more roots by editing the `workspaces` list.
+1. **Build** the Gateway binary.
+2. **`init` once** — creates `~/.pinkcollab` (mode `0700`) and `config.yaml` (mode `0600`) with `--workspace` as its single allowed root. It never starts the server and refuses to overwrite an existing config, so add more roots by editing `workspaces`.
+3. **Edit the config** for an absolute `omp` path, more workspaces, or HTTPS.
+4. **Run it** — in the foreground, or [as a background service](#run-as-a-background-service).
+5. **`pair`**, scan the QR code, then create your first task.
 
-`serve` runs against that configuration, and **is the default when no subcommand is given**: after the first `init`, running `pinkcollab-gateway` alone is enough.
+> Use the same `--data-dir` for `init`, `serve`, `pair`, and the service. A different directory means a different config and a different set of credentials — the phone would be pairing against nothing.
 
-Use the same `--data-dir` everywhere (`init`, `serve`, `pair`, and the service); a different directory means a different configuration and set of credentials. Defaults: configuration at `~/.pinkcollab/config.yaml`, listener `127.0.0.1:8787`. Background services also need an absolute `omp` path — the service's `PATH` differs from your terminal's, so a bare `omp` fails there.
+## Commands
 
-### Run as a background service (Windows)
+| Command | What it does |
+| --- | --- |
+| `init --workspace <dir>` | One-time bootstrap: creates the data dir and `config.yaml`. |
+| `serve` | Runs the Gateway. **This is the default when no subcommand is given** — after `init`, running the binary alone is enough. |
+| `pair [--url <root>] [--qr <file>]` | Prints a pairing QR code. `--url` defaults to `public_url`; `--qr` defaults to `pairing.png`. |
+| `setup-funnel [--https 443] [--dry-run] [--tailscale <path>]` | Publishes the loopback Gateway on the internet with Tailscale Funnel and writes `public_url`. |
+| `revoke --client <clientId>` | Deletes a paired device's credential on the host. |
+| `service` *(Windows only)* | Runs under the Windows Service Control Manager. |
 
-The Windows binary includes a native Service Control Manager entry point, `service`. Initialize the configuration first as the regular user that will run the service, then register it as an administrator. Place the executable somewhere permanent, such as `C:\PinkCollab\pinkcollab-gateway.exe`.
+## Configuration
+
+Lives at `~/.pinkcollab/config.yaml`; see [`gateway/config.example.yaml`](gateway/config.example.yaml).
+
+| Key | Default | What it decides |
+| --- | --- | --- |
+| `listen` | `127.0.0.1:8787` | The socket to bind — **must be a loopback address**. *(why: the Gateway serves plain HTTP and never handles TLS, so loopback is the only safe place for it; HTTPS is always produced by whatever sits in front.)* |
+| `public_url` | empty | The root URL the phone dials, baked into the QR code. Must be `https://…` in production. |
+| `name` | hostname | The host label shown in Android. |
+| `workspaces` | `[]` | Allowed root directories — the Gateway refuses to touch anything outside them. *This is the sandbox for all file access.* |
+| `omp` | `omp` | The OMP executable. **Use an absolute path for services**: their `PATH` differs from your terminal's, so a bare `omp` fails there. |
+| `omp_args` | `[]` | Extra OMP flags; may not override `--mode` or session storage. |
+| `max_sessions` | `8` | Concurrent OMP runtimes (1–100). Finished sessions keep their slot until stopped, so **Stop** frees capacity. |
+
+Startup validation rejects: empty `workspaces`, `max_sessions` outside 1–100, a non-loopback `listen`, a `public_url` that is not a bare root URL, and `omp_args` that override mode or session storage.
+
+## Connect Android
+
+Android requires **HTTPS/WSS**. Plain HTTP is allowed only in debug builds for `localhost`, `127.0.0.1`, and the emulator host `10.0.2.2`. *(why: the phone carries a long-lived credential; sending it in cleartext over any real network would hand over full access to your host.)*
+
+The Gateway **always listens on loopback and never handles TLS**; something in front of it terminates HTTPS and forwards to `127.0.0.1:8787`. That front end is the only thing you pick:
+
+```mermaid
+flowchart LR
+    A[Phone] -->|HTTPS| B[TLS terminated in front] -->|plain HTTP| C[Gateway 127.0.0.1:8787]
+```
+
+| Front end | Reachable from | Phone needs |
+| --- | --- | --- |
+| **Tailscale Funnel** | The public internet | Nothing at all |
+| **Tailscale Serve** | Your tailnet only | Tailscale, same tailnet |
+| **Your own reverse proxy** | Whatever you expose | Whatever that proxy requires |
+
+Only two Gateway keys matter here — `listen` (loopback) and `public_url` (what the phone dials).
+
+### Tailscale Funnel — public, simplest
+
+Tailscale terminates TLS and forwards to the loopback Gateway, so **no certificate is needed anywhere**:
+
+```yaml
+listen: 127.0.0.1:8787
+public_url: https://my-host.example-tailnet.ts.net
+```
+
+```sh
+pinkcollab-gateway setup-funnel     # checks Tailscale, publishes the port, writes public_url
+# equivalent: tailscale funnel --bg --https=443 --yes http://127.0.0.1:8787
+tailscale funnel status
+```
+
+`setup-funnel` flags: `--dry-run` prints the plan without changing anything, `--https 8443` picks a non-default public port, `--tailscale <path>` points at the CLI when it is not on `PATH`.
+
+Caveats:
+
+- The tailnet policy must grant this node the `funnel` attribute. *Otherwise the CLI stops with `Funnel not available; "funnel" node attribute not set`.*
+- Funnel serves HTTPS on **443, 8443 or 10000** only; a non-default port belongs in `public_url`, e.g. `https://…ts.net:8443`.
+- Funnel and Tailscale Serve share one configuration — publishing replaces a Serve mapping on the same port. `tailscale funnel --https=443 off` removes it.
+- **The endpoint is public.** Reachability is not security: tokens stay single-use and short-lived, credentials stay revocable, the workspace allowlist still applies, and every REST call and WebSocket upgrade still requires authorization. Never rely on the `.ts.net` hostname staying secret.
+
+### Tailscale Serve — private
+
+Both devices run Tailscale in the same tailnet, and **nothing is exposed to the internet**. Tailscale terminates TLS exactly as with Funnel, but only serves your tailnet:
+
+```sh
+tailscale serve --bg http://127.0.0.1:8787
+```
+
+```yaml
+listen: 127.0.0.1:8787
+public_url: https://<hostname>.ts.net
+```
+
+This is the private counterpart of Funnel — same command shape, no public entry point.
+
+### Your own reverse proxy
+
+Caddy, nginx, or any HTTPS tunnel: it owns the certificate and the public or LAN address, and forwards to the loopback Gateway.
+
+```yaml
+listen: 127.0.0.1:8787
+public_url: https://dev-server.example.com
+```
+
+- The proxy must forward **WebSocket Upgrade** and the **`Authorization`** header, with `127.0.0.1:8787` as upstream. *(why: live updates ride on the WebSocket, and it authenticates separately from REST.)*
+- For LAN-only use, let the proxy bind the LAN address and reserve it in your router — if it changes, pairing breaks.
+- Android must trust the proxy's certificate chain. *(why: Android rejects self-signed chains by default.)*
+
+## Pairing and security
+
+```mermaid
+flowchart TB
+    A["pair → QR (url + token)"] --> B["Phone scans"]
+    B --> C["POST /api/v1/pair"]
+    C --> D["Phone stores Bearer credential"]
+```
+
+- The QR carries only the Gateway root URL and a one-time token.
+- `/api/v1/pair` is the **only** endpoint reachable without a credential. *(why: the phone has nothing to authenticate with yet, so trust has to start somewhere.)*
+- Everything else — including the WebSocket — returns `401` without a valid `Bearer` credential.
+
+| Token rule | Value |
+| --- | --- |
+| Lifetime | 5 minutes |
+| Successful uses | 1 — consumed on success |
+
+*Why so tight: the 192-bit random code is the only thing between the internet and your host until pairing succeeds, so it is short-lived and consumed transactionally on first use.*
+
+```sh
+pinkcollab-gateway pair --url https://dev-server.example.com --qr pairing.png
+pinkcollab-gateway revoke --client client_xxx     # clientId from the pairing response
+```
+
+Removing a pairing in Android only clears the phone's local copy — use `revoke` to actually cut host-side access.
+
+## Run as a background service
+
+All three run as the same regular OS user that owns `~/.pinkcollab` and the workspaces, and all need an absolute `omp` path.
+
+### Windows
 
 ```powershell
 sc.exe create PinkCollab binPath= '"C:\PinkCollab\pinkcollab-gateway.exe" --data-dir "C:\Users\YOUR_USER\.pinkcollab" service' start= auto
 ```
 
-Then open **Services → PinkCollab → Properties → Log On**, switch the account from LocalSystem to that regular user, grant it the *Log on as a service* right, and start the service. Restrict access to the user profile, OMP configuration, and workspaces to that account.
+Then open **Services → PinkCollab → Properties → Log On**, switch the account from LocalSystem to that user, grant *Log on as a service*, and start it. *(why: the Gateway and OMP need that user's credentials and file permissions; LocalSystem has neither.)*
 
 ```powershell
 sc.exe start PinkCollab
 sc.exe stop PinkCollab
 ```
 
-For development, running `pinkcollab-gateway.exe serve` in a terminal is enough — Ctrl+C stops it and no registration is needed. To update, stop the service, replace the binary, and start it again; identity and pairing credentials survive. Linux (systemd) and macOS (launchd) templates live in [`deploy/`](deploy/).
+### Linux (systemd)
 
-### Connect Android
-
-Android requires **HTTPS/WSS**. Plain HTTP is accepted only for loopback and the Android emulator. Three settings decide how the phone reaches the Gateway:
-
-| Setting | What it does |
-| --- | --- |
-| `listen` | The socket to bind. Keep the default `127.0.0.1:8787` and put Tailscale Funnel/Serve or an HTTPS reverse proxy in front of it (forward WebSocket Upgrade and `Authorization`), or bind a LAN/VPN address — but then `tls_cert` and `tls_key` become mandatory, because the Gateway rejects non-loopback listeners without TLS. |
-| `tls_cert` / `tls_key` | The PEM certificate and key, used when the Gateway terminates TLS itself. Android must trust the chain. |
-| `public_url` | The root URL the phone dials, and what `pair` bakes into the QR code. It must be HTTPS: either a hostname matching the certificate, or the `.ts.net` name Tailscale issues for the node. TLS may be terminated upstream, so a `public_url` of `https://…` never forces `tls_cert` on the Gateway itself. |
-
-If the host has **no public IP or domain**, pick one of these:
-
-- **Tailscale Funnel — simplest.** Tailscale on the computer only; the phone installs nothing and works on mobile data. Funnel terminates TLS and forwards to the loopback Gateway, so no certificate is needed:
-
-  ```yaml
-  listen: 127.0.0.1:8787
-  public_url: https://my-host.example-tailnet.ts.net
-  tls_cert: null
-  tls_key: null
-  ```
-
-  ```sh
-  pinkcollab-gateway setup-funnel        # checks Tailscale, publishes the port, writes public_url
-  # equivalent: tailscale funnel --bg http://127.0.0.1:8787
-  ```
-
-  The tailnet policy must allow `funnel` for this node. Funnel and Tailscale Serve share one configuration, so publishing replaces a Serve mapping on the same port. It is a **public** entry point: pairing and credentials remain the only gate, so never rely on the `.ts.net` hostname staying secret.
-
-- **Tailscale VPN — more private.** Tailscale on both devices, same tailnet, nothing exposed to the internet. Issue a certificate Android already trusts with `tailscale cert <hostname>`, look up the tailnet address with `tailscale ip -4`, and bind it directly:
-
-  ```yaml
-  listen: 100.x.y.z:8787
-  public_url: https://<hostname>.ts.net
-  tls_cert: /absolute/path/cert.pem
-  tls_key: /absolute/path/key.pem
-  ```
-
-  A lighter variant keeps `listen: 127.0.0.1:8787` and runs `tailscale serve --bg http://127.0.0.1:8787`: TLS is still terminated by Tailscale, and Funnel stays off.
-
-- **Advanced.** A LAN with a self-signed certificate, your own domain, an HTTPS reverse proxy, or another VPN. For a LAN, generate a pair with `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout key.pem -out cert.pem -subj "/CN=192.168.1.20" -addext "subjectAltName=IP:192.168.1.20"`, install it on the phone as a trusted CA, and configure:
-
-  ```yaml
-  listen: 192.168.1.20:8787
-  public_url: https://192.168.1.20:8787
-  tls_cert: /absolute/path/cert.pem
-  tls_key: /absolute/path/key.pem
-  ```
-
-  Reserve that address in your router — otherwise it changes and pairing breaks. Reverse proxies must forward WebSocket Upgrade and `Authorization`.
+Copy `deploy/pinkcollab.service` to `~/.config/systemd/user/`:
 
 ```sh
-pinkcollab-gateway pair --url https://dev-server.example.com --qr pairing.png
+systemctl --user daemon-reload
+systemctl --user enable --now pinkcollab
+journalctl --user -u pinkcollab -f
 ```
 
-In Android, open the host connection screen and scan the QR code, or enter the printed root URL and token. Tokens expire after five minutes and can be consumed once — share them only with the intended device.
+Add `loginctl enable-linger YOUR_USER` to keep it running after logout.
 
-Build the Android app:
+### macOS (launchd)
+
+Replace `YOUR_USER` in `deploy/dev.pinkcollab.gateway.plist` and copy it to `~/Library/LaunchAgents/`:
+
+```sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.pinkcollab.gateway.plist
+launchctl kickstart -k gui/$(id -u)/dev.pinkcollab.gateway
+```
+
+### Updates
+
+Stop the service, replace the binary, start it again. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started. Configs created by releases with embedded TLS remain compatible when `tls_cert` and `tls_key` are null; deployments that used those fields must move TLS termination to Funnel, Serve, or a reverse proxy and remove the fields.
+
+## Build Android
 
 ```sh
 cd android
-# Set sdk.dir in local.properties, or set ANDROID_HOME.
-./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug     # Windows: gradlew.bat
 ```
 
-On Windows, use `gradlew.bat`. The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. Debug builds support `http://10.0.2.2:8787` for connecting an emulator to its host computer. Release builds require HTTPS.
+Set `sdk.dir` in `local.properties`, or set `ANDROID_HOME`. The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
-To start a task, open **Workspaces → choose a directory → create a task here → enter a prompt → start**. Sending a message while the agent is running uses Steer; an idle or completed session accepts another Prompt. Interrupt keeps the runtime available. Stop closes it.
+To start a task: **Workspaces → choose a directory → create a task → enter a prompt → start**. Sending a message while the agent runs uses Steer; an idle or finished session accepts another Prompt. Interrupt keeps the runtime; Stop closes it.
 
-Revoke a lost device's credential using the `clientId` returned by the pairing API:
+On some Windows/JDK setups Gradle fails with `Unable to establish loopback connection` — create `C:/tmp` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/tmp`.
 
-```sh
-pinkcollab-gateway revoke --client client_xxx
-```
+## What survives a restart
 
-Removing a pairing in Android only clears the device's local credential — use the command above to revoke host-side access.
+| Data | Survives | Note |
+| --- | --- | --- |
+| Host identity, credentials, session metadata | Yes | SQLite (WAL) in the data dir |
+| Running OMP processes | No | Their metadata is kept and they show as **offline** |
+| Conversation history | Yes | Read on demand from OMP's JSONL session files |
 
-## Configuration and persistence
-
-See [the example configuration](gateway/config.example.yaml). `max_sessions` limits concurrent OMP runtimes, including completed sessions whose runtimes remain available for follow-up prompts. Stop a session to release its slot.
-
-Restarting the Gateway does not automatically restore exited OMP processes. Session metadata is retained, and previously active tasks become offline. Historical conversations are still read from OMP's session files. You can create a new task in the same working directory.
+*Why the split: live activity is buffered in memory for speed, while transcripts stay in OMP's own files so nothing is duplicated.*
 
 ## Validation
 
@@ -214,30 +261,28 @@ cd gateway
 cargo fmt --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-features --locked
-# Handshake smoke test against installed OMP; does not send a model prompt.
-cargo test --test omp_smoke -- --ignored
+cargo test --test omp_smoke -- --ignored   # handshake smoke test against installed OMP
 
 cd ../android
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-Tests exercise real HTTP/WebSocket connections and subprocess NDJSON communication. The deterministic `omp-fixture` is built only with the `test-fixtures` feature. Production builds select the `pinkcollab-gateway` binary.
+Tests drive real HTTP/WebSocket connections and real NDJSON subprocess I/O. The deterministic `omp-fixture` builds only with the `test-fixtures` feature.
 
-On some Windows/JDK installations, a long Unix domain socket temporary path can cause Gradle to fail with `Unable to establish loopback connection`. Create a short temporary directory such as `C:/tmp`, then set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/tmp` in the current terminal.
-
-## Project layout and deployment
+## Project layout
 
 ```text
-gateway/src/  api / config / events / model / omp / session / storage / workspace
-android/app/src/main/java/dev/pinkcollab/  data / ui
-android/app/src/main/res/                 launcher icon resources
-docs/assets/                             shared rounded logo
-deploy/                                  systemd and launchd templates
-docs/                                    API protocol and deployment guides
+gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace
+android/app/src/main/java/dev/pinkcollab/   data · ui
+deploy/        systemd and launchd templates
+docs/          API protocol (protocol.md, protocol_cn.md)
 ```
-
-See [the API protocol](docs/protocol.md) and [the deployment guide](docs/deployment.md) for details.
 
 ## Current limits
 
-The MVP does not include a terminal emulator, full Git client, Cloud Relay, multi-user permissions, code editor, or takeover of manually started OMP TUI sessions. Android system-level background notifications are planned for a later phase; Needs Attention currently updates while the app is open. Live tool events and activity are buffered in memory. After a restart, historical user and assistant messages are restored from OMP files without copying the full tool transcript.
+- No terminal emulator, Git client, code editor, or Cloud Relay.
+- No multi-user permissions — one host identity with paired devices.
+- Cannot attach to OMP sessions started manually in a terminal.
+- Restarting does not restore exited OMP processes.
+- Live tool events are buffered in memory; after a restart, history is restored from OMP files without the full tool transcript.
+- Android background notifications are planned; **Needs Attention** updates while the app is open.

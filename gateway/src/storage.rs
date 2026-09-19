@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY,metadata TEXT NOT NULL,
             [chrono::Utc::now().timestamp()],
         )?;
         db.execute(
-            "INSERT INTO pairing VALUES (?,?)",
+            "INSERT INTO pairing (token_hash,expires_at) VALUES (?,?)",
             params![hash(&t), chrono::Utc::now().timestamp() + 300],
         )?;
         Ok(t)

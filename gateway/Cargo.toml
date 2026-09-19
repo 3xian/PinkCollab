@@ -11,7 +11,7 @@ test-fixtures = []
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
-axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+axum-server = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
@@ -21,7 +21,6 @@ image = { version = "=0.25.6", default-features = false, features = ["png"] }
 qrcode = "0.14"
 rand = "0.9"
 rusqlite = { version = "0.37", features = ["bundled"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

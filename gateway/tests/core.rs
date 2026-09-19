@@ -126,7 +126,7 @@ async fn slow_event_clients_must_resynchronize() {
     ));
 }
 #[test]
-fn config_rejects_non_tls_public_listeners() {
+fn config_rejects_non_loopback_listeners() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.yaml"),
@@ -136,16 +136,42 @@ fn config_rejects_non_tls_public_listeners() {
     assert!(Config::load(dir.path()).is_err());
 }
 #[test]
-fn loopback_listener_allows_https_public_url_without_tls() {
+fn loopback_listener_with_https_public_url_is_valid() {
     // Tailscale Funnel/serve and HTTPS reverse proxies terminate TLS upstream.
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("config.yaml"),
-        "listen: 127.0.0.1:8787\npublic_url: https://my-host.example-tailnet.ts.net\nworkspaces: [projects]\ntls_cert: null\ntls_key: null\n",
+        "listen: 127.0.0.1:8787\npublic_url: https://my-host.example-tailnet.ts.net\nworkspaces: [projects]\n",
     )
     .unwrap();
     let config = Config::load(dir.path()).unwrap();
-    assert!(config.tls_cert.is_none() && config.tls_key.is_none());
+    assert!(config.listen.ip().is_loopback());
+    assert_eq!(config.public_url, "https://my-host.example-tailnet.ts.net");
+}
+#[test]
+fn config_accepts_legacy_null_tls_fields_but_does_not_write_them() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "listen: 127.0.0.1:8787\nworkspaces: [projects]\ntls_cert: null\ntls_key: null\n",
+    )
+    .unwrap();
+    let config = Config::load(dir.path()).unwrap();
+    let serialized = serde_yaml::to_string(&config).unwrap();
+    assert!(!serialized.contains("tls_cert"));
+    assert!(!serialized.contains("tls_key"));
+}
+#[test]
+fn config_explains_how_to_migrate_legacy_embedded_tls() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "listen: 192.168.1.20:8787\nworkspaces: [projects]\ntls_cert: cert.pem\ntls_key: key.pem\n",
+    )
+    .unwrap();
+    let error = Config::load(dir.path()).unwrap_err().to_string();
+    assert!(error.contains("no longer supported"));
+    assert!(error.contains("terminate TLS"));
 }
 #[test]
 fn config_rejects_public_url_that_is_not_a_root() {

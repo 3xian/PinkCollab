@@ -1,14 +1,11 @@
+# The Gateway always listens on loopback and never handles TLS itself.
+# Publish it with Tailscale Funnel/serve or an HTTPS reverse proxy,
+# which terminates TLS and forwards to 127.0.0.1:8787.
 listen: 127.0.0.1:8787
-# Tailscale Funnel/Serve or an HTTPS reverse proxy can terminate TLS upstream:
-# a https public_url does not force tls_cert/tls_key on the Gateway itself.
 public_url: https://dev-server.example.com
 name: dev-server
 workspaces:
   - ~/projects
 omp: omp
 omp_args: []
-# Leave both null when Funnel/Serve or a reverse proxy terminates TLS, or when
-# pairing with --url http://127.0.0.1:8787 for local development.
-tls_cert: null
-tls_key: null
 max_sessions: 8

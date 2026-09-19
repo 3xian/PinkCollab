@@ -32,7 +32,10 @@ pub struct Config {
     pub workspaces: Vec<PathBuf>,
     pub omp: String,
     pub omp_args: Vec<String>,
+    // Deserialization-only compatibility for configs written before embedded TLS was removed.
+    #[serde(skip_serializing)]
     pub tls_cert: Option<PathBuf>,
+    #[serde(skip_serializing)]
     pub tls_key: Option<PathBuf>,
     pub max_sessions: usize,
 }
@@ -70,12 +73,12 @@ impl Config {
             "max_sessions must be 1..100"
         );
         ensure!(
-            c.tls_cert.is_some() == c.tls_key.is_some(),
-            "tls_cert and tls_key required together"
+            c.tls_cert.is_none() && c.tls_key.is_none(),
+            "tls_cert and tls_key are no longer supported; bind a loopback address and terminate TLS with Tailscale Funnel/serve or an HTTPS reverse proxy"
         );
         ensure!(
-            c.listen.ip().is_loopback() || c.tls_cert.is_some(),
-            "non-loopback listeners require TLS; bind 127.0.0.1 and publish it with Tailscale Funnel/serve or an HTTPS reverse proxy instead"
+            c.listen.ip().is_loopback(),
+            "listen must be a loopback address; publish it with Tailscale Funnel/serve or an HTTPS reverse proxy"
         );
         if !c.public_url.is_empty() {
             root_url(&c.public_url).context("invalid public_url")?;
