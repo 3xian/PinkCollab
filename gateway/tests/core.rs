@@ -1,6 +1,7 @@
 use pinkcollab_gateway::{
     config::Config,
     events::{Bus, normalize},
+    funnel,
     model::Session,
     storage::Store,
     workspace::Browser,
@@ -133,6 +134,56 @@ fn config_rejects_non_tls_public_listeners() {
     )
     .unwrap();
     assert!(Config::load(dir.path()).is_err());
+}
+#[test]
+fn loopback_listener_allows_https_public_url_without_tls() {
+    // Tailscale Funnel/serve and HTTPS reverse proxies terminate TLS upstream.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "listen: 127.0.0.1:8787\npublic_url: https://my-host.example-tailnet.ts.net\nworkspaces: [projects]\ntls_cert: null\ntls_key: null\n",
+    )
+    .unwrap();
+    let config = Config::load(dir.path()).unwrap();
+    assert!(config.tls_cert.is_none() && config.tls_key.is_none());
+}
+#[test]
+fn config_rejects_public_url_that_is_not_a_root() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        "listen: 127.0.0.1:8787\npublic_url: https://my-host.example-tailnet.ts.net/gateway\nworkspaces: [projects]\n",
+    )
+    .unwrap();
+    assert!(Config::load(dir.path()).is_err());
+}
+#[test]
+fn funnel_builds_the_forward_and_public_urls() {
+    assert_eq!(funnel::target(8787), "http://127.0.0.1:8787");
+    assert_eq!(
+        funnel::public_url("my-host.example-tailnet.ts.net", 443),
+        "https://my-host.example-tailnet.ts.net"
+    );
+    assert_eq!(
+        funnel::public_url("my-host.example-tailnet.ts.net", 8443),
+        "https://my-host.example-tailnet.ts.net:8443"
+    );
+    assert!(funnel::allows_https_port(443) && !funnel::allows_https_port(8787));
+}
+#[test]
+fn funnel_rejects_ports_and_listeners_before_touching_tailscale() {
+    let dir = tempfile::tempdir().unwrap();
+    let options = |https_port| funnel::Options {
+        https_port,
+        dry_run: true,
+        binary: None,
+    };
+    assert!(funnel::setup(dir.path(), &Config::default(), options(8787)).is_err());
+    let public = Config {
+        listen: "0.0.0.0:8787".parse().unwrap(),
+        ..Config::default()
+    };
+    assert!(funnel::setup(dir.path(), &public, options(443)).is_err());
 }
 #[test]
 fn sqlite_stores_metadata_without_transcript() {

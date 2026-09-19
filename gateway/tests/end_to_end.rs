@@ -79,6 +79,24 @@ impl Harness {
         std::fs::create_dir_all(&path).unwrap();
         pinkcollab_gateway::workspace::display(&path)
     }
+    fn events_request(
+        &self,
+        credential: Option<&str>,
+    ) -> tokio_tungstenite::tungstenite::http::Request<()> {
+        let mut request = self
+            .url
+            .replace("http://", "ws://")
+            .add_path("/api/v1/events")
+            .into_client_request()
+            .unwrap();
+        if let Some(credential) = credential {
+            request.headers_mut().insert(
+                "Authorization",
+                format!("Bearer {credential}").parse().unwrap(),
+            );
+        }
+        request
+    }
     async fn pair(&self) -> String {
         let token = self.store.new_pairing().unwrap();
         let response = reqwest::Client::new()
@@ -148,17 +166,9 @@ async fn phone_to_gateway_to_omp_closed_loop() {
         .await
         .unwrap();
     assert_eq!(roots.as_array().unwrap().len(), 1);
-    let mut request = h
-        .url
-        .replace("http://", "ws://")
-        .add_path("/api/v1/events")
-        .into_client_request()
+    let (mut socket, _) = tokio_tungstenite::connect_async(h.events_request(Some(&credential)))
+        .await
         .unwrap();
-    request.headers_mut().insert(
-        "Authorization",
-        format!("Bearer {credential}").parse().unwrap(),
-    );
-    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
     let first = socket.next().await.unwrap().unwrap();
     let snapshot: Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
     assert_eq!(snapshot["type"], "snapshot");
@@ -368,6 +378,29 @@ async fn phone_to_gateway_to_omp_closed_loop() {
             .await
             .is_err()
     );
+}
+#[tokio::test]
+async fn websocket_requires_a_paired_credential() {
+    let h = Harness::new(1).await;
+    assert!(
+        tokio_tungstenite::connect_async(h.events_request(None))
+            .await
+            .is_err()
+    );
+    assert!(
+        tokio_tungstenite::connect_async(h.events_request(Some("not-a-credential")))
+            .await
+            .is_err()
+    );
+    let credential = h.pair().await;
+    let (mut socket, _) = tokio_tungstenite::connect_async(h.events_request(Some(&credential)))
+        .await
+        .unwrap();
+    let first = socket.next().await.unwrap().unwrap();
+    let snapshot: Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
+    assert_eq!(snapshot["type"], "snapshot");
+    socket.close(None).await.unwrap();
+    h.registry.close().await;
 }
 #[tokio::test]
 async fn cycling_without_an_alternative_model_is_rejected() {

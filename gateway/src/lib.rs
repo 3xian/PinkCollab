@@ -1,6 +1,7 @@
 pub mod api;
 pub mod config;
 pub mod events;
+pub mod funnel;
 pub mod model;
 pub mod omp;
 pub mod session;

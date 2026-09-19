@@ -131,13 +131,29 @@ Android requires **HTTPS/WSS**. Plain HTTP is accepted only for loopback and the
 
 | Setting | What it does |
 | --- | --- |
-| `listen` | The socket to bind. Keep the default `127.0.0.1:8787` and put an HTTPS reverse proxy in front of it (forward WebSocket Upgrade and `Authorization`), or bind a LAN/VPN address — but then `tls_cert` and `tls_key` become mandatory, because the Gateway rejects non-loopback listeners without TLS. |
+| `listen` | The socket to bind. Keep the default `127.0.0.1:8787` and put Tailscale Funnel/Serve or an HTTPS reverse proxy in front of it (forward WebSocket Upgrade and `Authorization`), or bind a LAN/VPN address — but then `tls_cert` and `tls_key` become mandatory, because the Gateway rejects non-loopback listeners without TLS. |
 | `tls_cert` / `tls_key` | The PEM certificate and key, used when the Gateway terminates TLS itself. Android must trust the chain. |
-| `public_url` | The root URL the phone dials, and what `pair` bakes into the QR code. It must be HTTPS, and its hostname must match the certificate. |
+| `public_url` | The root URL the phone dials, and what `pair` bakes into the QR code. It must be HTTPS: either a hostname matching the certificate, or the `.ts.net` name Tailscale issues for the node. TLS may be terminated upstream, so a `public_url` of `https://…` never forces `tls_cert` on the Gateway itself. |
 
-If the host has **no public IP or domain**, choose one of these:
+If the host has **no public IP or domain**, pick one of these:
 
-- **Tailscale (recommended).** Install it on the host and the phone, join both to the same tailnet, and issue a certificate Android already trusts using `tailscale cert <hostname>`. Then look up the host's tailnet address with `tailscale ip -4` and bind it directly:
+- **Tailscale Funnel — simplest.** Tailscale on the computer only; the phone installs nothing and works on mobile data. Funnel terminates TLS and forwards to the loopback Gateway, so no certificate is needed:
+
+  ```yaml
+  listen: 127.0.0.1:8787
+  public_url: https://my-host.example-tailnet.ts.net
+  tls_cert: null
+  tls_key: null
+  ```
+
+  ```sh
+  pinkcollab-gateway setup-funnel        # checks Tailscale, publishes the port, writes public_url
+  # equivalent: tailscale funnel --bg http://127.0.0.1:8787
+  ```
+
+  The tailnet policy must allow `funnel` for this node. Funnel and Tailscale Serve share one configuration, so publishing replaces a Serve mapping on the same port. It is a **public** entry point: pairing and credentials remain the only gate, so never rely on the `.ts.net` hostname staying secret.
+
+- **Tailscale VPN — more private.** Tailscale on both devices, same tailnet, nothing exposed to the internet. Issue a certificate Android already trusts with `tailscale cert <hostname>`, look up the tailnet address with `tailscale ip -4`, and bind it directly:
 
   ```yaml
   listen: 100.x.y.z:8787
@@ -146,7 +162,9 @@ If the host has **no public IP or domain**, choose one of these:
   tls_key: /absolute/path/key.pem
   ```
 
-- **LAN with a self-signed certificate.** Works only while the phone shares the host's Wi-Fi, and the certificate must be installed on the phone as a trusted CA:
+  A lighter variant keeps `listen: 127.0.0.1:8787` and runs `tailscale serve --bg http://127.0.0.1:8787`: TLS is still terminated by Tailscale, and Funnel stays off.
+
+- **Advanced.** A LAN with a self-signed certificate, your own domain, an HTTPS reverse proxy, or another VPN. For a LAN, generate a pair with `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout key.pem -out cert.pem -subj "/CN=192.168.1.20" -addext "subjectAltName=IP:192.168.1.20"`, install it on the phone as a trusted CA, and configure:
 
   ```yaml
   listen: 192.168.1.20:8787
@@ -155,7 +173,7 @@ If the host has **no public IP or domain**, choose one of these:
   tls_key: /absolute/path/key.pem
   ```
 
-  Generate the pair with `openssl req -x509 -newkey rsa:2048 -nodes -days 365 -keyout key.pem -out cert.pem -subj "/CN=192.168.1.20" -addext "subjectAltName=IP:192.168.1.20"`. Reserve the address in your router — otherwise it changes and pairing breaks.
+  Reserve that address in your router — otherwise it changes and pairing breaks. Reverse proxies must forward WebSocket Upgrade and `Authorization`.
 
 ```sh
 pinkcollab-gateway pair --url https://dev-server.example.com --qr pairing.png

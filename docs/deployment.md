@@ -8,6 +8,34 @@ The Gateway and OMP use the permissions and credential environment of the same r
 
 The default loopback listener is suitable for an HTTPS reverse proxy. Public networks, LANs, VPNs, and Tailscale can all carry this protocol. The reverse proxy must forward WebSocket Upgrade and Authorization and use `127.0.0.1:8787` as the upstream address.
 
+### Tailscale Funnel
+
+Funnel publishes the loopback Gateway on the internet, so the phone needs neither Tailscale nor a VPN. Tailscale terminates TLS, so the Gateway itself needs no certificate:
+
+```yaml
+listen: 127.0.0.1:8787
+public_url: https://my-host.example-tailnet.ts.net
+tls_cert: null
+tls_key: null
+```
+
+```sh
+pinkcollab-gateway setup-funnel
+# equivalent: tailscale funnel --bg http://127.0.0.1:8787
+tailscale funnel status
+```
+
+`setup-funnel` checks that the CLI exists and is logged in, reads the node's `.ts.net` name, runs `tailscale funnel --bg --https=443 --yes http://127.0.0.1:<listen port>`, writes `public_url`, and prints the next step. Use `--dry-run` to print the plan, `--https 8443` for a non-default public port, and `--tailscale <path>` when the CLI is not on PATH.
+
+Caveats:
+
+- The tailnet policy must grant the node the `funnel` attribute; otherwise the CLI stops with `Funnel not available; "funnel" node attribute not set`.
+- Funnel serves HTTPS on 443, 8443 or 10000 only. With a non-default port, `public_url` carries it: `https://my-host.example-tailnet.ts.net:8443`.
+- Funnel and Tailscale Serve share one configuration, so publishing replaces a Serve mapping on the same port. `tailscale funnel --https=443 off` removes it.
+- The endpoint is public. Pairing tokens remain single-use and short-lived, credentials remain revocable, the workspace allowlist still applies, and authorization is still required on every REST call and WebSocket upgrade — the URL is reachability, not security.
+
+### Listening on a LAN/VPN address directly
+
 To listen directly on a LAN/VPN address, configure:
 
 ```yaml

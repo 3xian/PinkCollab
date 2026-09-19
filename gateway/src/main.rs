@@ -4,6 +4,7 @@ use pinkcollab_gateway::{
     api::{self, App},
     config::{self, Config},
     events::Bus,
+    funnel,
     model::Host,
     session::Registry,
     storage::{self, Store},
@@ -37,6 +38,18 @@ enum Commands {
         url: Option<String>,
         #[arg(long, default_value = "pairing.png")]
         qr: PathBuf,
+    },
+    /// Publish the loopback Gateway on the internet with Tailscale Funnel.
+    SetupFunnel {
+        /// Public HTTPS port offered by Funnel: 443, 8443 or 10000.
+        #[arg(long, default_value_t = 443)]
+        https: u16,
+        /// Print the plan without touching Tailscale or config.yaml.
+        #[arg(long)]
+        dry_run: bool,
+        /// Path to the tailscale executable, when it is not on PATH.
+        #[arg(long)]
+        tailscale: Option<PathBuf>,
     },
     Revoke {
         #[arg(long)]
@@ -72,15 +85,7 @@ async fn main() -> Result<()> {
     match cli.command.unwrap_or(Commands::Serve) {
         Commands::Pair { url, qr } => {
             let base = url.unwrap_or(config.public_url);
-            let parsed = url::Url::parse(&base).context("pair requires --url https://<host>")?;
-            ensure!(
-                parsed.username().is_empty()
-                    && parsed.password().is_none()
-                    && parsed.path() == "/"
-                    && parsed.query().is_none()
-                    && parsed.fragment().is_none(),
-                "pair URL must be a gateway root URL"
-            );
+            let parsed = config::root_url(&base).context("pair requires --url https://<host>")?;
             ensure!(
                 parsed.scheme() == "https"
                     || (parsed.scheme() == "http"
@@ -105,6 +110,19 @@ async fn main() -> Result<()> {
                 qr.display()
             );
         }
+        Commands::SetupFunnel {
+            https,
+            dry_run,
+            tailscale,
+        } => funnel::setup(
+            &cli.data_dir,
+            &config,
+            funnel::Options {
+                https_port: https,
+                dry_run,
+                binary: tailscale.as_deref(),
+            },
+        )?,
         Commands::Revoke { client } => store.revoke(&client)?,
         Commands::Serve => serve(config, store).await?,
         #[cfg(windows)]
@@ -169,6 +187,19 @@ async fn serve_until(
         config.listen,
         config.name
     );
+    if config.public_url.is_empty() {
+        println!("public_url is empty; pair with --url https://<host>");
+    } else {
+        println!(
+            "Public URL {} (TLS {})",
+            config.public_url,
+            if config.tls_cert.is_some() {
+                "at the Gateway"
+            } else {
+                "terminated upstream"
+            }
+        );
+    }
     let task = tokio::spawn(async move {
         if let (Some(cert), Some(key)) = (config.tls_cert, config.tls_key) {
             let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await?;

@@ -4,6 +4,25 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
 };
+use url::Url;
+/// A gateway root URL: http or https, no credentials, no path, query or fragment.
+pub fn root_url(raw: &str) -> Result<Url> {
+    let parsed = Url::parse(raw)
+        .context("URL must be absolute, e.g. https://my-host.example-tailnet.ts.net")?;
+    ensure!(
+        matches!(parsed.scheme(), "http" | "https"),
+        "URL requires http or https"
+    );
+    ensure!(
+        parsed.username().is_empty()
+            && parsed.password().is_none()
+            && parsed.path() == "/"
+            && parsed.query().is_none()
+            && parsed.fragment().is_none(),
+        "URL must be a gateway root URL"
+    );
+    Ok(parsed)
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -56,8 +75,11 @@ impl Config {
         );
         ensure!(
             c.listen.ip().is_loopback() || c.tls_cert.is_some(),
-            "non-loopback listeners require TLS; alternatively use a loopback HTTPS reverse proxy"
+            "non-loopback listeners require TLS; bind 127.0.0.1 and publish it with Tailscale Funnel/serve or an HTTPS reverse proxy instead"
         );
+        if !c.public_url.is_empty() {
+            root_url(&c.public_url).context("invalid public_url")?;
+        }
         ensure!(
             !c.omp_args
                 .iter()

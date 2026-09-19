@@ -8,6 +8,34 @@ Gateway 与 OMP 使用同一个普通 OS 用户的权限和凭据环境。建议
 
 默认回环监听适用于 HTTPS 反向代理。公网、LAN、VPN 或 Tailscale 都可以传输本协议。反向代理须转发 WebSocket Upgrade 与 Authorization，并将上游连接设为 `127.0.0.1:8787`。
 
+### Tailscale Funnel
+
+Funnel 把回环 Gateway 发布到公网，手机无需安装 Tailscale，也无需 VPN。TLS 由 Tailscale 终止，Gateway 自身不需要证书：
+
+```yaml
+listen: 127.0.0.1:8787
+public_url: https://my-host.example-tailnet.ts.net
+tls_cert: null
+tls_key: null
+```
+
+```sh
+pinkcollab-gateway setup-funnel
+# 等价命令：tailscale funnel --bg http://127.0.0.1:8787
+tailscale funnel status
+```
+
+`setup-funnel` 会检查 CLI 是否存在且已登录、读取本机 `.ts.net` 域名、执行 `tailscale funnel --bg --https=443 --yes http://127.0.0.1:<listen 端口>`、写回 `public_url` 并提示下一步。`--dry-run` 只打印计划，`--https 8443` 可换非默认公网端口，CLI 不在 PATH 时用 `--tailscale <路径>`。
+
+注意事项：
+
+- tailnet 策略必须为本机授予 `funnel` 属性，否则 CLI 会报 `Funnel not available; "funnel" node attribute not set`。
+- Funnel 只提供 443、8443、10000 三个 HTTPS 端口；非默认端口时 `public_url` 需带端口，例如 `https://my-host.example-tailnet.ts.net:8443`。
+- Funnel 与 Tailscale Serve 共用一份配置：发布后会替换同端口上的 Serve 映射，`tailscale funnel --https=443 off` 可移除。
+- 该入口是公网入口。配对令牌仍然单次使用且有过期时间、凭据仍可吊销、workspace 白名单照旧生效，REST 与 WebSocket 仍然都要鉴权——URL 只解决可达性，不提供安全性。
+
+### 直接监听 LAN/VPN 地址
+
 直接监听 LAN/VPN 地址时配置：
 
 ```yaml
