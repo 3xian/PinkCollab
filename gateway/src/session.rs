@@ -1,6 +1,6 @@
 use crate::{
     events::{self, Bus},
-    model::{Detail, ModelInfo, Session, TimelineItem},
+    model::{Detail, ModelInfo, Session, TimelineItem, ToolTrace},
     omp::{self, Output, Runtime},
     storage::{self, Store},
     workspace::{self, Browser},
@@ -183,6 +183,20 @@ impl Registry {
         if let Some(old) = e.timeline.iter_mut().find(|v| v.id == item.id) {
             if item.detail.is_empty() {
                 item.detail = old.detail.clone();
+            }
+            if let (Some(previous), Some(current)) = (&old.tool, &mut item.tool) {
+                if current.call_id.is_empty() {
+                    current.call_id = previous.call_id.clone();
+                }
+                if current.name.is_empty() {
+                    current.name = previous.name.clone();
+                }
+                if current.arguments.is_empty() {
+                    current.arguments = previous.arguments.clone();
+                }
+                if current.result.is_empty() {
+                    current.result = previous.result.clone();
+                }
             }
             *old = item.clone();
         } else {
@@ -659,32 +673,145 @@ pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
         leaf = omp::string(entry, "parentId").into();
     }
     chain.reverse();
-    let mut timeline = vec![];
+    let mut timeline: Vec<TimelineItem> = vec![];
+    let mut tool_positions = HashMap::<String, usize>::new();
     for entry in chain {
         if entry["type"] != "message" {
             continue;
         }
         let m = &entry["message"];
         let role = omp::string(m, "role");
+        let timestamp = omp::string(entry, "timestamp")
+            .parse()
+            .unwrap_or_else(|_| Utc::now());
+        if role == "toolResult" || role == "tool" {
+            let call_id = omp::string(m, "toolCallId");
+            if call_id.is_empty() {
+                continue;
+            }
+            let result = omp::text_content(m);
+            if let Some(item) = tool_positions
+                .get(call_id)
+                .and_then(|index| timeline.get_mut(*index))
+            {
+                if let Some(tool) = &mut item.tool {
+                    tool.result = result.clone();
+                    tool.is_error = m["isError"] == true;
+                    tool.completed = true;
+                }
+                item.text = format!(
+                    "{} · {}",
+                    if m["isError"] == true {
+                        "Tool failed"
+                    } else {
+                        "Finished"
+                    },
+                    omp::string(m, "toolName")
+                );
+                item.detail = result;
+            } else {
+                let name = omp::string(m, "toolName");
+                tool_positions.insert(call_id.into(), timeline.len());
+                timeline.push(TimelineItem {
+                    id: call_id.into(),
+                    kind: "tool".into(),
+                    text: format!(
+                        "{} · {name}",
+                        if m["isError"] == true {
+                            "Tool failed"
+                        } else {
+                            "Finished"
+                        }
+                    ),
+                    detail: result.clone(),
+                    tool: Some(ToolTrace {
+                        call_id: call_id.into(),
+                        name: name.into(),
+                        arguments: String::new(),
+                        result,
+                        is_error: m["isError"] == true,
+                        completed: true,
+                    }),
+                    timestamp,
+                });
+            }
+            continue;
+        }
         if !["user", "assistant"].contains(&role) {
+            continue;
+        }
+        let entry_id = omp::string(entry, "id");
+        if role == "assistant"
+            && let Some(parts) = m["content"].as_array()
+        {
+            for (index, part) in parts.iter().enumerate() {
+                match omp::string(part, "type") {
+                    "text" => {
+                        let text = omp::string(part, "text").trim();
+                        if !text.is_empty() {
+                            timeline.push(TimelineItem {
+                                id: format!("{entry_id}:{index}"),
+                                kind: "assistant".into(),
+                                text: text.into(),
+                                detail: String::new(),
+                                tool: None,
+                                timestamp,
+                            });
+                        }
+                    }
+                    "toolCall" => {
+                        let call_id = omp::string(part, "id");
+                        let name = omp::string(part, "name");
+                        if call_id.is_empty() || name.is_empty() {
+                            continue;
+                        }
+                        let arguments = part["arguments"].to_string();
+                        tool_positions.insert(call_id.into(), timeline.len());
+                        timeline.push(TimelineItem {
+                            id: call_id.into(),
+                            kind: "tool".into(),
+                            text: format!("Running · {name}"),
+                            detail: arguments.clone(),
+                            tool: Some(ToolTrace {
+                                call_id: call_id.into(),
+                                name: name.into(),
+                                arguments,
+                                result: String::new(),
+                                is_error: false,
+                                completed: false,
+                            }),
+                            timestamp,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            if omp::string(m, "stopReason") == "error" {
+                timeline.push(TimelineItem {
+                    id: format!("{entry_id}:error"),
+                    kind: "error".into(),
+                    text: omp::string(m, "errorMessage").into(),
+                    detail: String::new(),
+                    tool: None,
+                    timestamp,
+                });
+            }
             continue;
         }
         let text = m["content"]
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| omp::text_content(m));
-        if text.is_empty() {
-            continue;
+        if !text.is_empty() {
+            timeline.push(TimelineItem {
+                id: entry_id.into(),
+                kind: role.into(),
+                text,
+                detail: String::new(),
+                tool: None,
+                timestamp,
+            });
         }
-        timeline.push(TimelineItem {
-            id: omp::string(entry, "id").into(),
-            kind: role.into(),
-            text,
-            detail: String::new(),
-            timestamp: omp::string(entry, "timestamp")
-                .parse()
-                .unwrap_or_else(|_| Utc::now()),
-        });
     }
     Ok(timeline
         .into_iter()

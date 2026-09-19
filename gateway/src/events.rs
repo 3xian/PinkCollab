@@ -1,5 +1,5 @@
 use crate::{
-    model::{Attention, Event, TimelineItem},
+    model::{Attention, Event, TimelineItem, ToolTrace},
     omp::{string, text_content},
     storage::id,
 };
@@ -48,6 +48,7 @@ pub fn item(kind: &str, text: impl Into<String>, detail: impl Into<String>) -> T
         kind: kind.into(),
         text: text.into(),
         detail: detail.into(),
+        tool: None,
         timestamp: Utc::now(),
     }
 }
@@ -115,6 +116,14 @@ pub fn normalize(f: &Value) -> Update {
                 f["args"].to_string(),
             );
             i.id = string(f, "toolCallId").into();
+            i.tool = Some(ToolTrace {
+                call_id: i.id.clone(),
+                name: name.into(),
+                arguments: f["args"].to_string(),
+                result: String::new(),
+                is_error: false,
+                completed: false,
+            });
             u.item = Some(i);
         }
         "tool_execution_end" => {
@@ -129,6 +138,14 @@ pub fn normalize(f: &Value) -> Update {
                 text_content(&f["result"]),
             );
             i.id = string(f, "toolCallId").into();
+            i.tool = Some(ToolTrace {
+                call_id: i.id.clone(),
+                name: string(f, "toolName").into(),
+                arguments: String::new(),
+                result: text_content(&f["result"]),
+                is_error: f["isError"] == true,
+                completed: true,
+            });
             u.item = Some(i);
         }
         "prompt_result" => {

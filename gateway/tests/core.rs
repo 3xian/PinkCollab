@@ -110,7 +110,14 @@ fn normalized_events_keep_tasks_open_until_agent_end() {
         normalize(&json!({"type":"agent_end"})).status,
         Some("completed")
     );
-    assert_eq!(normalize(&json!({"type":"tool_execution_start","toolName":"bash","args":{"command":"cargo test"}})).activity.as_deref(),Some("Testing"));
+    let tool = normalize(
+        &json!({"type":"tool_execution_start","toolCallId":"call-1","toolName":"bash","args":{"command":"cargo test"}}),
+    );
+    assert_eq!(tool.activity.as_deref(), Some("Testing"));
+    let trace = tool.item.unwrap().tool.unwrap();
+    assert_eq!(trace.call_id, "call-1");
+    assert_eq!(trace.name, "bash");
+    assert!(trace.arguments.contains("cargo test"));
     assert_eq!(normalize(&json!({"type":"extension_ui_request","method":"select","id":"q","title":"API?","options":["v1","v2"]})).attention.unwrap().options,["v1","v2"]);
 }
 #[tokio::test]

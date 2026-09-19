@@ -82,15 +82,15 @@ Subsequent events use `{sequence,type,timestamp,payload}`. sequence is an increa
 | --- | --- |
 | session.updated | Full Session |
 | session.deleted | `{sessionId}` |
-| timeline.updated | `{sessionId,item:{id,kind,text,detail,timestamp}}` |
+| timeline.updated | `{sessionId,item:{id,kind,text,detail,tool?,timestamp}}` |
 | message.delta | `{sessionId,text}`; text delta for the current assistant message |
 | model.updated | `{sessionId,model}`; `model` may be null when OMP has no active model |
 | attention.created | `{sessionId,attention}` |
 
-Clients merge events by session/item id and use updatedAt to prevent older states queued after the snapshot from overwriting newer states. Timeline updates with the same id are upserts; the final assistant message replaces the current streaming draft. Timeline kind is user / assistant / tool / subagent / error / notice.
+Clients merge events by session/item id and use updatedAt to prevent older states queued after the snapshot from overwriting newer states. Timeline updates with the same id are upserts; the final assistant message replaces the current streaming draft. Timeline kind is user / assistant / tool / subagent / error / notice. Tool items may include `tool:{callId,name,arguments,result,isError,completed}`. Start and result updates share `callId`, allowing clients to project the trace without parsing display text.
 
 The Gateway sends a Ping every 25 seconds and disconnects if no heartbeat response is received for 70 seconds. Slow clients are disconnected when their backlog exceeds 256 events. Clients should reconnect to obtain a snapshot and reload the details of any open task. This version does not provide persistent event replay.
 
 ## Data ownership
 
-SQLite stores only the Host ID, client token hashes, pairing token hashes, Session management metadata, and OMP session file location information. OMP manages provider credentials. Only the latest 500 live Timeline items are kept in memory; historical conversations are reconstructed for the current branch using parentId from OMP entries.
+SQLite stores only the Host ID, client token hashes, pairing token hashes, Session management metadata, and OMP session file location information. OMP manages provider credentials. Only the latest 500 live Timeline items are kept in memory; historical conversations, including paired tool calls/results, are reconstructed for the current branch using parentId from OMP entries.

@@ -8,7 +8,8 @@ data class PairedHost(val host: Host, val url: String, val credential: String, v
 data class Attention(val id: String, val type: String, val text: String, val options: List<String>)
 data class ModelInfo(val provider: String, val id: String, val name: String)
 data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean)
-data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String)
+data class ToolTrace(val callId: String, val name: String, val arguments: String, val result: String, val isError: Boolean, val completed: Boolean)
+data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
 data class SessionDetail(val session: Session, val timeline: List<TimelineItem>, val streaming: String = "", val model: ModelInfo? = null)
 data class Workspace(val name: String, val path: String)
 data class Listing(val path: String, val parent: String?, val directories: List<Workspace>, val branch: String?, val gitStatus: String?)
@@ -21,7 +22,19 @@ fun JSONObject.session(): Session {
     val a = optJSONObject("attention")?.let { Attention(it.getString("id"), it.getString("type"), it.getString("text"), it.optJSONArray("options")?.strings().orEmpty()) }
     return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), getString("status"), getString("activity"), getBoolean("needsAttention"), a, getString("createdAt"), getString("updatedAt"), optBoolean("runtimeAttached"))
 }
-fun JSONObject.item() = TimelineItem(getString("id"), getString("kind"), getString("text"), optString("detail"), getString("timestamp"))
+fun JSONObject.item(): TimelineItem {
+    val tool = optJSONObject("tool")?.let {
+        ToolTrace(
+            callId = it.optString("callId", getString("id")),
+            name = it.optString("name"),
+            arguments = it.optString("arguments"),
+            result = it.optString("result"),
+            isError = it.optBoolean("isError"),
+            completed = it.optBoolean("completed"),
+        )
+    }
+    return TimelineItem(getString("id"), getString("kind"), getString("text"), optString("detail"), getString("timestamp"), tool)
+}
 fun JSONObject.modelInfo() = ModelInfo(getString("provider"), getString("id"), getString("name"))
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }

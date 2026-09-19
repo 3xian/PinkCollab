@@ -54,7 +54,26 @@ pub struct TimelineItem {
     pub text: String,
     #[serde(default)]
     pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolTrace>,
     pub timestamp: DateTime<Utc>,
+}
+
+/// Structured tool data is part of the wire timeline only. OMP's session JSONL remains the
+/// canonical, lossless transcript and PinkCollab still does not persist conversation content.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolTrace {
+    pub call_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub arguments: String,
+    #[serde(default)]
+    pub result: String,
+    #[serde(default)]
+    pub is_error: bool,
+    #[serde(default)]
+    pub completed: bool,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Detail {

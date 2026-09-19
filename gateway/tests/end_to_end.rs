@@ -538,3 +538,64 @@ async fn history_follows_parent_branch() {
         ["root", "current branch"]
     );
 }
+
+#[tokio::test]
+async fn history_pairs_tool_calls_with_results_and_skips_thinking() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    let rows = [
+        json!({
+            "id":"a", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
+            "message":{"role":"assistant","content":[
+                {"type":"thinking","thinking":"private"},
+                {"type":"toolCall","id":"call-1","name":"edit","arguments":{"path":"src/Login.kt"}}
+            ]}
+        }),
+        json!({
+            "id":"b", "parentId":"a", "type":"message", "timestamp":"2026-09-20T00:00:01Z",
+            "message":{"role":"toolResult","toolCallId":"call-1","toolName":"edit","content":[{"type":"text","text":"updated"}],"isError":false}
+        }),
+        json!({
+            "id":"c", "parentId":"b", "type":"message", "timestamp":"2026-09-20T00:00:02Z",
+            "message":{"role":"assistant","content":[{"type":"text","text":"Fixed."}]}
+        }),
+    ];
+    std::fs::write(
+        &path,
+        rows.into_iter()
+            .map(|row| row.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+
+    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
+    assert_eq!(history.len(), 2);
+    let tool = history[0].tool.as_ref().unwrap();
+    assert_eq!(tool.call_id, "call-1");
+    assert_eq!(tool.name, "edit");
+    assert!(tool.arguments.contains("src/Login.kt"));
+    assert_eq!(tool.result, "updated");
+    assert!(tool.completed && !tool.is_error);
+    assert_eq!(history[1].text, "Fixed.");
+}
+
+#[tokio::test]
+async fn history_keeps_assistant_errors_but_not_private_thinking() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    std::fs::write(
+        &path,
+        json!({
+            "id":"a", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
+            "message":{"role":"assistant","content":[{"type":"thinking","thinking":"private"}],"stopReason":"error","errorMessage":"provider unavailable"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].kind, "error");
+    assert_eq!(history[0].text, "provider unavailable");
+}
