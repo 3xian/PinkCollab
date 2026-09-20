@@ -240,6 +240,12 @@ cd android
 
 Set `sdk.dir` in `local.properties`, or set `ANDROID_HOME`. The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
+Install on a connected device:
+
+```sh
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+```
+
 To start a task: **Workspaces → choose a directory → create a task → enter a prompt → start**. Sending a message while the agent runs uses Steer; an idle or finished session accepts another Prompt. Interrupt keeps the runtime; Stop closes it.
 
 On some Windows/JDK setups Gradle fails with `Unable to establish loopback connection` — create `C:/tmp` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/tmp`.
