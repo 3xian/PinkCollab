@@ -239,4 +239,4 @@ private fun conciseResult(value: String): String = value
     .orEmpty()
     .take(180)
 
-private fun conciseError(value: String): String = conciseResult(value).ifBlank { "执行失败" }
+private fun conciseError(value: String): String = conciseResult(value).ifBlank { "Failed" }

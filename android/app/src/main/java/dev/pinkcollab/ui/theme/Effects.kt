@@ -7,6 +7,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -82,24 +83,27 @@ fun GlowBackground(state: HazeState, modifier: Modifier = Modifier) {
     }
 }
 
+/** Pink→violet hairline: white edges read as grey against the near-black base. */
+private fun edgeBrush(alpha: Float): Brush =
+    Brush.linearGradient(listOf(Pink200.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.35f)))
+
 /**
- * Frosted-glass panel: translucent gradient fill plus a hairline light border.
+ * Frosted-glass panel: translucent gradient fill plus a pink→violet hairline border.
  * Drawn over [GlowBackground] it reads as glass without paying per-node blur cost,
  * which keeps long scrolling lists smooth.
+ *
+ * The outline is derived from [shape], so pills and cards each get a matching corner
+ * radius; a fixed radius makes the stroke drift off the corner and show a stray edge.
  */
-fun Modifier.glassPanel(shape: Shape, fillAlpha: Float = 0.07f, borderAlpha: Float = 0.14f): Modifier =
-    background(
-        Brush.linearGradient(listOf(Color.White.copy(alpha = fillAlpha), Color.White.copy(alpha = fillAlpha * 0.45f))),
-        shape,
-    ).drawBehind {
-        drawRoundRect(
-            brush = Brush.linearGradient(
-                listOf(Color.White.copy(alpha = borderAlpha), Color.White.copy(alpha = borderAlpha * 0.3f)),
-            ),
-            cornerRadius = CornerRadius(24f, 24f),
-            style = Stroke(width = 1.2.dp.toPx()),
-        )
-    }
+fun Modifier.glassPanel(
+    shape: Shape,
+    fillAlpha: Float = 0.07f,
+    borderAlpha: Float = 0.14f,
+    borderBrush: Brush? = null,
+): Modifier = background(
+    Brush.linearGradient(listOf(Pink200.copy(alpha = fillAlpha * 0.9f), Color.White.copy(alpha = fillAlpha * 0.45f))),
+    shape,
+).border(1.2.dp, borderBrush ?: edgeBrush(borderAlpha), shape)
 
 /** Solid-color backdrop with the brand gradient and rounded corners (buttons, FABs). */
 fun Modifier.gradientFill(shape: Shape, brush: Brush = PinkVioletBrush, radius: Dp = 16.dp): Modifier =
@@ -121,15 +125,11 @@ private fun rememberPulseAlpha(): Float {
 @Composable
 fun Modifier.pulsingGlowBorder(shape: Shape, width: Dp = 1.5.dp): Modifier {
     val alpha = rememberPulseAlpha()
-    return drawBehind {
-        drawRoundRect(
-            brush = Brush.linearGradient(
-                listOf(Pink400.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.75f)),
-            ),
-            cornerRadius = CornerRadius(24f, 24f),
-            style = Stroke(width = width.toPx()),
-        )
-    }
+    return border(
+        width,
+        Brush.linearGradient(listOf(Pink400.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.75f))),
+        shape,
+    )
 }
 
 /** Small status dot with a soft outer glow, optionally pulsing. */

@@ -17,8 +17,8 @@ class GatewayApi {
         .callTimeout(50, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build()
     fun validateURL(value: String): String {
         val url = value.trim().trimEnd('/').toHttpUrl()
-        require(url.username.isEmpty() && url.password.isEmpty() && url.encodedPath == "/" && url.query == null && url.fragment == null) { "请填写 Gateway 根地址" }
-        require(url.isHttps || (BuildConfig.DEBUG && url.host in listOf("localhost", "127.0.0.1", "10.0.2.2"))) { "Gateway 必须使用 HTTPS" }
+        require(url.username.isEmpty() && url.password.isEmpty() && url.encodedPath == "/" && url.query == null && url.fragment == null) { "Enter the Gateway root URL" }
+        require(url.isHttps || (BuildConfig.DEBUG && url.host in listOf("localhost", "127.0.0.1", "10.0.2.2"))) { "The Gateway must use HTTPS" }
         return url.toString().trimEnd('/')
     }
     suspend fun request(url: String, credential: String?, path: String, method: String = "GET", body: JSONObject? = null, query: Pair<String, String>? = null): String = withContext(Dispatchers.IO) {

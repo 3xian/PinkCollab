@@ -14,7 +14,7 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
         if (repository.state.value.loading) return
         viewModelScope.launch {
             repository.error(null); repository.loading(true)
-            try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { repository.error(e.message ?: "操作失败") }
+            try { action() } catch (e: CancellationException) { throw e } catch (e: Exception) { repository.error(e.message ?: "Action failed") }
             finally { repository.loading(false) }
         }
     }

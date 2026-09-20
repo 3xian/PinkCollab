@@ -31,13 +31,13 @@ class SessionDisplayProjectionTest {
     @Test fun conciseProjectionGroupsStagesAndAssistantTextEndsAGroup() {
         val projected = projectSessionTimeline(
             listOf(
-                message("u", "user", "修复登录"),
+                message("u", "user", "Fix login"),
                 tool("r", "read"),
                 message("compact", "notice", "Compacting context"),
                 tool("g", "grep"),
                 tool("e1", "edit", arguments("src/Login.kt", old = "a", new = "b")),
                 tool("e2", "write", arguments("src/Login.kt", content = "b")),
-                message("a", "assistant", "已找到原因。"),
+                message("a", "assistant", "Found the cause."),
                 tool("t", "bash", result = "3 tests passed"),
             ),
         )

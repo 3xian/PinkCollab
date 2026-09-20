@@ -64,7 +64,7 @@ fun statusColor(status: String): Color = when (status) {
 }
 
 fun statusLabel(status: String): String = when (status) {
-    "starting" -> "启动中"; "running" -> "进行中"; "needs_input" -> "等待你回复"; "idle" -> "已暂停"
-    "completed" -> "已完成"; "failed" -> "失败"; "stopped" -> "已停止"; "offline" -> "离线"
+    "starting" -> "Starting"; "running" -> "Running"; "needs_input" -> "Needs you"; "idle" -> "Paused"
+    "completed" -> "Completed"; "failed" -> "Failed"; "stopped" -> "Stopped"; "offline" -> "Offline"
     else -> status
 }

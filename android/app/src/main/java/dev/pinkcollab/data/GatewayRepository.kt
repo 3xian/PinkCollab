@@ -26,15 +26,15 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         runCatching { credentials.read() }.onSuccess { saved ->
             mutable.update { it.copy(hosts = saved.associate { paired -> paired.host.id to HostState(paired) }) }
             saved.forEach { connect(it) }
-        }.onFailure { error("配对信息无法解密，请重新配对：${it.message}") }
+        }.onFailure { error("Pairing data could not be decrypted; pair again: ${it.message}") }
     }
     fun error(message: String?) { mutable.update { it.copy(error = message) } }
     fun loading(value: Boolean) { mutable.update { it.copy(loading = value) } }
-    private fun paired(id: String) = state.value.hosts[id]?.paired ?: throw IllegalStateException("Host 已移除")
+    private fun paired(id: String) = state.value.hosts[id]?.paired ?: throw IllegalStateException("Host removed")
     suspend fun pair(url: String, token: String) {
         val base = api.validateURL(url)
         val response = JSONObject(api.request(base, null, "/api/v1/pair", "POST", JSONObject().put("token", token.trim()).put("name", "PinkCollab Android")))
-        require(response.getInt("protocolVersion") == 1) { "不支持此 Gateway 协议版本" }
+        require(response.getInt("protocolVersion") == 1) { "Unsupported Gateway protocol version" }
         val paired = PairedHost(response.getJSONObject("host").host(), base, response.getString("credential"), response.getString("clientId"))
         val hosts = state.value.hosts + (paired.host.id to HostState(paired))
         credentials.save(hosts.values.map { it.paired })

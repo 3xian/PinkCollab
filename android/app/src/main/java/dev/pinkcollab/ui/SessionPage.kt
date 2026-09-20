@@ -11,11 +11,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,22 +25,22 @@ private val CardShape = RoundedCornerShape(20.dp)
 
 @Composable
 fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPrompt: (String, () -> Unit) -> Unit, onCommand: (String) -> Unit, onRespond: (JSONObject) -> Unit, onCycleModel: () -> Unit) {
-    if (detail == null) { Text(if (loading) "正在加载任务…" else "无法加载任务，请返回重试。", Modifier.padding(24.dp), color = TextMid); return }
+    if (detail == null) { Text(if (loading) "Loading task…" else "Could not load this task. Go back and try again.", Modifier.padding(24.dp), color = TextMid); return }
     val session = detail.session
     var prompt by rememberSaveable(session.id) { mutableStateOf("") }
     var displayMode by rememberSaveable(session.id) { mutableStateOf(SessionDisplayMode.Concise) }
     val attached = session.runtimeAttached && host?.connected == true
     val displayTimeline = remember(detail.timeline, displayMode) { projectSessionTimeline(detail.timeline, displayMode) }
     val activity = if (host?.connected != true) {
-        "Host 离线 · 正在尝试重连"
+        "Host offline · reconnecting"
     } else if (displayMode == SessionDisplayMode.Debug) {
         session.activity
     } else when (session.status) {
-        "starting", "running" -> "正在处理"
-        "needs_input" -> "等待你的回复"
-        "completed" -> "已完成"
-        "failed" -> "运行失败"
-        "idle" -> "待命"
+        "starting", "running" -> "Working"
+        "needs_input" -> "Waiting for you"
+        "completed" -> "Completed"
+        "failed" -> "Failed"
+        "idle" -> "Idle"
         else -> session.activity
     }
     Column(Modifier.fillMaxSize().imePadding()) {
@@ -56,11 +53,11 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
                     if (host?.connected != true) Text(activity, color = statusColor("failed"), style = MaterialTheme.typography.labelMedium)
                 }
                 TextButton(onClick = { displayMode = if (displayMode == SessionDisplayMode.Concise) SessionDisplayMode.Debug else SessionDisplayMode.Concise }, colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) {
-                    Text(if (displayMode == SessionDisplayMode.Concise) "Debug" else "简洁")
+                    Text(if (displayMode == SessionDisplayMode.Concise) "Debug" else "Concise")
                 }
                 val model = detail.model?.takeIf { attached && displayMode == SessionDisplayMode.Debug }
                 if (model != null) TextButton(onClick = onCycleModel, enabled = !loading, modifier = Modifier.widthIn(max = 220.dp), colors = ButtonDefaults.textButtonColors(contentColor = Violet400)) {
-                    Icon(Icons.Outlined.SwapHoriz, "切换模型")
+                    Icon(Icons.Outlined.SwapHoriz, "Switch model")
                     Spacer(Modifier.width(4.dp))
                     Text("${model.provider} · ${model.name}", maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -68,14 +65,14 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
         }
         HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (displayTimeline.isEmpty()) item { Text("等待 Agent 消息…", style = MaterialTheme.typography.bodySmall, color = TextMid) }
+            if (displayTimeline.isEmpty()) item { Text("Waiting for the agent…", style = MaterialTheme.typography.bodySmall, color = TextMid) }
             items(displayTimeline, key = { it.id }) { item -> DisplayItem(item) }
             if (detail.streaming.isNotBlank()) item {
                 Card(Modifier.fillMaxWidth().glassPanel(CardShape, fillAlpha = 0.09f), shape = CardShape, colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         GlowDot(Pink400, pulse = true)
                         Spacer(Modifier.width(10.dp))
-                        Column { Text("OMP · 正在回复", style = MaterialTheme.typography.labelMedium, color = Pink200); Spacer(Modifier.height(4.dp)); Text(detail.streaming, style = MaterialTheme.typography.bodyMedium) }
+                        Column { Text("OMP · replying", style = MaterialTheme.typography.labelMedium, color = Pink200); Spacer(Modifier.height(4.dp)); Text(detail.streaming, style = MaterialTheme.typography.bodyMedium) }
                     }
                 }
             }
@@ -83,10 +80,10 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
         }
         HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
         Column(Modifier.fillMaxWidth().padding(12.dp).glassPanel(CardShape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(prompt, { prompt = it }, placeholder = { Text(if (session.status == "running") "引导 OMP 调整方向…" else "继续发送 Prompt…") }, modifier = Modifier.fillMaxWidth(), maxLines = 4, enabled = attached && !loading && session.attention == null, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Pink400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Pink400))
+            OutlinedTextField(prompt, { prompt = it }, placeholder = { Text(if (session.status == "running") "Steer OMP…" else "Send another prompt…") }, modifier = Modifier.fillMaxWidth(), maxLines = 4, enabled = attached && !loading && session.attention == null, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Pink400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Pink400))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Row { TextButton(onClick = { onCommand("interrupt") }, enabled = attached && !loading && session.status in listOf("running", "needs_input"), colors = ButtonDefaults.textButtonColors(contentColor = Violet400)) { Text("Interrupt") }; TextButton(onClick = { onCommand("stop") }, enabled = attached && !loading, colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text("Stop") } }
-                GradientButton(onClick = { onPrompt(prompt) { prompt = "" } }, enabled = prompt.isNotBlank() && attached && !loading && session.attention == null) { Text(if (session.status == "running") "Steer" else "发送") }
+                GradientButton(onClick = { onPrompt(prompt) { prompt = "" } }, enabled = prompt.isNotBlank() && attached && !loading && session.attention == null) { Text(if (session.status == "running") "Steer" else "Send") }
             }
         }
     }
@@ -124,16 +121,16 @@ private fun MessageCard(item: SessionDisplayItem.Message) {
 private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
     val title = when (group.stage) {
-        ActivityStage.Explore -> "检查代码 · ${group.operationCount} 个操作"
+        ActivityStage.Explore -> "Exploring · ${group.operationCount} operations"
         ActivityStage.Change -> if (group.files.isNotEmpty()) {
-            "修改代码 · ${group.files.size} 个文件"
+            "Editing · ${group.files.size} files"
         } else {
-            "修改代码 · ${group.operationCount} 个操作"
+            "Editing · ${group.operationCount} operations"
         }
         ActivityStage.Execute -> when (group.status) {
-            ActivityStatus.Running -> "验证改动"
-            ActivityStatus.Succeeded -> "✓ 验证通过"
-            ActivityStatus.Failed -> "验证失败"
+            ActivityStatus.Running -> "Verifying"
+            ActivityStatus.Succeeded -> "✓ Verified"
+            ActivityStatus.Failed -> "Verification failed"
         }
     }
     // The projection decides expandability: a group carries a detail kind exactly when it has
@@ -157,7 +154,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
             if (group.summary.isNotBlank()) Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid)
             if (detailKind != null) {
                 TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) {
-                    Text(if (expanded) "收起" else detailKind.action)
+                    Text(if (expanded) "Collapse" else detailKind.action)
                 }
                 if (expanded) Text(group.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
             }
@@ -167,10 +164,10 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
 
 private val ActivityDetailKind.action: String
     get() = when (this) {
-        ActivityDetailKind.Diff -> "查看 diff"
-        ActivityDetailKind.Content -> "查看写入内容"
-        ActivityDetailKind.Changes -> "查看修改详情"
-        ActivityDetailKind.Error -> "查看错误"
+        ActivityDetailKind.Diff -> "View diff"
+        ActivityDetailKind.Content -> "View content"
+        ActivityDetailKind.Changes -> "View changes"
+        ActivityDetailKind.Error -> "View error"
     }
 
 @Composable
@@ -179,22 +176,19 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
     Card(
         Modifier
             .fillMaxWidth()
-            .drawBehind {
-                drawRoundRect(
-                    brush = Brush.linearGradient(listOf(Red400.copy(alpha = 0.7f), Red400.copy(alpha = 0.2f))),
-                    cornerRadius = CornerRadius(24f, 24f),
-                    style = Stroke(width = 2.dp.toPx()),
-                )
-            }
-            .glassPanel(CardShape, fillAlpha = 0.10f, borderAlpha = 0.16f),
+            .glassPanel(
+                CardShape,
+                fillAlpha = 0.10f,
+                borderBrush = Brush.linearGradient(listOf(Red400.copy(alpha = 0.7f), Red400.copy(alpha = 0.2f))),
+            ),
         shape = CardShape,
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("错误", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Red400)
+            Text("Error", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Red400)
             Text(item.text)
             if (item.details.isNotBlank() && item.details != item.text) {
-                TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "收起" else "查看错误") }
+                TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "Collapse" else "View error") }
                 if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
             }
         }
@@ -217,9 +211,9 @@ private fun RawTimelineCard(item: TimelineItem) {
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "工具调用"; "subagent" -> "Subagent"; "error" -> "错误"; else -> "动态" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Pink200; "error" -> Red400; else -> Violet400 })
+            Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Pink200; "error" -> Red400; else -> Violet400 })
             Text(item.text, style = if (isDetail) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge)
-            if (isDetail && detail.isNotBlank()) { TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) { Text(if (expanded) "收起 Details" else "展开 Details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
+            if (isDetail && detail.isNotBlank()) { TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
         }
     }
 }
@@ -240,15 +234,15 @@ private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSON
             Row(verticalAlignment = Alignment.CenterVertically) {
                 GlowDot(Pink400, pulse = true)
                 Spacer(Modifier.width(8.dp))
-                Text("OMP 需要你回复", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Pink200)
+                Text("OMP needs your reply", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Pink200)
             }
             Text(attention.text)
             when (attention.type) {
                 "select" -> attention.options.forEach { option -> GradientButton(onClick = { respond(response().put("value", option)) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(option) } }
-                "confirm" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { GradientButton(onClick = { respond(response().put("confirmed", true)) }, enabled = enabled) { Text("确认") }; OutlinedButton(onClick = { respond(response().put("confirmed", false)) }, enabled = enabled, colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMid)) { Text("拒绝") } }
-                else -> { OutlinedTextField(answer, { answer = it }, label = { Text("你的回答") }, minLines = if (attention.type == "editor") 4 else 1, modifier = Modifier.fillMaxWidth(), enabled = enabled, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Pink400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Pink400)); GradientButton(onClick = { respond(response().put("value", answer)) }, enabled = enabled) { Text("提交回答") } }
+                "confirm" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { GradientButton(onClick = { respond(response().put("confirmed", true)) }, enabled = enabled) { Text("Confirm") }; OutlinedButton(onClick = { respond(response().put("confirmed", false)) }, enabled = enabled, colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMid)) { Text("Decline") } }
+                else -> { OutlinedTextField(answer, { answer = it }, label = { Text("Your answer") }, minLines = if (attention.type == "editor") 4 else 1, modifier = Modifier.fillMaxWidth(), enabled = enabled, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Pink400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Pink400)); GradientButton(onClick = { respond(response().put("value", answer)) }, enabled = enabled) { Text("Submit") } }
             }
-            TextButton(onClick = { respond(response().put("cancelled", true)) }, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = TextMid)) { Text("取消输入") }
+            TextButton(onClick = { respond(response().put("cancelled", true)) }, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = TextMid)) { Text("Cancel") }
         }
     }
 }
