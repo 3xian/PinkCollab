@@ -87,10 +87,10 @@ select 的 value 必须是 options 中的原字符串。输入完成后重新进
 | model.updated | `{sessionId,model}`，OMP 没有当前模型时 `model` 为 null |
 | attention.created | `{sessionId,attention}` |
 
-客户端以 session/item id 合并事件，按 updatedAt 防止快照之后排队的旧状态回退。timeline 同 id 更新是 upsert；助手最终消息覆盖当前流式草稿。Timeline kind 为 user / assistant / tool / subagent / error / notice。工具项可能带有 `tool:{callId,name,arguments,result,isError,completed}`；开始和结果更新共享 `callId`，客户端无需解析展示文本即可投影视图。
+客户端以 session/item id 合并事件，按 updatedAt 防止快照之后排队的旧状态回退。timeline 同 id 更新是 upsert；助手最终消息覆盖当前流式草稿。Timeline kind 为 user / assistant / tool / subagent / error / notice。工具项可能带有 `tool:{callId,name,arguments,result,isError,completed}`：能观察到调用本身时 `arguments` 是原始 JSON 对象，只从历史中重建出结果时为 null。工具项的 `detail` 恒为空，载荷只在 `tool` 里出现一次。开始和结果更新共享 `callId` 并保留调用开始时间，客户端无需解析展示文本即可投影视图。
 
 Gateway 每 25 秒发送 Ping，70 秒未收到心跳回复则断开。慢客户端超过 256 条积压时断开，客户端应重新连接获取快照，并重新加载打开的任务详情。本版本不提供持久事件重放。
 
 ## 数据所有权
 
-SQLite 只保存 Host ID、客户端 token 哈希、配对令牌哈希、Session 管理元数据和 OMP session 文件定位信息。供应商凭据由 OMP 保管。前台实时 Timeline 最近 500 项只放在内存；历史对话（包括已配对的工具调用与结果）按 OMP entry 的 parentId 重建当前分支。
+SQLite 只保存 Host ID、客户端 token 哈希、配对令牌哈希、Session 管理元数据和 OMP session 文件定位信息。供应商凭据由 OMP 保管。内存中最多保留 500 条实时 Timeline 项，截断时优先保留用户可见的消息边界，而非隐藏的工具记录。历史对话（包括已配对的工具调用与结果）按 OMP entry 的 parentId 重建当前分支，并采用相同的保留策略。

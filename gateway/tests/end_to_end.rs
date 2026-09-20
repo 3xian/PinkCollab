@@ -574,10 +574,87 @@ async fn history_pairs_tool_calls_with_results_and_skips_thinking() {
     let tool = history[0].tool.as_ref().unwrap();
     assert_eq!(tool.call_id, "call-1");
     assert_eq!(tool.name, "edit");
-    assert!(tool.arguments.contains("src/Login.kt"));
+    assert_eq!(tool.arguments["path"], "src/Login.kt");
     assert_eq!(tool.result, "updated");
     assert!(tool.completed && !tool.is_error);
     assert_eq!(history[1].text, "Fixed.");
+}
+
+#[tokio::test]
+async fn history_limit_preserves_visible_messages_before_tool_heavy_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    let mut rows = vec![json!({
+        "id":"user", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
+        "message":{"role":"user","content":"Keep this request"}
+    })];
+    let mut parent = "user".to_string();
+    for index in 0..501 {
+        let call_entry = format!("call-entry-{index}");
+        let result_entry = format!("result-entry-{index}");
+        let call_id = format!("call-{index}");
+        rows.push(json!({
+            "id":call_entry.clone(), "parentId":parent.clone(), "type":"message", "timestamp":"2026-09-20T00:00:01Z",
+            "message":{"role":"assistant","content":[{"type":"toolCall","id":call_id.clone(),"name":"read","arguments":{"path":format!("src/{index}.rs")}}]}
+        }));
+        rows.push(json!({
+            "id":result_entry.clone(), "parentId":call_entry, "type":"message", "timestamp":"2026-09-20T00:00:02Z",
+            "message":{"role":"toolResult","toolCallId":call_id,"toolName":"read","content":[{"type":"text","text":"ok"}],"isError":false}
+        }));
+        parent = result_entry;
+    }
+    std::fs::write(
+        &path,
+        rows.into_iter()
+            .map(|row| row.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+
+    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
+    assert_eq!(history.len(), 500);
+    assert_eq!(history[0].kind, "user");
+    assert_eq!(history[0].text, "Keep this request");
+    assert_eq!(
+        history.iter().filter(|item| item.kind == "tool").count(),
+        499
+    );
+}
+
+/// A transcript can record the result of a call in a different entry than the call itself, and the
+/// two frames describe one call: reconstructing them as two items would show the call twice.
+#[tokio::test]
+async fn history_merges_a_result_that_precedes_its_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    let rows = [
+        json!({
+            "id":"a", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
+            "message":{"role":"toolResult","toolCallId":"call-1","toolName":"edit","content":[{"type":"text","text":"updated"}],"isError":false}
+        }),
+        json!({
+            "id":"b", "parentId":"a", "type":"message", "timestamp":"2026-09-20T00:00:01Z",
+            "message":{"role":"assistant","content":[{"type":"toolCall","id":"call-1","name":"edit","arguments":{"path":"src/Login.kt"}}]}
+        }),
+    ];
+    std::fs::write(
+        &path,
+        rows.into_iter()
+            .map(|row| row.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+
+    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
+    assert_eq!(history.len(), 1);
+    let tool = history[0].tool.as_ref().unwrap();
+    assert_eq!(tool.call_id, "call-1");
+    assert_eq!(tool.arguments["path"], "src/Login.kt");
+    assert_eq!(tool.result, "updated");
+    assert!(tool.completed && !tool.is_error);
+    assert_eq!(history[0].text, "Finished · edit");
 }
 
 #[tokio::test]

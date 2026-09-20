@@ -2,7 +2,7 @@ use pinkcollab_gateway::{
     config::Config,
     events::{Bus, normalize},
     funnel,
-    model::Session,
+    model::{Session, TimelineItem},
     storage::Store,
     workspace::Browser,
 };
@@ -117,8 +117,38 @@ fn normalized_events_keep_tasks_open_until_agent_end() {
     let trace = tool.item.unwrap().tool.unwrap();
     assert_eq!(trace.call_id, "call-1");
     assert_eq!(trace.name, "bash");
-    assert!(trace.arguments.contains("cargo test"));
+    assert_eq!(trace.arguments["command"], "cargo test");
     assert_eq!(normalize(&json!({"type":"extension_ui_request","method":"select","id":"q","title":"API?","options":["v1","v2"]})).attention.unwrap().options,["v1","v2"]);
+}
+
+#[test]
+fn tool_result_keeps_call_metadata_and_start_timestamp() {
+    let started_at = "2026-09-20T00:00:00Z".parse().unwrap();
+    let mut item = TimelineItem::tool_started(
+        "call-1",
+        "bash",
+        json!({"command":"cargo test"}),
+        started_at,
+    );
+    item.merge_tool_update(TimelineItem::tool_completed(
+        "call-1",
+        "",
+        "passed",
+        false,
+        "2026-09-20T00:00:10Z".parse().unwrap(),
+    ));
+
+    let trace = item.tool.as_ref().unwrap();
+    assert_eq!(item.timestamp, started_at);
+    assert_eq!(trace.name, "bash");
+    assert_eq!(trace.arguments["command"], "cargo test");
+    assert_eq!(trace.result, "passed");
+
+    let wire = serde_json::to_value(&item).unwrap();
+    assert_eq!(wire["tool"]["arguments"]["command"], "cargo test");
+    // The payload travels once, inside `tool`: the display fields are derived and carry nothing.
+    assert_eq!(wire["detail"], "");
+    assert_eq!(wire["text"], "Finished · bash");
 }
 #[tokio::test]
 async fn slow_event_clients_must_resynchronize() {

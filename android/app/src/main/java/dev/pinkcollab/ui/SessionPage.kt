@@ -97,15 +97,20 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
     val title = when (group.stage) {
         ActivityStage.Explore -> "检查代码 · ${group.operationCount} 个操作"
-        ActivityStage.Change -> "修改代码 · ${group.files.size.takeIf { it > 0 } ?: group.operationCount} 个文件"
+        ActivityStage.Change -> if (group.files.isNotEmpty()) {
+            "修改代码 · ${group.files.size} 个文件"
+        } else {
+            "修改代码 · ${group.operationCount} 个操作"
+        }
         ActivityStage.Execute -> when (group.status) {
             ActivityStatus.Running -> "验证改动"
             ActivityStatus.Succeeded -> "✓ 验证通过"
             ActivityStatus.Failed -> "验证失败"
         }
     }
-    val expandable = group.details.isNotBlank() &&
-        (group.stage == ActivityStage.Change || group.status == ActivityStatus.Failed)
+    // The projection decides expandability: a group carries a detail kind exactly when it has
+    // details, so the card does not re-derive the rule from the stage and status.
+    val detailKind = group.detailKind
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -114,15 +119,23 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
                 color = if (group.status == ActivityStatus.Failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
             )
             if (group.summary.isNotBlank()) Text(group.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (expandable) {
+            if (detailKind != null) {
                 TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp)) {
-                    Text(if (expanded) "收起" else if (group.stage == ActivityStage.Change) "查看 diff" else "查看错误")
+                    Text(if (expanded) "收起" else detailKind.action)
                 }
                 if (expanded) Text(group.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
             }
         }
     }
 }
+
+private val ActivityDetailKind.action: String
+    get() = when (this) {
+        ActivityDetailKind.Diff -> "查看 diff"
+        ActivityDetailKind.Content -> "查看写入内容"
+        ActivityDetailKind.Changes -> "查看修改详情"
+        ActivityDetailKind.Error -> "查看错误"
+    }
 
 @Composable
 private fun ErrorCard(item: SessionDisplayItem.Error) {
@@ -145,7 +158,7 @@ private fun RawTimelineCard(item: TimelineItem) {
     val isDetail = item.kind in listOf("tool", "subagent")
     val detail = item.tool?.let { tool ->
         buildList {
-            if (tool.arguments.isNotBlank() && tool.arguments != "null") add("Arguments\n${tool.arguments}")
+            if (tool.arguments.raw.isNotBlank()) add("Arguments\n${tool.arguments.raw}")
             if (tool.result.isNotBlank()) add("Result\n${tool.result}")
         }.joinToString("\n\n")
     }.orEmpty().ifBlank { item.detail }

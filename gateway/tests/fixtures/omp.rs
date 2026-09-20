@@ -5,6 +5,20 @@ fn emit(value: Value) {
     println!("{value}");
     std::io::stdout().flush().unwrap();
 }
+/// Writes an endless unterminated line for 20 seconds: enough for a reader that buffers without a
+/// bound to keep growing, while a bounded one rejects the frame immediately.
+fn flood_stdout() -> ! {
+    let chunk = vec![b'x'; 64 * 1024];
+    let mut out = std::io::stdout();
+    for _ in 0..2000 {
+        if out.write_all(&chunk).is_err() {
+            break;
+        }
+        let _ = out.flush();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    std::process::exit(1);
+}
 fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
     let id = pinkcollab_gateway::storage::id("message_");
     let message =
@@ -27,6 +41,12 @@ fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
     emit(json!({"type":"agent_end"}));
 }
 fn main() {
+    let args = std::env::args().collect::<Vec<_>>();
+    // `--flood-stdout` never finishes a line, which is how a bounded reader is told apart from one
+    // that grows a buffer until OMP stops writing.
+    if args.iter().any(|arg| arg == "--flood-stdout") {
+        flood_stdout();
+    }
     let log = std::env::current_dir()
         .unwrap()
         .join("fixture-session.jsonl");
@@ -36,13 +56,19 @@ fn main() {
         json!({"provider":"fixture","id":"smart","name":"Fixture Smart"}),
     ];
     // `--single-model` mirrors a host whose model scope has no alternative for `cycle_model` to pick.
-    let models: &[Value] = if std::env::args().any(|arg| arg == "--single-model") {
+    let models: &[Value] = if args.iter().any(|arg| arg == "--single-model") {
         &all_models[..1]
     } else {
         &all_models
     };
     let mut model_index = 0;
     emit(json!({"type":"ready","protocolVersion":1}));
+    // `--stall-stdin` announces itself and then never drains its pipe, so a write larger than the
+    // pipe buffer stays blocked exactly as a wedged OMP would leave it.
+    if args.iter().any(|arg| arg == "--stall-stdin") {
+        std::thread::sleep(std::time::Duration::from_secs(300));
+        return;
+    }
     for line in std::io::stdin().lock().lines() {
         let Ok(line) = line else {
             break;

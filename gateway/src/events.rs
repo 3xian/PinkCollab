@@ -1,5 +1,5 @@
 use crate::{
-    model::{Attention, Event, TimelineItem, ToolTrace},
+    model::{Attention, Event, TimelineItem},
     omp::{string, text_content},
     storage::id,
 };
@@ -110,43 +110,21 @@ pub fn normalize(f: &Value) -> Update {
                 _ => "Investigating",
             };
             u.activity = Some(activity.into());
-            let mut i = item(
-                "tool",
-                format!("{activity} · {name}"),
-                f["args"].to_string(),
-            );
-            i.id = string(f, "toolCallId").into();
-            i.tool = Some(ToolTrace {
-                call_id: i.id.clone(),
-                name: name.into(),
-                arguments: f["args"].to_string(),
-                result: String::new(),
-                is_error: false,
-                completed: false,
-            });
-            u.item = Some(i);
+            u.item = Some(TimelineItem::tool_started(
+                string(f, "toolCallId"),
+                name,
+                f["args"].clone(),
+                Utc::now(),
+            ));
         }
         "tool_execution_end" => {
-            let prefix = if f["isError"] == true {
-                "Tool failed"
-            } else {
-                "Finished"
-            };
-            let mut i = item(
-                "tool",
-                format!("{prefix} · {}", string(f, "toolName")),
+            u.item = Some(TimelineItem::tool_completed(
+                string(f, "toolCallId"),
+                string(f, "toolName"),
                 text_content(&f["result"]),
-            );
-            i.id = string(f, "toolCallId").into();
-            i.tool = Some(ToolTrace {
-                call_id: i.id.clone(),
-                name: string(f, "toolName").into(),
-                arguments: String::new(),
-                result: text_content(&f["result"]),
-                is_error: f["isError"] == true,
-                completed: true,
-            });
-            u.item = Some(i);
+                f["isError"] == true,
+                Utc::now(),
+            ));
         }
         "prompt_result" => {
             if f["success"] == false {

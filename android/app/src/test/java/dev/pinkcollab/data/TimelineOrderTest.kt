@@ -15,4 +15,16 @@ class TimelineOrderTest {
         assertEquals(1, merged.size)
         assertEquals("Finished", merged.single().text)
     }
+
+    /**
+     * The gateway pins a tool item to the timestamp of its call, so an update and its start can
+     * carry the same one. Which side wins then is a rule, not an accident: the preferred argument.
+     */
+    @Test fun timestampTiesAreDecidedByThePreferredSide() {
+        val snapshot = TimelineItem("tool-1", "tool", "Running · bash", "", "2026-09-14T00:00:00Z")
+        val event = snapshot.copy(text = "Finished · bash")
+
+        assertEquals("Running · bash", mergeTimeline(listOf(snapshot), listOf(event)).single().text)
+        assertEquals("Finished · bash", mergeTimeline(listOf(event), listOf(snapshot)).single().text)
+    }
 }

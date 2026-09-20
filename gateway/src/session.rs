@@ -1,6 +1,6 @@
 use crate::{
     events::{self, Bus},
-    model::{Detail, ModelInfo, Session, TimelineItem, ToolTrace},
+    model::{Detail, ModelInfo, Session, TimelineItem},
     omp::{self, Output, Runtime},
     storage::{self, Store},
     workspace::{self, Browser},
@@ -9,16 +9,16 @@ use anyhow::{Context, Result, bail, ensure};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{
-    collections::{HashMap, VecDeque},
-    path::Path,
-    sync::Arc,
-};
+use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::Mutex;
+
+/// How many timeline items a session keeps in memory. Both the live timeline and a reconstructed
+/// history use the same number and the same retention policy.
+const TIMELINE_LIMIT: usize = 500;
 
 struct Entry {
     session: Session,
-    timeline: VecDeque<TimelineItem>,
+    timeline: Vec<TimelineItem>,
     model: Option<ModelInfo>,
     runtime: Option<Arc<Runtime>>,
     command: Arc<Mutex<()>>,
@@ -74,7 +74,7 @@ impl Registry {
                 session.id.clone(),
                 Entry {
                     session,
-                    timeline: VecDeque::new(),
+                    timeline: Vec::new(),
                     model: None,
                     runtime: None,
                     command: Arc::new(Mutex::new(())),
@@ -109,7 +109,7 @@ impl Registry {
             let e = state.entries.get(id).context("session not found")?;
             (
                 e.session.clone(),
-                e.timeline.iter().cloned().collect::<Vec<_>>(),
+                e.timeline.clone(),
                 e.model.clone(),
             )
         };
@@ -179,35 +179,29 @@ impl Registry {
         if item.id.is_empty() {
             item.id = storage::id("item_");
         }
-        item.timestamp = Utc::now();
-        if let Some(old) = e.timeline.iter_mut().find(|v| v.id == item.id) {
-            if item.detail.is_empty() {
-                item.detail = old.detail.clone();
+        let published = match e.timeline.iter_mut().find(|value| value.id == item.id) {
+            // A tool result arrives as a second frame for the same call: it only completes the
+            // item, which keeps the call's original position and start timestamp.
+            Some(old) if old.tool.is_some() && item.tool.is_some() => {
+                old.merge_tool_update(item);
+                old.clone()
             }
-            if let (Some(previous), Some(current)) = (&old.tool, &mut item.tool) {
-                if current.call_id.is_empty() {
-                    current.call_id = previous.call_id.clone();
+            Some(old) => {
+                if item.detail.is_empty() {
+                    item.detail = std::mem::take(&mut old.detail);
                 }
-                if current.name.is_empty() {
-                    current.name = previous.name.clone();
-                }
-                if current.arguments.is_empty() {
-                    current.arguments = previous.arguments.clone();
-                }
-                if current.result.is_empty() {
-                    current.result = previous.result.clone();
-                }
+                *old = item.clone();
+                item
             }
-            *old = item.clone();
-        } else {
-            e.timeline.push_back(item.clone());
-            if e.timeline.len() > 500 {
-                e.timeline.pop_front();
+            None => {
+                e.timeline.push(item.clone());
+                trim_timeline(&mut e.timeline, TIMELINE_LIMIT);
+                item
             }
-        }
+        };
         self.bus.publish(
             "timeline.updated",
-            events::timeline_payload(&e.session.id, &item),
+            events::timeline_payload(&e.session.id, &published),
         );
     }
     async fn handle(&self, id: &str, frame: Value) -> Result<()> {
@@ -299,9 +293,10 @@ impl Registry {
         if e.stopping {
             e.session.status = "stopped".into();
             e.session.activity = "Stopped".into();
-        } else if error.is_some() {
+        } else if let Some(reason) = error {
+            // The transport reports why it gave up; surfacing it beats a fixed string that hides it.
             e.session.status = "failed".into();
-            e.session.activity = "OMP process exited unexpectedly".into();
+            e.session.activity = reason;
         } else if !["completed", "failed"].contains(&e.session.status.as_str()) {
             e.session.status = "stopped".into();
             e.session.activity = "OMP process exited".into();
@@ -377,7 +372,7 @@ impl Registry {
                 session_id.clone(),
                 Entry {
                     session,
-                    timeline: VecDeque::new(),
+                    timeline: Vec::new(),
                     model: None,
                     runtime: None,
                     command: command.clone(),
@@ -390,7 +385,7 @@ impl Registry {
         let (runtime, mut output) = match started {
             Ok(v) => v,
             Err(err) => {
-                self.exit(&session_id, Some(err.to_string())).await?;
+                self.exit(&session_id, Some(format!("{err:#}"))).await?;
                 return Err(err);
             }
         };
@@ -674,7 +669,6 @@ pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
     }
     chain.reverse();
     let mut timeline: Vec<TimelineItem> = vec![];
-    let mut tool_positions = HashMap::<String, usize>::new();
     for entry in chain {
         if entry["type"] != "message" {
             continue;
@@ -690,51 +684,16 @@ pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
                 continue;
             }
             let result = omp::text_content(m);
-            if let Some(item) = tool_positions
-                .get(call_id)
-                .and_then(|index| timeline.get_mut(*index))
-            {
-                if let Some(tool) = &mut item.tool {
-                    tool.result = result.clone();
-                    tool.is_error = m["isError"] == true;
-                    tool.completed = true;
-                }
-                item.text = format!(
-                    "{} · {}",
-                    if m["isError"] == true {
-                        "Tool failed"
-                    } else {
-                        "Finished"
-                    },
-                    omp::string(m, "toolName")
-                );
-                item.detail = result;
-            } else {
-                let name = omp::string(m, "toolName");
-                tool_positions.insert(call_id.into(), timeline.len());
-                timeline.push(TimelineItem {
-                    id: call_id.into(),
-                    kind: "tool".into(),
-                    text: format!(
-                        "{} · {name}",
-                        if m["isError"] == true {
-                            "Tool failed"
-                        } else {
-                            "Finished"
-                        }
-                    ),
-                    detail: result.clone(),
-                    tool: Some(ToolTrace {
-                        call_id: call_id.into(),
-                        name: name.into(),
-                        arguments: String::new(),
-                        result,
-                        is_error: m["isError"] == true,
-                        completed: true,
-                    }),
+            upsert_tool(
+                &mut timeline,
+                TimelineItem::tool_completed(
+                    call_id,
+                    omp::string(m, "toolName"),
+                    result,
+                    m["isError"] == true,
                     timestamp,
-                });
-            }
+                ),
+            );
             continue;
         }
         if !["user", "assistant"].contains(&role) {
@@ -765,23 +724,11 @@ pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
                         if call_id.is_empty() || name.is_empty() {
                             continue;
                         }
-                        let arguments = part["arguments"].to_string();
-                        tool_positions.insert(call_id.into(), timeline.len());
-                        timeline.push(TimelineItem {
-                            id: call_id.into(),
-                            kind: "tool".into(),
-                            text: format!("Running · {name}"),
-                            detail: arguments.clone(),
-                            tool: Some(ToolTrace {
-                                call_id: call_id.into(),
-                                name: name.into(),
-                                arguments,
-                                result: String::new(),
-                                is_error: false,
-                                completed: false,
-                            }),
-                            timestamp,
-                        });
+                        let arguments = part["arguments"].clone();
+                        upsert_tool(
+                            &mut timeline,
+                            TimelineItem::tool_started(call_id, name, arguments, timestamp),
+                        );
                     }
                     _ => {}
                 }
@@ -813,12 +760,32 @@ pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
             });
         }
     }
-    Ok(timeline
-        .into_iter()
-        .rev()
-        .take(500)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect())
+    trim_timeline(&mut timeline, TIMELINE_LIMIT);
+    Ok(timeline)
+}
+
+/// Upserts a tool item by call id. A transcript can hold the result of a call in a different entry
+/// than the call itself (or in the other order), and both frames describe one call.
+fn upsert_tool(timeline: &mut Vec<TimelineItem>, item: TimelineItem) {
+    match timeline.iter_mut().find(|existing| existing.id == item.id) {
+        Some(existing) => existing.merge_tool_update(item),
+        None => timeline.push(item),
+    }
+}
+
+fn is_visible_timeline_boundary(item: &TimelineItem) -> bool {
+    matches!(item.kind.as_str(), "user" | "assistant" | "error")
+}
+
+/// Drops the oldest hidden bookkeeping before the oldest visible message, so a burst of tool calls
+/// cannot push the conversation itself out of the timeline. Shared by the live timeline and by
+/// reconstructed history, which are documented as using the same retention policy.
+fn trim_timeline(timeline: &mut Vec<TimelineItem>, limit: usize) {
+    while timeline.len() > limit {
+        let index = timeline
+            .iter()
+            .position(|item| !is_visible_timeline_boundary(item))
+            .unwrap_or(0);
+        timeline.remove(index);
+    }
 }

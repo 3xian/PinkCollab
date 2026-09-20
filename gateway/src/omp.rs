@@ -1,31 +1,107 @@
 use crate::storage::id;
 use anyhow::{Context, Result, bail, ensure};
-use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
+    io::{BufRead, BufReader, Write},
     path::Path,
-    sync::{Arc, Mutex},
-    time::Duration,
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
 };
-use tokio::{
-    io::AsyncWriteExt,
-    process::Command,
-    sync::{mpsc, oneshot, watch},
-};
-use tokio_util::codec::{FramedRead, LinesCodec};
+use tokio::sync::{mpsc, oneshot, watch};
+
+/// Framing limit for a single NDJSON frame in either direction. This is PinkCollab's own bound:
+/// an OMP frame that exceeds it ends the session instead of being buffered without limit.
+const MAX_LINE: usize = 1024 * 1024;
+
+/// Upper bound for one blocking stdin write. Pipe buffers are small (64 KiB on Windows) while a
+/// prompt may be 256 KiB, so a wedged OMP must fail the transport instead of stalling it.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long OMP may take to exit after its stdin closes before it is killed.
+const TERMINATE_GRACE: Duration = Duration::from_secs(3);
 
 pub enum Output {
     Frame(Value),
+    /// The process is gone. `Some` carries why the transport failed, `None` means it exited
+    /// normally or because we asked it to.
     Exited(Option<String>),
 }
+
+/// Sole owner of the child process. Termination lives here, not in the write path, so neither a
+/// blocked stdin write nor a stalled event consumer can keep a stop from taking effect.
+struct Process {
+    child: Mutex<Child>,
+    terminated: AtomicBool,
+}
+
+impl Process {
+    /// Idempotent. Closes nothing itself: closing stdin is the writer's job, and this waits out
+    /// `grace` for OMP to exit on its own before killing and reaping. Returns the exit status, or
+    /// `None` when another caller already terminated the process.
+    fn terminate(&self, grace: Duration) -> Option<ExitStatus> {
+        if self.terminated.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        let mut child = self.child.lock().unwrap();
+        let deadline = Instant::now() + grace;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return Some(status),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                // Nothing left to wait for: kill it and reap it so no zombie survives the session.
+                _ => break,
+            }
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        child.try_wait().ok().flatten()
+    }
+}
+
+/// Single termination point shared by the reader thread, the writer thread and [`Runtime::stop`].
+struct Shutdown {
+    process: Arc<Process>,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
+    requested: watch::Sender<bool>,
+    exited: watch::Sender<bool>,
+    output: mpsc::Sender<Output>,
+    finished: AtomicBool,
+}
+
+impl Shutdown {
+    /// Idempotent: ends the process, releases every pending request and reports the outcome once.
+    fn finish(&self, reason: Option<String>) {
+        if self.finished.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let status = self.process.terminate(TERMINATE_GRACE);
+        // A stop we requested is not a crash; `session::exit` already reports it as stopped.
+        let reason = reason.or_else(|| {
+            (!*self.requested.borrow() && status.is_some_and(|status| !status.success()))
+                .then(|| "OMP process exited unexpectedly".to_string())
+        });
+        self.pending.lock().unwrap().clear();
+        let _ = self.exited.send(true);
+        let _ = self.output.blocking_send(Output::Exited(reason));
+    }
+}
+
 pub struct Runtime {
     input: mpsc::Sender<(Value, oneshot::Sender<Result<()>>)>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
     ready: watch::Receiver<bool>,
     exited: watch::Receiver<bool>,
     stop: watch::Sender<bool>,
+    process: Arc<Process>,
 }
+
 impl Runtime {
     pub fn spawn(
         executable: &str,
@@ -33,93 +109,109 @@ impl Runtime {
         cwd: &Path,
     ) -> Result<(Arc<Self>, mpsc::Receiver<Output>)> {
         let mut child = Command::new(executable)
+            // `Stdio::piped()` is the only pipe path either `std` or tokio offers here: tokio's
+            // process spawn extracts the very same `CreatePipe` handles `std` created, so an
+            // explicit `CreatePipe` wrapper (removed in favour of this) would change nothing
+            // about how OMP's pipes are allocated. ERROR_PIPE_BUSY (231) is unrelated to that
+            // choice and stays an open observation on saturated pipe namespaces.
             .args(["--mode", "rpc-ui"])
             .args(args)
             .current_dir(cwd)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
-            .context("cannot start OMP")?;
-        let mut stdin = child.stdin.take().context("OMP stdin unavailable")?;
-        let mut stdout = FramedRead::new(
-            child.stdout.take().context("OMP stdout unavailable")?,
-            LinesCodec::new_with_max_length(1024 * 1024),
-        );
+            .with_context(|| format!("cannot start OMP at {executable} in {}", cwd.display()))?;
+        let stdin = child.stdin.take().context("OMP stdin unavailable")?;
+        let stdout = child.stdout.take().context("OMP stdout unavailable")?;
         let (input, mut commands) = mpsc::channel::<(Value, oneshot::Sender<Result<()>>)>(32);
         let (output, receiver) = mpsc::channel(256);
         let (ready_tx, ready) = watch::channel(false);
         let (exit_tx, exited) = watch::channel(false);
         let (stop, mut stopping) = watch::channel(false);
         let pending = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
-        let responses = pending.clone();
-        tokio::spawn(async move {
-            let mut error = None;
-            loop {
-                tokio::select! {
-                    _ = stopping.changed() => {
-                        let _ = stdin.shutdown().await;
-                        drop(stdin);
-                        if tokio::time::timeout(Duration::from_secs(3), child.wait()).await.is_err() {
-                            let _ = child.kill().await;
-                        }
-                        break;
+        let process = Arc::new(Process {
+            child: Mutex::new(child),
+            terminated: AtomicBool::new(false),
+        });
+        let shutdown = Arc::new(Shutdown {
+            process: process.clone(),
+            pending: pending.clone(),
+            requested: stop.clone(),
+            exited: exit_tx,
+            output: output.clone(),
+            finished: AtomicBool::new(false),
+        });
+        let reader = shutdown.clone();
+        let reader_output = output.clone();
+        let reader_pending = pending.clone();
+        std::thread::spawn(move || {
+            let mut source = BufReader::new(stdout);
+            let mut frame = Vec::with_capacity(8 * 1024);
+            let reason = loop {
+                frame.clear();
+                match read_frame(&mut source, &mut frame) {
+                    // stdout closed: OMP is exiting, either on its own or because we stopped it.
+                    Ok(0) => break None,
+                    Ok(_) if frame.len() > MAX_LINE => {
+                        break Some("OMP exceeded the NDJSON transport limit".to_string());
                     }
-                    command = commands.recv() => {
-                        let Some((value, ack)) = command else {
-                            let _ = child.kill().await;
-                            break;
-                        };
-                        let result = async {
-                            let mut bytes = serde_json::to_vec(&value)?;
-                            ensure!(bytes.len() < 1024 * 1024, "OMP frame too large");
-                            bytes.push(b'\n');
-                            tokio::time::timeout(Duration::from_secs(10), stdin.write_all(&bytes))
-                                .await.context("OMP write timed out")??;
-                            Ok(())
-                        }.await;
-                        let failed = result.is_err();
-                        let _ = ack.send(result);
-                        if failed {
-                            error = Some("OMP input transport failed".into());
-                            let _ = child.kill().await;
-                            break;
-                        }
-                    }
-                    line = stdout.next() => {
-                        match line {
-                            Some(Ok(line)) => {
-                                let Ok(frame) = serde_json::from_str::<Value>(&line) else { continue; };
-                                if string(&frame, "type") == "ready" { let _ = ready_tx.send(true); }
-                                if string(&frame, "type") == "response" {
-                                    let responder = responses.lock().unwrap().remove(string(&frame, "id"));
-                                    if let Some(tx) = responder { let _ = tx.send(frame); continue; }
-                                }
-                                if output.send(Output::Frame(frame)).await.is_err() {
-                                    let _ = child.kill().await;
-                                    break;
-                                }
-                            }
-                            Some(Err(_)) => {
-                                error = Some("OMP exceeded NDJSON transport limit".into());
-                                let _ = child.kill().await;
-                                break;
-                            }
-                            None => {
-                                match child.wait().await {
-                                    Ok(status) if status.success() => {},
-                                    _ => error = Some("OMP process exited unexpectedly".into()),
-                                }
-                                break;
-                            }
-                        }
-                    }
+                    Ok(_) => {}
+                    Err(err) => break Some(format!("OMP output transport failed: {err}")),
                 }
-            }
-            responses.lock().unwrap().clear();
-            let _ = exit_tx.send(true);
-            let _ = output.send(Output::Exited(error)).await;
+                let Ok(value) = serde_json::from_slice::<Value>(&frame) else {
+                    continue;
+                };
+                if string(&value, "type") == "ready" {
+                    let _ = ready_tx.send(true);
+                }
+                if string(&value, "type") == "response"
+                    && let Some(responder) = reader_pending
+                        .lock()
+                        .unwrap()
+                        .remove(string(&value, "id"))
+                {
+                    let _ = responder.send(value);
+                    continue;
+                }
+                if reader_output.blocking_send(Output::Frame(value)).is_err() {
+                    break None;
+                }
+            };
+            reader.finish(reason);
+        });
+        let writer = shutdown.clone();
+        // Writes are blocking, so they run on a dedicated thread and never on a runtime worker.
+        // The handle must be resolved here, on the runtime thread: calling `Handle::current()`
+        // inside the spawned thread panics and silently kills the writer.
+        let runtime = tokio::runtime::Handle::current();
+        std::thread::spawn(move || {
+            let reason: Option<String> = runtime.block_on(async move {
+                let stdin: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
+                    Arc::new(Mutex::new(Some(Box::new(stdin))));
+                let reason = loop {
+                    let command = tokio::select! {
+                        _ = stopping.changed() => None,
+                        command = commands.recv() => command,
+                    };
+                    let Some((value, ack)) = command else {
+                        break None;
+                    };
+                    let result = write_frame(&stdin, value).await;
+                    let failure = result
+                        .as_ref()
+                        .err()
+                        .map(|err| format!("OMP input transport failed: {err:#}"));
+                    let _ = ack.send(result);
+                    if failure.is_some() {
+                        break failure;
+                    }
+                };
+                // Releasing the last stdin handle asks OMP to exit on its own.
+                let _ = stdin.lock().unwrap().take();
+                reason
+            });
+            writer.finish(reason);
         });
         Ok((
             Arc::new(Self {
@@ -128,10 +220,12 @@ impl Runtime {
                 ready,
                 exited,
                 stop,
+                process,
             }),
             receiver,
         ))
     }
+
     pub async fn wait_ready(&self) -> Result<()> {
         let mut ready = self.ready.clone();
         let mut exited = self.exited.clone();
@@ -152,6 +246,7 @@ impl Runtime {
         .await
         .context("OMP startup timed out")?
     }
+
     pub async fn write(&self, frame: Value) -> Result<()> {
         let (ack, rx) = oneshot::channel();
         self.input
@@ -160,6 +255,7 @@ impl Runtime {
             .context("OMP no longer attached")?;
         rx.await.context("OMP input closed")?
     }
+
     pub async fn request(&self, mut frame: Value) -> Result<Value> {
         let request_id = id("req_");
         frame["id"] = json!(request_id);
@@ -182,22 +278,61 @@ impl Runtime {
         self.pending.lock().unwrap().remove(&request_id);
         result
     }
+
+    /// Ends the OMP process. Bounded by [`TERMINATE_GRACE`]: termination is owned by [`Process`],
+    /// so it works even while a write is blocked or a client has stopped draining events.
     pub async fn stop(&self) {
         let _ = self.stop.send(true);
-        let mut exited = self.exited.clone();
-        while !*exited.borrow() {
-            if exited.changed().await.is_err() {
-                break;
-            }
-        }
+        let process = self.process.clone();
+        let _ = tokio::task::spawn_blocking(move || process.terminate(TERMINATE_GRACE)).await;
     }
+
     pub fn alive(&self) -> bool {
         !*self.exited.borrow()
     }
 }
+
+impl Drop for Runtime {
+    /// Takes the place of tokio's `kill_on_drop`: the last handle must not leave an orphaned OMP.
+    fn drop(&mut self) {
+        let _ = self.stop.send(true);
+        self.process.terminate(Duration::ZERO);
+    }
+}
+
+/// Reads one NDJSON frame without ever buffering more than `MAX_LINE + 1` bytes, so a line that
+/// never ends fails the transport instead of growing until the Gateway runs out of memory.
+fn read_frame<R: BufRead>(source: &mut R, frame: &mut Vec<u8>) -> std::io::Result<usize> {
+    let mut bounded = std::io::Read::take(&mut *source, (MAX_LINE + 1) as u64);
+    bounded.read_until(b'\n', frame)
+}
+
+async fn write_frame(
+    pipe: &Arc<Mutex<Option<Box<dyn Write + Send>>>>,
+    value: Value,
+) -> Result<()> {
+    let mut bytes = serde_json::to_vec(&value)?;
+    ensure!(bytes.len() < MAX_LINE, "OMP frame too large");
+    bytes.push(b'\n');
+    let pipe = pipe.clone();
+    let write = tokio::task::spawn_blocking(move || -> Result<()> {
+        let mut guard = pipe.lock().unwrap();
+        let stream = guard.as_mut().context("OMP stdin is closed")?;
+        stream.write_all(&bytes)?;
+        stream.flush()?;
+        Ok(())
+    });
+    match tokio::time::timeout(WRITE_TIMEOUT, write).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(join)) => Err(join).context("OMP write task failed"),
+        Err(_) => bail!("OMP write timed out after {WRITE_TIMEOUT:?}"),
+    }
+}
+
 pub fn string<'a>(frame: &'a Value, key: &str) -> &'a str {
     frame.get(key).and_then(Value::as_str).unwrap_or("")
 }
+
 pub fn text_content(message: &Value) -> String {
     message["content"]
         .as_array()

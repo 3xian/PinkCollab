@@ -9,6 +9,8 @@ enum class ActivityStage { Explore, Change, Execute }
 
 enum class ActivityStatus { Running, Succeeded, Failed }
 
+enum class ActivityDetailKind { Diff, Content, Changes, Error }
+
 sealed interface SessionDisplayItem {
     val id: String
 
@@ -26,6 +28,7 @@ sealed interface SessionDisplayItem {
         val status: ActivityStatus,
         val summary: String,
         val details: String,
+        val detailKind: ActivityDetailKind?,
     ) : SessionDisplayItem
 
     data class Error(
@@ -61,14 +64,14 @@ fun projectSessionTimeline(
 
     timeline.forEachIndexed { index, item ->
         if (item.kind == "tool") {
-            val trace = item.tool ?: legacyTrace(item)
+            val trace = item.tool
             val stage = trace?.let(::activityStage)
             if (trace != null && stage != null) {
                 if (group?.stage != stage) {
                     flushGroup()
                     group = MutableActivityGroup(stage, "activity:${item.id}:$index")
                 }
-                group?.add(trace, item.detail)
+                group?.add(trace)
             } else if (trace?.isError == true || item.text.contains("failed", ignoreCase = true)) {
                 flushGroup()
                 output += SessionDisplayItem.Error(
@@ -103,43 +106,44 @@ private class MutableActivityGroup(
     private val id: String,
 ) {
     private val traces = mutableListOf<ToolTrace>()
-    private val rawDetails = mutableListOf<String>()
 
-    fun add(trace: ToolTrace, legacyDetail: String) {
+    fun add(trace: ToolTrace) {
         traces += trace
-        val detail = if (stage == ActivityStage.Change) {
-            changeDiff(trace).ifBlank { legacyDetail }
-        } else {
-            buildList {
-                if (trace.arguments.isNotBlank() && trace.arguments != "null") add(trace.arguments)
-                if (trace.result.isNotBlank()) add(trace.result)
-                if (isEmpty() && legacyDetail.isNotBlank()) add(legacyDetail)
-            }.joinToString("\n")
-        }
-        if (detail.isNotBlank()) rawDetails += detail
     }
 
     fun build(): SessionDisplayItem.ActivityGroup {
-        val files = if (stage == ActivityStage.Change) {
-            traces.flatMap { extractFiles(it.arguments + "\n" + it.result) }.distinct()
+        // Change groups scan each trace once: the same result feeds the file list and the details.
+        val scanned = if (stage == ActivityStage.Change) {
+            traces.map { trace -> trace to extractFiles(trace) }
         } else {
             emptyList()
         }
-        val failed = traces.any { it.isError }
-        val complete = traces.all { it.completed }
+        val files = scanned.flatMap { it.second }.distinct()
+        val failed = traces.any(ToolTrace::isError)
         val status = when {
             failed -> ActivityStatus.Failed
-            complete -> ActivityStatus.Succeeded
+            traces.all(ToolTrace::completed) -> ActivityStatus.Succeeded
             else -> ActivityStatus.Running
         }
         val summary = when (stage) {
             ActivityStage.Explore -> ""
             ActivityStage.Change -> files.joinToString(" · ")
-            ActivityStage.Execute -> traces.asReversed()
+            ActivityStage.Execute -> (if (failed) traces.filter(ToolTrace::isError) else traces).asReversed()
                 .asSequence()
                 .map { conciseResult(it.result) }
                 .firstOrNull { it.isNotBlank() }
                 .orEmpty()
+        }
+        // One decision: a group carries details exactly when it has a detail kind, and the card only
+        // offers the expander when it does.
+        val details = when {
+            stage == ActivityStage.Change -> changeDetails(scanned)
+            stage == ActivityStage.Execute && failed -> traces
+                .filter(ToolTrace::isError)
+                .joinToString("\n\n", transform = ::failureDetails)
+                .takeIf(String::isNotBlank)
+                ?.let { GroupDetails(it, ActivityDetailKind.Error) }
+            else -> null
         }
         return SessionDisplayItem.ActivityGroup(
             id = id,
@@ -148,10 +152,13 @@ private class MutableActivityGroup(
             files = files,
             status = status,
             summary = summary,
-            details = rawDetails.joinToString("\n\n"),
+            details = details?.text.orEmpty(),
+            detailKind = details?.kind,
         )
     }
 }
+
+private data class GroupDetails(val text: String, val kind: ActivityDetailKind)
 
 private fun activityStage(trace: ToolTrace): ActivityStage? {
     val name = trace.name.lowercase().substringAfterLast('.').substringAfterLast('/')
@@ -166,74 +173,63 @@ private fun activityStage(trace: ToolTrace): ActivityStage? {
     }
 }
 
-private fun legacyTrace(item: TimelineItem): ToolTrace? {
-    val name = item.text.substringAfterLast('·', "").trim()
-    if (name.isBlank()) return null
-    return ToolTrace(
-        callId = item.id,
-        name = name,
-        arguments = if (item.text.startsWith("Finished") || item.text.startsWith("Tool failed")) "" else item.detail,
-        result = if (item.text.startsWith("Finished") || item.text.startsWith("Tool failed")) item.detail else "",
-        isError = item.text.startsWith("Tool failed"),
-        completed = item.text.startsWith("Finished") || item.text.startsWith("Tool failed"),
+private val patchPath = Regex("""(?m)^(?:\+\+\+\s+b/|---\s+a/|\*\*\* (?:Update|Add|Delete) File:\s*)([^\r\n]+)""")
+
+private fun extractFiles(trace: ToolTrace): List<String> {
+    val arguments = trace.arguments
+    val direct = listOf("path", "file", "filePath", "file_path", "filename")
+        .mapNotNull(arguments.strings::get)
+    val listed = listOf("files", "paths").flatMap { arguments.stringLists[it].orEmpty() }
+    val patches = listOfNotNull(
+        arguments.strings["patch"],
+        arguments.strings["diff"],
+        trace.result,
+    ).flatMap { value -> patchPath.findAll(value).map { it.groupValues[1] }.toList() }
+    return (direct + listed + patches)
+        .map { it.trim().removeSurrounding("\"") }
+        .filter { it.isNotBlank() && it != "/dev/null" && "://" !in it }
+}
+
+private data class ChangeDetails(val text: String, val kind: ActivityDetailKind)
+
+private fun changeDetails(scanned: List<Pair<ToolTrace, List<String>>>): GroupDetails? {
+    val entries = scanned.mapNotNull { (trace, paths) -> changeDetail(trace, paths) }
+    if (entries.isEmpty()) return null
+    return GroupDetails(
+        entries.joinToString("\n\n") { it.text },
+        entries.map(ChangeDetails::kind).distinct().singleOrNull() ?: ActivityDetailKind.Changes,
     )
 }
 
-private val patchPath = Regex("""(?m)^(?:\+\+\+\s+b/|---\s+a/|\*\*\* (?:Update|Add|Delete) File:\s*)([^\r\n]+)""")
-
-private fun extractFiles(value: String): List<String> =
-    (listOf("path", "file", "filePath", "file_path", "filename").mapNotNull { jsonString(value, it) } +
-        patchPath.findAll(value).map { it.groupValues[1] })
-        .map { it.trim().removeSurrounding("\"") }
-        .filter { it.isNotBlank() && it != "/dev/null" && "://" !in it }
-        .toList()
-
-private fun changeDiff(trace: ToolTrace): String {
+private fun changeDetail(trace: ToolTrace, paths: List<String>): ChangeDetails? {
     val arguments = trace.arguments
-    val explicit = jsonString(arguments, "patch") ?: jsonString(arguments, "diff")
-    if (!explicit.isNullOrBlank()) return explicit
-    val path = extractFiles(arguments).firstOrNull() ?: return trace.result
-    val old = jsonString(arguments, "old_string") ?: jsonString(arguments, "old")
-    val new = jsonString(arguments, "new_string") ?: jsonString(arguments, "new")
-        ?: jsonString(arguments, "content")
-    if (old == null && new == null) return trace.result
-    return buildString {
-        appendLine("--- a/$path")
-        appendLine("+++ b/$path")
-        appendLine("@@")
-        old?.lineSequence()?.forEach { appendLine("-$it") }
-        new?.lineSequence()?.forEach { appendLine("+$it") }
-    }.trimEnd()
+    val path = paths.firstOrNull()
+    val old = arguments.strings["old_string"] ?: arguments.strings["old"]
+    val new = arguments.strings["new_string"] ?: arguments.strings["new"]
+    val content = arguments.strings["content"]
+    val patch = arguments.strings["patch"] ?: arguments.strings["diff"]
+    val detail = when {
+        !patch.isNullOrBlank() -> ChangeDetails(patch, ActivityDetailKind.Diff)
+        path != null && old != null && new != null -> ChangeDetails(fileDiff(path, old, new), ActivityDetailKind.Diff)
+        content != null -> ChangeDetails(listOfNotNull(path, content).joinToString("\n\n"), ActivityDetailKind.Content)
+        else -> ChangeDetails(trace.result, ActivityDetailKind.Changes)
+    }
+    // Blank details would leave a detail kind without anything to expand, so they collapse to null.
+    return detail.takeIf { it.text.isNotBlank() }
 }
 
-private fun jsonString(value: String, key: String): String? {
-    val match = Regex("""\"${Regex.escape(key)}\"\s*:\s*\"((?:\\.|[^\"\\])*)\"""").find(value)
-        ?: return null
-    val escaped = match.groupValues[1]
-    return buildString {
-        var index = 0
-        while (index < escaped.length) {
-            val char = escaped[index++]
-            if (char != '\\' || index >= escaped.length) {
-                append(char)
-                continue
-            }
-            when (val next = escaped[index++]) {
-                'n' -> append('\n')
-                'r' -> append('\r')
-                't' -> append('\t')
-                'b' -> append('\b')
-                'f' -> append('\u000c')
-                'u' -> {
-                    val hex = escaped.substring(index, (index + 4).coerceAtMost(escaped.length))
-                    hex.toIntOrNull(16)?.let { append(it.toChar()) } ?: append("\\u$hex")
-                    index = (index + 4).coerceAtMost(escaped.length)
-                }
-                else -> append(next)
-            }
-        }
-    }
-}
+private fun fileDiff(path: String, old: String, new: String): String = buildString {
+    appendLine("--- a/$path")
+    appendLine("+++ b/$path")
+    appendLine("@@")
+    old.lineSequence().forEach { appendLine("-$it") }
+    new.lineSequence().forEach { appendLine("+$it") }
+}.trimEnd()
+
+private fun failureDetails(trace: ToolTrace): String = buildList {
+    if (trace.arguments.raw.isNotBlank()) add(trace.arguments.raw)
+    if (trace.result.isNotBlank()) add(trace.result)
+}.joinToString("\n")
 
 private fun conciseResult(value: String): String = value
     .lineSequence()

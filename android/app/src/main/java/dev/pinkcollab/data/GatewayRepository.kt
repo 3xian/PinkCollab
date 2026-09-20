@@ -98,7 +98,9 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                 val id = payload.getString("sessionId"); val item = payload.getJSONObject("item").item()
                 mutable.update { app ->
                     val d = app.details[id] ?: return@update app
-                    app.copy(details = app.details + (id to d.copy(timeline = mergeTimeline(listOf(item), d.timeline), streaming = if (item.kind == "assistant") "" else d.streaming)))
+                    // The event is the newest state for its id, so it wins a timestamp tie.
+                    val merged = mergeTimeline(listOf(item), d.timeline)
+                    app.copy(details = app.details + (id to d.copy(timeline = merged, streaming = if (item.kind == "assistant") "" else d.streaming)))
                 }
             }
             "message.delta" -> {
@@ -140,6 +142,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         mutable.update { app ->
             val old = app.details[id]
             val current = app.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
+            // The fresh snapshot is authoritative for a read; the cached list only fills its gaps.
             val merged = mergeTimeline(timeline, old?.timeline.orEmpty())
             val latest = if (current != null && compareTimestamps(current.updatedAt, s.updatedAt) > 0) current else s
             app.copy(details = app.details + (id to SessionDetail(latest, merged, if (latest.status in listOf("completed", "failed", "stopped", "idle", "offline")) "" else old?.streaming.orEmpty(), raw.optJSONObject("model")?.modelInfo())))

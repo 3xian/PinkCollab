@@ -8,7 +8,39 @@ data class PairedHost(val host: Host, val url: String, val credential: String, v
 data class Attention(val id: String, val type: String, val text: String, val options: List<String>)
 data class ModelInfo(val provider: String, val id: String, val name: String)
 data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean)
-data class ToolTrace(val callId: String, val name: String, val arguments: String, val result: String, val isError: Boolean, val completed: Boolean)
+data class ToolArguments(
+    val raw: String = "",
+    val strings: Map<String, String> = emptyMap(),
+    val stringLists: Map<String, List<String>> = emptyMap(),
+) {
+    companion object {
+        fun from(json: JSONObject): ToolArguments {
+            val strings = mutableMapOf<String, String>()
+            val stringLists = mutableMapOf<String, List<String>>()
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                when (val value = json.opt(key)) {
+                    is String -> strings[key] = value
+                    // Entries that are not strings stay reachable through `raw`; keeping whatever
+                    // strings an array does hold stops `{"files":["a",{"path":"b"}]}` from losing
+                    // the file it names.
+                    is JSONArray -> stringLists[key] = (0 until value.length()).mapNotNull { value.opt(it) as? String }
+                }
+            }
+            return ToolArguments(json.toString(), strings, stringLists)
+        }
+
+        /**
+         * `arguments` is a JSON object on the wire. A string holding the same JSON is accepted too,
+         * so this parsing detail stays here instead of leaking into the UI; anything that is not a
+         * JSON object (absent, `null`, malformed) means the call carried no arguments.
+         */
+        fun parse(raw: String): ToolArguments =
+            runCatching { from(JSONObject(raw)) }.getOrElse { ToolArguments() }
+    }
+}
+data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean)
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
 data class SessionDetail(val session: Session, val timeline: List<TimelineItem>, val streaming: String = "", val model: ModelInfo? = null)
 data class Workspace(val name: String, val path: String)
@@ -24,10 +56,15 @@ fun JSONObject.session(): Session {
 }
 fun JSONObject.item(): TimelineItem {
     val tool = optJSONObject("tool")?.let {
+        val arguments = when (val value = it.opt("arguments")) {
+            is JSONObject -> ToolArguments.from(value)
+            is String -> ToolArguments.parse(value)
+            else -> ToolArguments()
+        }
         ToolTrace(
             callId = it.optString("callId", getString("id")),
             name = it.optString("name"),
-            arguments = it.optString("arguments"),
+            arguments = arguments,
             result = it.optString("result"),
             isError = it.optBoolean("isError"),
             completed = it.optBoolean("completed"),

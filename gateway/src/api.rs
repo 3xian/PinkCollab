@@ -36,8 +36,13 @@ impl IntoResponse for ApiError {
         (self.0, Json(json!({"error":self.1}))).into_response()
     }
 }
+/// `Display` on an anyhow error stops at the outermost context; `{:#}` keeps the whole chain, so
+/// every API error that wraps one goes through here.
+fn reason(error: &anyhow::Error) -> String {
+    format!("{error:#}")
+}
 fn invalid(e: anyhow::Error) -> ApiError {
-    ApiError(StatusCode::CONFLICT, e.to_string())
+    ApiError(StatusCode::CONFLICT, reason(&e))
 }
 pub fn router(app: App) -> Router {
     let protected = Router::new()
@@ -142,7 +147,7 @@ async fn list(State(app): State<App>, Query(query): Query<ListQuery>) -> ApiResu
         .browser
         .list(FsPath::new(&query.path))
         .await
-        .map_err(|e| ApiError(StatusCode::FORBIDDEN, e.to_string()))?;
+        .map_err(|e| ApiError(StatusCode::FORBIDDEN, reason(&e)))?;
     Ok(Json(json!(listing)))
 }
 async fn sessions(State(app): State<App>) -> Json<Value> {
@@ -153,7 +158,7 @@ async fn detail(State(app): State<App>, Path(id): Path<String>) -> ApiResult {
         .registry
         .detail(&id)
         .await
-        .map_err(|e| ApiError(StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|e| ApiError(StatusCode::NOT_FOUND, reason(&e)))?;
     Ok(Json(json!(detail)))
 }
 #[derive(Deserialize)]
@@ -173,7 +178,7 @@ async fn create(
         .registry
         .create(body.host_id, body.cwd, body.prompt, body.title)
         .await
-        .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
+        .map_err(|e| ApiError(StatusCode::UNPROCESSABLE_ENTITY, reason(&e)))?;
     Ok((StatusCode::CREATED, Json(json!(s))))
 }
 async fn delete(State(app): State<App>, Path(id): Path<String>) -> Result<StatusCode, ApiError> {
