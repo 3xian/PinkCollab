@@ -2,7 +2,7 @@
     <style name="Theme.PinkCollab" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:colorAccent">#FF4D8D</item>
-        <item name="android:windowBackground">#07050A</item>
+        <item name="android:colorAccent">#9B6CFF</item>
+        <item name="android:windowBackground">#050408</item>
     </style>
 </resources>

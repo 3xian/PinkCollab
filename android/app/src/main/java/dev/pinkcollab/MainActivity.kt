@@ -11,7 +11,7 @@ import dev.pinkcollab.ui.PinkCollabApp
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The UI is dark-only (black + pink), so system bars always get light icons.
+        // The UI is dark-only (black + purple), so system bars always get light icons.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),

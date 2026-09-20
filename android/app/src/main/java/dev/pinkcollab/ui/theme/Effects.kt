@@ -39,27 +39,27 @@ import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 
-/** Brand gradient: hot pink → violet, used for buttons, borders and glows. */
-val PinkVioletBrush = Brush.linearGradient(listOf(Pink400, Violet400))
+/** Brand gradient: bright purple → deep violet, used for buttons, borders and glows. */
+val PrimaryGradientBrush = Brush.linearGradient(listOf(Purple400, Violet400))
 
 /** Real backdrop-blur style for the chrome bars (top bar / bottom navigation). */
 val GlassBarStyle = HazeStyle(
     backgroundColor = Base0,
-    tints = listOf(HazeTint(Color(0xFF120C16).copy(alpha = 0.62f)), HazeTint(Pink400.copy(alpha = 0.05f))),
+    tints = listOf(HazeTint(Color(0xFF100B18).copy(alpha = 0.62f)), HazeTint(Purple400.copy(alpha = 0.06f))),
     blurRadius = 24.dp,
     noiseFactor = 0.02f,
-    fallbackTint = HazeTint(Color(0xFF120C16).copy(alpha = 0.86f)),
+    fallbackTint = HazeTint(Color(0xFF100B18).copy(alpha = 0.86f)),
 )
 
-/** Full-bleed near-black canvas with pink/violet glow orbs; the blur source for all glass. */
+/** Full-bleed near-black canvas with layered purple glow orbs. */
 @Composable
 fun GlowBackground(state: HazeState, modifier: Modifier = Modifier) {
     Canvas(modifier.hazeSource(state)) {
         drawRect(Base0)
-        // top-left hot pink bloom
+        // top-left electric-purple bloom
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Pink400.copy(alpha = 0.20f), Color.Transparent),
+                colors = listOf(Purple400.copy(alpha = 0.19f), Color.Transparent),
                 center = Offset(size.width * 0.12f, -size.height * 0.08f),
                 radius = size.minDimension * 1.05f,
             ),
@@ -72,10 +72,10 @@ fun GlowBackground(state: HazeState, modifier: Modifier = Modifier) {
                 radius = size.minDimension * 0.95f,
             ),
         )
-        // faint pink floor glow at the bottom center
+        // faint deep-purple floor glow at the bottom center
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Pink700.copy(alpha = 0.22f), Color.Transparent),
+                colors = listOf(Purple700.copy(alpha = 0.24f), Color.Transparent),
                 center = Offset(size.width * 0.5f, size.height * 1.12f),
                 radius = size.width * 0.85f,
             ),
@@ -83,12 +83,12 @@ fun GlowBackground(state: HazeState, modifier: Modifier = Modifier) {
     }
 }
 
-/** Pink→violet hairline: white edges read as grey against the near-black base. */
+/** Purple→violet hairline: white edges read as grey against the near-black base. */
 private fun edgeBrush(alpha: Float): Brush =
-    Brush.linearGradient(listOf(Pink200.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.35f)))
+    Brush.linearGradient(listOf(Purple200.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.42f)))
 
 /**
- * Frosted-glass panel: translucent gradient fill plus a pink→violet hairline border.
+ * Frosted-glass panel: translucent gradient fill plus a purple→violet hairline border.
  * Drawn over [GlowBackground] it reads as glass without paying per-node blur cost,
  * which keeps long scrolling lists smooth.
  *
@@ -101,12 +101,12 @@ fun Modifier.glassPanel(
     borderAlpha: Float = 0.14f,
     borderBrush: Brush? = null,
 ): Modifier = background(
-    Brush.linearGradient(listOf(Pink200.copy(alpha = fillAlpha * 0.9f), Color.White.copy(alpha = fillAlpha * 0.45f))),
+    Brush.linearGradient(listOf(Purple200.copy(alpha = fillAlpha * 0.8f), Color.White.copy(alpha = fillAlpha * 0.35f))),
     shape,
 ).border(1.2.dp, borderBrush ?: edgeBrush(borderAlpha), shape)
 
 /** Solid-color backdrop with the brand gradient and rounded corners (buttons, FABs). */
-fun Modifier.gradientFill(shape: Shape, brush: Brush = PinkVioletBrush, radius: Dp = 16.dp): Modifier =
+fun Modifier.gradientFill(shape: Shape, brush: Brush = PrimaryGradientBrush, radius: Dp = 16.dp): Modifier =
     background(brush, shape)
 
 @Composable
@@ -121,13 +121,13 @@ private fun rememberPulseAlpha(): Float {
     return alpha
 }
 
-/** Card border that breathes: a pink→violet gradient outline with pulsing alpha. */
+/** Card border that breathes: a purple→violet gradient outline with pulsing alpha. */
 @Composable
 fun Modifier.pulsingGlowBorder(shape: Shape, width: Dp = 1.5.dp): Modifier {
     val alpha = rememberPulseAlpha()
     return border(
         width,
-        Brush.linearGradient(listOf(Pink400.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.75f))),
+        Brush.linearGradient(listOf(Purple400.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.75f))),
         shape,
     )
 }
@@ -182,7 +182,7 @@ fun GradientButton(
         ),
         modifier = modifier.drawBehind {
             val brush = if (enabled) {
-                PinkVioletBrush
+                PrimaryGradientBrush
             } else {
                 Brush.linearGradient(listOf(Gray400.copy(alpha = 0.25f), Gray400.copy(alpha = 0.15f)))
             }

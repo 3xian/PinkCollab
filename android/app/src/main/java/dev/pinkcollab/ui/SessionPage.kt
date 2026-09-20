@@ -52,7 +52,7 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
                     StatusChip(session.status)
                     if (host?.connected != true) Text(activity, color = statusColor("failed"), style = MaterialTheme.typography.labelMedium)
                 }
-                TextButton(onClick = { displayMode = if (displayMode == SessionDisplayMode.Concise) SessionDisplayMode.Debug else SessionDisplayMode.Concise }, colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) {
+                TextButton(onClick = { displayMode = if (displayMode == SessionDisplayMode.Concise) SessionDisplayMode.Debug else SessionDisplayMode.Concise }, colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) {
                     Text(if (displayMode == SessionDisplayMode.Concise) "Debug" else "Concise")
                 }
                 val model = detail.model?.takeIf { attached && displayMode == SessionDisplayMode.Debug }
@@ -70,9 +70,9 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
             if (detail.streaming.isNotBlank()) item {
                 Card(Modifier.fillMaxWidth().glassPanel(CardShape, fillAlpha = 0.09f), shape = CardShape, colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        GlowDot(Pink400, pulse = true)
+                        GlowDot(Purple400, pulse = true)
                         Spacer(Modifier.width(10.dp))
-                        Column { Text("OMP · replying", style = MaterialTheme.typography.labelMedium, color = Pink200); Spacer(Modifier.height(4.dp)); Text(detail.streaming, style = MaterialTheme.typography.bodyMedium) }
+                        Column { Text("OMP · replying", style = MaterialTheme.typography.labelMedium, color = Purple200); Spacer(Modifier.height(4.dp)); Text(detail.streaming, style = MaterialTheme.typography.bodyMedium) }
                     }
                 }
             }
@@ -80,7 +80,7 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
         }
         HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
         Column(Modifier.fillMaxWidth().padding(12.dp).glassPanel(CardShape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(prompt, { prompt = it }, placeholder = { Text(if (session.status == "running") "Steer OMP…" else "Send another prompt…") }, modifier = Modifier.fillMaxWidth(), maxLines = 4, enabled = attached && !loading && session.attention == null, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Pink400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Pink400))
+            OutlinedTextField(prompt, { prompt = it }, placeholder = { Text(if (session.status == "running") "Steer OMP…" else "Send another prompt…") }, modifier = Modifier.fillMaxWidth(), maxLines = 4, enabled = attached && !loading && session.attention == null, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Purple400))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Row { TextButton(onClick = { onCommand("interrupt") }, enabled = attached && !loading && session.status in listOf("running", "needs_input"), colors = ButtonDefaults.textButtonColors(contentColor = Violet400)) { Text("Interrupt") }; TextButton(onClick = { onCommand("stop") }, enabled = attached && !loading, colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text("Stop") } }
                 GradientButton(onClick = { onPrompt(prompt) { prompt = "" } }, enabled = prompt.isNotBlank() && attached && !loading && session.attention == null) { Text(if (session.status == "running") "Steer" else "Send") }
@@ -111,7 +111,7 @@ private fun MessageCard(item: SessionDisplayItem.Message) {
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (isUser) "You" else "Assistant", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = if (isUser) Pink200 else Violet400)
+            Text(if (isUser) "You" else "Assistant", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = if (isUser) Purple200 else Violet400)
             Text(item.text, style = MaterialTheme.typography.bodyLarge)
         }
     }
@@ -153,7 +153,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
             )
             if (group.summary.isNotBlank()) Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid)
             if (detailKind != null) {
-                TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) {
+                TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) {
                     Text(if (expanded) "Collapse" else detailKind.action)
                 }
                 if (expanded) Text(group.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
@@ -211,9 +211,9 @@ private fun RawTimelineCard(item: TimelineItem) {
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Pink200; "error" -> Red400; else -> Violet400 })
+            Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Purple200; "error" -> Red400; else -> Violet400 })
             Text(item.text, style = if (isDetail) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge)
-            if (isDetail && detail.isNotBlank()) { TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
+            if (isDetail && detail.isNotBlank()) { TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
         }
     }
 }
@@ -232,15 +232,15 @@ private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSON
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                GlowDot(Pink400, pulse = true)
+                GlowDot(Purple400, pulse = true)
                 Spacer(Modifier.width(8.dp))
-                Text("OMP needs your reply", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Pink200)
+                Text("OMP needs your reply", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Purple200)
             }
             Text(attention.text)
             when (attention.type) {
                 "select" -> attention.options.forEach { option -> GradientButton(onClick = { respond(response().put("value", option)) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(option) } }
                 "confirm" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { GradientButton(onClick = { respond(response().put("confirmed", true)) }, enabled = enabled) { Text("Confirm") }; OutlinedButton(onClick = { respond(response().put("confirmed", false)) }, enabled = enabled, colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMid)) { Text("Decline") } }
-                else -> { OutlinedTextField(answer, { answer = it }, label = { Text("Your answer") }, minLines = if (attention.type == "editor") 4 else 1, modifier = Modifier.fillMaxWidth(), enabled = enabled, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Pink400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Pink400)); GradientButton(onClick = { respond(response().put("value", answer)) }, enabled = enabled) { Text("Submit") } }
+                else -> { OutlinedTextField(answer, { answer = it }, label = { Text("Your answer") }, minLines = if (attention.type == "editor") 4 else 1, modifier = Modifier.fillMaxWidth(), enabled = enabled, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Purple400)); GradientButton(onClick = { respond(response().put("value", answer)) }, enabled = enabled) { Text("Submit") } }
             }
             TextButton(onClick = { respond(response().put("cancelled", true)) }, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = TextMid)) { Text("Cancel") }
         }

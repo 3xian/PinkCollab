@@ -2,7 +2,7 @@ package dev.pinkcollab.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -42,7 +42,6 @@ import org.json.JSONObject
 private val CardShape = RoundedCornerShape(20.dp)
 private val PillShape = RoundedCornerShape(999.dp)
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val repo = vm.repository
@@ -83,38 +82,28 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
             GlowBackground(hazeState, Modifier.matchParentSize())
             Scaffold(
                 containerColor = Color.Transparent,
-                // Insets are handled explicitly: the top bar owns the status bar, the floating
-                // pill owns the navigation bar, and pages without the pill pad themselves below.
+                // Content draws edge-to-edge. Navigation is an overlay so the background and
+                // scrolling timeline continue behind it instead of stopping above the pill.
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                topBar = {
-                    Box(Modifier.fillMaxWidth().hazeEffect(hazeState) { style = GlassBarStyle }) {
-                        TopAppBar(
-                            title = { Column { Text(when (page) { "tasks" -> "Tasks"; "workspaces" -> "Workspaces"; "hosts" -> "Hosts"; "session" -> "Task"; "browser" -> "Choose directory"; "create" -> "New task"; "pair" -> "Connect host"; else -> "PinkCollab" }); if (!secondary) Text("PinkCollab · remote OMP control", style = MaterialTheme.typography.labelSmall, color = Pink200) } },
-                            navigationIcon = { if (secondary) IconButton(onClick = { back() }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } },
-                            actions = { if (!secondary) IconButton(onClick = { pairToken = ""; page = "pair" }) { Icon(Icons.Outlined.AddLink, "Connect host") } },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent),
-                        )
-                    }
-                },
-                bottomBar = {
-                    if (!secondary) FloatingPillNav(
-                        hazeState = hazeState,
-                        current = page,
-                        onSelect = { key -> page = key; rootPage = key },
+                snackbarHost = {
+                    SnackbarHost(
+                        snackbar,
+                        Modifier.then(
+                            if (secondary) Modifier.navigationBarsPadding()
+                            else Modifier.navigationBarsPadding().padding(bottom = 84.dp),
+                        ),
                     )
                 },
-                floatingActionButton = {
-                    if (page == "tasks" && app.hosts.isNotEmpty()) GlowFab(onClick = { page = "workspaces"; rootPage = "workspaces" })
-                },
-                snackbarHost = { SnackbarHost(snackbar) },
             ) { padding ->
                 Column(
                     Modifier
                         .fillMaxSize()
                         .padding(padding)
+                        .statusBarsPadding()
+                        .padding(top = if (secondary) 56.dp else 0.dp)
                         .then(if (secondary) Modifier.navigationBarsPadding() else Modifier),
                 ) {
-                    if (app.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), color = Pink400, trackColor = Pink700.copy(alpha = 0.30f))
+                    if (app.loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), color = Purple400, trackColor = Purple700.copy(alpha = 0.30f))
                     when (page) {
                         "tasks" -> TasksPage(app, ::openSession, { page = "pair" }, { vm.run { app.hosts.keys.forEach { repo.refreshHost(it) } } })
                         "hosts" -> HostsPage(app, { page = "pair" }, { id -> vm.run { repo.refreshHost(id) } }, { id -> vm.run { repo.forget(id) } }, ::openSession)
@@ -133,53 +122,84 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                     }
                 }
             }
+            if (secondary) {
+                IconButton(
+                    onClick = { back() },
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(start = 12.dp, top = 4.dp)
+                        .glassPanel(CircleShape, fillAlpha = 0.10f, borderAlpha = 0.16f),
+                ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", tint = Purple200) }
+            } else {
+                FloatingPillNav(
+                    hazeState = hazeState,
+                    current = page,
+                    onSelect = { key -> page = key; rootPage = key },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+                if (page == "tasks" && app.hosts.isNotEmpty()) {
+                    GlowFab(
+                        onClick = { page = "workspaces"; rootPage = "workspaces" },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .navigationBarsPadding()
+                            .padding(end = 22.dp, bottom = 88.dp),
+                    )
+                }
+            }
         }
     }
 }
 
-/** FAB with a pink halo: gradient disc over a soft radial glow. */
+/** FAB with a purple halo, placed immediately above the floating navigation. */
 @Composable
-private fun GlowFab(onClick: () -> Unit) {
+private fun GlowFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        Modifier
-            .navigationBarsPadding()
-            .padding(start = 14.dp, end = 14.dp, bottom = 104.dp)
+        modifier
             .size(74.dp)
             .drawBehind {
-                drawCircle(Brush.radialGradient(listOf(Pink400.copy(alpha = 0.38f), Color.Transparent), center = Offset(size.width / 2f, size.height / 2f)))
+                drawCircle(Brush.radialGradient(listOf(Purple400.copy(alpha = 0.38f), Color.Transparent), center = Offset(size.width / 2f, size.height / 2f)))
             },
         contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
                 .size(56.dp)
-                .background(PinkVioletBrush, CircleShape)
+                .background(PrimaryGradientBrush, CircleShape)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Outlined.Add, "New task", tint = Color(0xFF1A020C)) }
+        ) { Icon(Icons.Outlined.Add, "New task", tint = Color(0xFF10051F)) }
     }
 }
 
-/** Floating capsule navigation: selected entry expands to show its label. */
+/** Floating capsule navigation with a fixed-width indicator that slides between tabs. */
 @Composable
-private fun FloatingPillNav(hazeState: HazeState, current: String, onSelect: (String) -> Unit) {
+private fun FloatingPillNav(
+    hazeState: HazeState,
+    current: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val items = listOf(
         Triple("tasks", "Tasks", Icons.Outlined.TaskAlt),
         Triple("workspaces", "Workspaces", Icons.Outlined.FolderOpen),
         Triple("hosts", "Hosts", Icons.Outlined.Dns),
     )
+    val selectedIndex = items.indexOfFirst { it.first == current }.coerceAtLeast(0)
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 26.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Row(
+        BoxWithConstraints(
             Modifier
+                .fillMaxWidth()
+                .height(60.dp)
                 .drawBehind {
                     drawRoundRect(
-                        brush = Brush.radialGradient(listOf(Pink400.copy(alpha = 0.30f), Color.Transparent)),
+                        brush = Brush.radialGradient(listOf(Purple400.copy(alpha = 0.30f), Color.Transparent)),
                         topLeft = Offset(-40f, -14f),
                         size = Size(size.width + 80f, size.height + 28f),
                         cornerRadius = CornerRadius(40f, 40f),
@@ -187,26 +207,38 @@ private fun FloatingPillNav(hazeState: HazeState, current: String, onSelect: (St
                 }
                 .clip(PillShape)
                 .hazeEffect(hazeState) { style = GlassBarStyle }
-                .glassPanel(PillShape, fillAlpha = 0.11f, borderAlpha = 0.22f)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                .glassPanel(PillShape, fillAlpha = 0.11f, borderAlpha = 0.22f),
         ) {
-            items.forEach { (key, title, icon) ->
-                val selected = current == key
-                Row(
-                    Modifier
-                        .animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
-                        .clip(PillShape)
-                        .then(if (selected) Modifier.background(PinkVioletBrush, PillShape) else Modifier)
-                        .clickable { onSelect(key) }
-                        .padding(horizontal = if (selected) 16.dp else 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(icon, title, Modifier.size(22.dp), tint = if (selected) Color(0xFF1A020C) else Gray400)
-                    if (selected) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(title, color = Color(0xFF1A020C), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            val tabWidth = (maxWidth - 12.dp) / items.size
+            val indicatorX by animateDpAsState(
+                targetValue = 6.dp + tabWidth * selectedIndex,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "tabIndicatorX",
+            )
+            Box(
+                Modifier
+                    .offset(x = indicatorX, y = 6.dp)
+                    .width(tabWidth)
+                    .height(48.dp)
+                    .background(PrimaryGradientBrush, PillShape),
+            )
+            Row(Modifier.fillMaxSize().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                items.forEach { (key, title, icon) ->
+                    val selected = current == key
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(PillShape)
+                            .clickable { onSelect(key) },
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(icon, title, Modifier.size(22.dp), tint = if (selected) Color(0xFF10051F) else Gray400)
+                        if (selected) {
+                            Spacer(Modifier.width(7.dp))
+                            Text(title, color = Color(0xFF10051F), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        }
                     }
                 }
             }
@@ -221,10 +253,10 @@ private fun EmptyState(title: String, description: String, action: String? = nul
             Modifier
                 .size(96.dp)
                 .drawBehind {
-                    drawCircle(Brush.radialGradient(listOf(Pink400.copy(alpha = 0.30f), Color.Transparent)))
+                    drawCircle(Brush.radialGradient(listOf(Purple400.copy(alpha = 0.30f), Color.Transparent)))
                 },
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Outlined.Hub, null, Modifier.size(52.dp), tint = Pink400) }
+        ) { Icon(Icons.Outlined.Hub, null, Modifier.size(52.dp), tint = Purple400) }
         Spacer(Modifier.height(24.dp)); Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp)); Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
         action?.let { Spacer(Modifier.height(24.dp)); GradientButton(onClick = onAction) { Text(it) } }
@@ -238,16 +270,15 @@ private fun TasksPage(app: AppState, open: (Session) -> Unit, pair: () -> Unit, 
     val attention = sessions.filter { it.needsAttention }
     val running = sessions.filter { !it.needsAttention && it.status in listOf("starting", "running") }
     val recent = sessions.filter { !it.needsAttention && it.status !in listOf("starting", "running") }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("${sessions.size} tasks · ${app.hosts.values.count { it.connected }} online", style = MaterialTheme.typography.labelLarge, color = TextMid); TextButton(onClick = refresh, enabled = !app.loading, colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) { Text("Refresh") } } }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("${sessions.size} tasks · ${app.hosts.values.count { it.connected }} online", style = MaterialTheme.typography.labelLarge, color = TextMid); TextButton(onClick = refresh, enabled = !app.loading, colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text("Refresh") } } }
         if (sessions.isEmpty()) item { Text("No tasks yet. Open Workspaces, pick a directory, and enter your first prompt.", Modifier.padding(vertical = 40.dp), color = TextMid) }
         listOf("Needs attention" to attention, "Running" to running, "Recent" to recent).forEach { (title, group) ->
             if (group.isNotEmpty()) {
-                item { Text(title, style = MaterialTheme.typography.titleMedium, color = if (title == "Needs attention") Pink400 else TextHigh) }
+                item { Text(title, style = MaterialTheme.typography.titleMedium, color = if (title == "Needs attention") Purple400 else TextHigh) }
                 items(group, key = { it.id }) { s -> SessionCard(s, app.hosts[s.hostId], { open(s) }) }
             }
         }
-        item { Spacer(Modifier.height(80.dp)) }
     }
 }
 
@@ -277,7 +308,7 @@ private fun SessionCard(s: Session, host: HostState?, onClick: () -> Unit) {
 @Composable
 private fun HostsPage(app: AppState, pair: () -> Unit, refresh: (String) -> Unit, forget: (String) -> Unit, open: (Session) -> Unit) {
     if (app.hosts.isEmpty()) { EmptyState("No hosts yet", "Every machine running the Gateway pairs on its own.", "Connect host", pair); return }
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    LazyColumn(contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         items(app.hosts.values.toList(), key = { it.paired.host.id }) { h ->
             Card(Modifier.fillMaxWidth().glassPanel(CardShape), shape = CardShape, colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -292,19 +323,19 @@ private fun HostsPage(app: AppState, pair: () -> Unit, refresh: (String) -> Unit
                     Text("${h.paired.host.os} · ${h.sessions.count { it.status in listOf("starting", "running", "needs_input") }} active tasks", color = TextMid)
                     Text(h.paired.url, style = MaterialTheme.typography.bodySmall, color = Gray400)
                     Text("OMP ${h.paired.host.ompVersion} · Gateway ${h.paired.host.gatewayVersion}", style = MaterialTheme.typography.bodySmall, color = Gray400)
-                    h.sessions.filter { it.status in listOf("running", "needs_input", "starting") }.forEach { s -> TextButton(onClick = { open(s) }, colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) { Text(s.title) } }
-                    Row { TextButton(onClick = { refresh(h.paired.host.id) }, enabled = !app.loading, colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) { Text("Refresh") }; TextButton(onClick = { forget(h.paired.host.id) }, enabled = !app.loading, colors = ButtonDefaults.textButtonColors(contentColor = Gray400)) { Text("Remove local pairing") } }
+                    h.sessions.filter { it.status in listOf("running", "needs_input", "starting") }.forEach { s -> TextButton(onClick = { open(s) }, colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text(s.title) } }
+                    Row { TextButton(onClick = { refresh(h.paired.host.id) }, enabled = !app.loading, colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text("Refresh") }; TextButton(onClick = { forget(h.paired.host.id) }, enabled = !app.loading, colors = ButtonDefaults.textButtonColors(contentColor = Gray400)) { Text("Remove local pairing") } }
                 }
             }
         }
-        item { OutlinedButton(onClick = pair, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Pink200)) { Icon(Icons.Outlined.AddLink, null); Spacer(Modifier.width(8.dp)); Text("Connect another host") } }
+        item { OutlinedButton(onClick = pair, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Purple200)) { Icon(Icons.Outlined.AddLink, null); Spacer(Modifier.width(8.dp)); Text("Connect another host") } }
     }
 }
 
 @Composable
 private fun WorkspacePage(app: AppState, browse: (String, String) -> Unit, pair: () -> Unit) {
     if (app.hosts.isEmpty()) { EmptyState("Start from a directory", "After pairing a host, the directories the Gateway allows appear here.", "Connect host", pair); return }
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         app.hosts.values.forEach { h ->
             item { Text(h.paired.host.name + if (h.connected) "" else " · offline", style = MaterialTheme.typography.titleMedium) }
             if (h.workspaces.isEmpty()) item { Text("Connecting to the Gateway…", style = MaterialTheme.typography.bodySmall, color = TextMid) }
@@ -316,7 +347,7 @@ private fun WorkspacePage(app: AppState, browse: (String, String) -> Unit, pair:
                     shape = CardShape,
                     colors = CardDefaults.cardColors(containerColor = Color.Transparent),
                 ) { Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.FolderOpen, null, tint = Pink400); Spacer(Modifier.width(16.dp))
+                    Icon(Icons.Outlined.FolderOpen, null, tint = Purple400); Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) { Text(w.name, style = MaterialTheme.typography.titleMedium); Text(w.path, style = MaterialTheme.typography.bodySmall, color = TextMid) }; Icon(Icons.Outlined.ChevronRight, null, tint = Gray400)
                 } }
             }
@@ -329,15 +360,15 @@ private fun BrowserPage(listing: Listing?, hostName: String, loading: Boolean, b
     if (listing == null) { EmptyState(if (loading) "Reading directory" else "Directory unavailable", "Go back to Workspaces and choose again."); return }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().padding(16.dp).glassPanel(CardShape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(hostName, style = MaterialTheme.typography.labelLarge, color = Pink400)
+            Text(hostName, style = MaterialTheme.typography.labelLarge, color = Purple400)
             Text(listing.path, style = MaterialTheme.typography.titleMedium)
             listing.branch?.let { Text("Git · $it", style = MaterialTheme.typography.labelLarge, color = Violet400); Text(listing.gitStatus?.ifEmpty { "Working tree clean" }.orEmpty(), style = MaterialTheme.typography.bodySmall, color = TextMid) }
             GradientButton(onClick = { select(listing.path) }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text("Create task here") }
         }
         HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(8.dp)) {
-            listing.parent?.let { parent -> item { TextButton(onClick = { browse(parent) }, enabled = !loading, colors = ButtonDefaults.textButtonColors(contentColor = Pink200)) { Icon(Icons.Outlined.ArrowUpward, null); Spacer(Modifier.width(8.dp)); Text("Parent directory") } } }
-            items(listing.directories, key = { it.path }) { w -> TextButton(onClick = { browse(w.path) }, enabled = !loading, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = TextHigh)) { Icon(Icons.Outlined.Folder, null, tint = Pink400); Spacer(Modifier.width(12.dp)); Text(w.name, Modifier.weight(1f)); Icon(Icons.Outlined.ChevronRight, null, tint = Gray400) } }
+            listing.parent?.let { parent -> item { TextButton(onClick = { browse(parent) }, enabled = !loading, colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Icon(Icons.Outlined.ArrowUpward, null); Spacer(Modifier.width(8.dp)); Text("Parent directory") } } }
+            items(listing.directories, key = { it.path }) { w -> TextButton(onClick = { browse(w.path) }, enabled = !loading, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(contentColor = TextHigh)) { Icon(Icons.Outlined.Folder, null, tint = Purple400); Spacer(Modifier.width(12.dp)); Text(w.name, Modifier.weight(1f)); Icon(Icons.Outlined.ChevronRight, null, tint = Gray400) } }
             if (listing.directories.isEmpty()) item { Text("No subdirectories to browse", Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium, color = TextMid) }
         }
     }
@@ -348,7 +379,7 @@ private fun CreatePage(host: HostState?, cwd: String, loading: Boolean, changeDi
     var prompt by rememberSaveable(cwd) { mutableStateOf("") }
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text("Host", style = MaterialTheme.typography.labelMedium, color = TextMid); Text(host?.paired?.host?.name.orEmpty(), style = MaterialTheme.typography.titleMedium) }
-        item { Text("Working directory", style = MaterialTheme.typography.labelMedium, color = TextMid); Text(cwd); TextButton(onClick = changeDirectory, enabled = !loading, colors = ButtonDefaults.textButtonColors(contentColor = Pink200), contentPadding = PaddingValues(0.dp)) { Text("Change") } }
+        item { Text("Working directory", style = MaterialTheme.typography.labelMedium, color = TextMid); Text(cwd); TextButton(onClick = changeDirectory, enabled = !loading, colors = ButtonDefaults.textButtonColors(contentColor = Purple200), contentPadding = PaddingValues(0.dp)) { Text("Change") } }
         item { OutlinedTextField(value = prompt, onValueChange = { prompt = it }, label = { Text("What should OMP do?") }, placeholder = { Text("Fix the checkout race and run the tests") }, minLines = 5, modifier = Modifier.fillMaxWidth(), enabled = !loading) }
         item { GradientButton(onClick = { start(prompt) }, enabled = prompt.isNotBlank() && !loading && host?.connected == true, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Outlined.PlayArrow, null); Spacer(Modifier.width(8.dp)); Text(if (loading) "Starting OMP…" else "Start task") } }
     }
@@ -362,6 +393,6 @@ private fun PairPage(url: String, token: String, loading: Boolean, onURL: (Strin
         item { Text("Or enter it manually", style = MaterialTheme.typography.labelLarge, color = TextMid) }
         item { OutlinedTextField(url, onURL, label = { Text("Gateway address") }, placeholder = { Text("https://dev-server.example.com") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = !loading) }
         item { OutlinedTextField(token, onToken, label = { Text("One-time pairing token") }, modifier = Modifier.fillMaxWidth(), enabled = !loading) }
-        item { OutlinedButton(onClick = pair, enabled = url.isNotBlank() && token.isNotBlank() && !loading, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Pink200)) { Text("Pair") } }
+        item { OutlinedButton(onClick = pair, enabled = url.isNotBlank() && token.isNotBlank() && !loading, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors(contentColor = Purple200)) { Text("Pair") } }
     }
 }
