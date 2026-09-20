@@ -107,11 +107,7 @@ impl Registry {
         let (session, timeline, model) = {
             let state = self.state.lock().await;
             let e = state.entries.get(id).context("session not found")?;
-            (
-                e.session.clone(),
-                e.timeline.clone(),
-                e.model.clone(),
-            )
+            (e.session.clone(), e.timeline.clone(), e.model.clone())
         };
         // OMP owns transcripts. Read its branch-aware session log on demand instead of copying it to SQLite.
         let timeline = if timeline.is_empty() && !session.session_file.is_empty() {

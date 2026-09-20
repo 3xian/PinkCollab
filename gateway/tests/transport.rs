@@ -5,10 +5,20 @@ use pinkcollab_gateway::omp::{Output, Runtime};
 use serde_json::json;
 use std::time::Duration;
 
-fn fixture(args: &[&str]) -> (tempfile::TempDir, std::sync::Arc<Runtime>, tokio::sync::mpsc::Receiver<Output>) {
+fn fixture(
+    args: &[&str],
+) -> (
+    tempfile::TempDir,
+    std::sync::Arc<Runtime>,
+    tokio::sync::mpsc::Receiver<Output>,
+) {
     let dir = tempfile::tempdir().unwrap();
-    let args = args.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>();
-    let (runtime, output) = Runtime::spawn(env!("CARGO_BIN_EXE_omp-fixture"), &args, dir.path()).unwrap();
+    let args = args
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<_>>();
+    let (runtime, output) =
+        Runtime::spawn(env!("CARGO_BIN_EXE_omp-fixture"), &args, dir.path()).unwrap();
     (dir, runtime, output)
 }
 
@@ -59,7 +69,9 @@ async fn unterminated_stdout_fails_the_transport_instead_of_buffering() {
         .await
         .expect("the reader must reject the frame while the flood is still running");
     assert!(
-        reason.as_deref().is_some_and(|reason| reason.contains("NDJSON")),
+        reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("NDJSON")),
         "unexpected reason: {reason:?}"
     );
     assert!(!runtime.alive());

@@ -156,7 +156,10 @@ impl TimelineItem {
         is_error: bool,
         timestamp: DateTime<Utc>,
     ) -> Self {
-        Self::tool(ToolTrace::completed(call_id, name, result, is_error), timestamp)
+        Self::tool(
+            ToolTrace::completed(call_id, name, result, is_error),
+            timestamp,
+        )
     }
 
     /// Tool items carry their payload once, inside `tool`; `detail` stays empty because clients

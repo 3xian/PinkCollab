@@ -166,10 +166,8 @@ impl Runtime {
                     let _ = ready_tx.send(true);
                 }
                 if string(&value, "type") == "response"
-                    && let Some(responder) = reader_pending
-                        .lock()
-                        .unwrap()
-                        .remove(string(&value, "id"))
+                    && let Some(responder) =
+                        reader_pending.lock().unwrap().remove(string(&value, "id"))
                 {
                     let _ = responder.send(value);
                     continue;
@@ -307,10 +305,7 @@ fn read_frame<R: BufRead>(source: &mut R, frame: &mut Vec<u8>) -> std::io::Resul
     bounded.read_until(b'\n', frame)
 }
 
-async fn write_frame(
-    pipe: &Arc<Mutex<Option<Box<dyn Write + Send>>>>,
-    value: Value,
-) -> Result<()> {
+async fn write_frame(pipe: &Arc<Mutex<Option<Box<dyn Write + Send>>>>, value: Value) -> Result<()> {
     let mut bytes = serde_json::to_vec(&value)?;
     ensure!(bytes.len() < MAX_LINE, "OMP frame too large");
     bytes.push(b'\n');
