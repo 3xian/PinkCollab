@@ -482,6 +482,22 @@ async fn failed_prompt_and_runtime_limits_do_not_leak_processes() {
         .command(s.id, "stop".into(), String::new(), Default::default())
         .await
         .unwrap();
+    // The quota counts live processes, so a stop must free its slot without another event-loop
+    // round trip; otherwise a caller that retries right after stopping is wrongly refused.
+    let again = h
+        .registry
+        .create(
+            h.host.id.clone(),
+            h.cwd("again"),
+            "hold".into(),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    h.registry
+        .command(again.id, "stop".into(), String::new(), Default::default())
+        .await
+        .unwrap();
     h.registry.close().await;
 }
 

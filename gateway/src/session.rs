@@ -29,6 +29,15 @@ struct State {
     entries: HashMap<String, Entry>,
     closing: bool,
 }
+
+/// Releases a session's OMP attachment. Every path that stops a runtime must detach it too: the
+/// quota counts live processes, and bookkeeping that lags behind the process is what makes "stop,
+/// then start again" fail intermittently.
+fn detach(e: &mut Entry) {
+    e.runtime = None;
+    e.model = None;
+    e.session.runtime_attached = false;
+}
 pub struct Registry {
     state: Mutex<State>,
     store: Arc<Store>,
@@ -281,9 +290,7 @@ impl Registry {
         let Some(e) = state.entries.get_mut(id) else {
             return Ok(());
         };
-        e.runtime = None;
-        e.model = None;
-        e.session.runtime_attached = false;
+        detach(e);
         e.session.attention = None;
         e.session.needs_attention = false;
         if e.stopping {
@@ -357,7 +364,8 @@ impl Registry {
                 state
                     .entries
                     .values()
-                    .filter(|e| e.runtime.is_some() || e.session.status == "starting")
+                    .filter(|e| e.session.status == "starting"
+                        || e.runtime.as_ref().is_some_and(|runtime| runtime.alive()))
                     .count()
                     < self.max,
                 "OMP runtime limit reached"
@@ -441,6 +449,15 @@ impl Registry {
                 self.save(e)?;
             }
             runtime.stop().await;
+            // The process is gone, so release its quota here. Waiting for the exit report to come
+            // back through the event loop leaves a window where a failed start still counts, and a
+            // caller retrying right after a startup failure would be told the limit is reached.
+            {
+                let mut state = self.state.lock().await;
+                let e = state.entries.get_mut(&session_id).unwrap();
+                detach(e);
+                self.save(e)?;
+            }
             return Err(err);
         }
         Ok(self.detail(&session_id).await?.session)
