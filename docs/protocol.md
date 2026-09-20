@@ -1,7 +1,5 @@
 # PinkCollab Protocol v1
 
-[English](protocol.md) · [简体中文](protocol_cn.md)
-
 Android depends only on this protocol. The OMP adapter follows the [official RPC specification](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md) and [rpc-types.ts](https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts). It currently uses v1 NDJSON (up to 1 MiB per frame) and does not negotiate OMP v2 chunk transport.
 
 Except for pairing, every REST request and WebSocket handshake must include `Authorization: Bearer <credential>`. Credentials cannot be passed through URL query parameters, and browser cross-origin access is not enabled. All responses include `Cache-Control: no-store`.

@@ -281,7 +281,7 @@ Tests drive real HTTP/WebSocket connections and real NDJSON subprocess I/O. The 
 gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace
 android/app/src/main/java/dev/pinkcollab/   data · ui
 deploy/        systemd and launchd templates
-docs/          API protocol (protocol.md, protocol_cn.md)
+docs/          API protocol (protocol.md)
 ```
 
 ## Current limits
