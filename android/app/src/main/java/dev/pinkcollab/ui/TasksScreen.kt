@@ -8,17 +8,23 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
@@ -33,6 +39,7 @@ internal fun TasksScreen(
     selectedSessionId: String,
     onSessionSelected: (String) -> Unit,
     openResources: () -> Unit,
+    connectHost: () -> Unit,
     loadSession: (Session, Boolean) -> Unit,
     onPrompt: (Session, String, () -> Unit) -> Unit,
     onCommand: (Session, String) -> Unit,
@@ -65,17 +72,17 @@ internal fun TasksScreen(
             selectPage = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
         )
         if (sessions.isEmpty()) {
-            Box(Modifier.weight(1f)) {
-                EmptyState(
-                    title = if (app.hosts.isEmpty()) "Bring OMP to your phone" else "No tasks yet",
-                    description = if (app.hosts.isEmpty()) {
-                        "Connect a host, then choose an allowed project directory."
-                    } else {
-                        "Choose a workspace and enter your first prompt."
-                    },
-                    action = "Open workspaces",
-                    onAction = openResources,
-                )
+            if (app.hosts.isEmpty()) {
+                BringOmpEmptyState(Modifier.weight(1f), connectHost)
+            } else {
+                Box(Modifier.weight(1f)) {
+                    EmptyState(
+                        title = "No tasks yet",
+                        description = "Choose a workspace and enter your first prompt.",
+                        action = "Open workspaces",
+                        onAction = openResources,
+                    )
+                }
             }
         } else {
             HorizontalPager(
@@ -107,6 +114,159 @@ internal fun TasksScreen(
                     onCycleModel = { onCycleModel(session) },
                 )
             }
+        }
+    }
+}
+
+private data class PairingStep(
+    val icon: ImageVector,
+    val title: String,
+    val description: String,
+)
+
+@Composable
+private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () -> Unit) {
+    val steps = remember {
+        listOf(
+            PairingStep(
+                Icons.Outlined.Terminal,
+                "Create a pairing code",
+                "Run the PinkCollab pairing command on your OMP host.",
+            ),
+            PairingStep(
+                Icons.Outlined.QrCodeScanner,
+                "Scan it with this phone",
+                "The one-time code securely links this app to your host.",
+            ),
+            PairingStep(
+                Icons.Outlined.EditNote,
+                "Start your first task",
+                "Pick a workspace, describe the outcome, and follow along.",
+            ),
+        )
+    }
+    androidx.compose.foundation.lazy.LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        item {
+            Column(
+                Modifier.fillMaxWidth().widthIn(max = 520.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(
+                    Modifier
+                        .glassPanel(RoundedCornerShape(999.dp), fillAlpha = 0.08f, borderAlpha = 0.18f)
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(7.dp).background(Teal300, CircleShape))
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        "SET UP IN ABOUT A MINUTE",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Purple200,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Spacer(Modifier.height(18.dp))
+                Box(
+                    Modifier
+                        .size(92.dp)
+                        .glassPanel(CircleShape, fillAlpha = 0.15f, borderAlpha = 0.32f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.size(62.dp).background(Purple400.copy(alpha = 0.14f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Outlined.AddLink,
+                            contentDescription = null,
+                            modifier = Modifier.size(34.dp),
+                            tint = Purple200,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Text(
+                    "Bring OMP to your phone",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Pair with the Gateway on your computer. Your code and tools stay on the host while you guide the work from here.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMid,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(22.dp))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .glassPanel(CardShape, fillAlpha = 0.075f, borderAlpha = 0.18f)
+                        .padding(horizontal = 18.dp, vertical = 6.dp),
+                ) {
+                    steps.forEachIndexed { index, step ->
+                        PairingStepRow(index + 1, step)
+                        if (index < steps.lastIndex) {
+                            HorizontalDivider(
+                                Modifier.padding(start = 50.dp),
+                                color = Color.White.copy(alpha = 0.07f),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(20.dp))
+                PrimaryButton(
+                    onClick = connectHost,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                ) {
+                    Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
+                    Spacer(Modifier.width(9.dp))
+                    Text("Connect your OMP host")
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "You can scan a QR code or enter the connection details manually.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Gray400,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingStepRow(number: Int, step: PairingStep) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(38.dp).background(Purple400.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(step.icon, contentDescription = null, Modifier.size(20.dp), tint = Purple200)
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "$number. ${step.title}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                step.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextMid,
+            )
         }
     }
 }

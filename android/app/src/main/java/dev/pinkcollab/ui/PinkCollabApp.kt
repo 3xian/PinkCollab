@@ -77,6 +77,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             selectedSessionId = selectedSessionId,
                             onSessionSelected = { selectedSessionId = it },
                             openResources = { route = AppRoute.Resources },
+                            connectHost = { route = AppRoute.PairHost() },
                             loadSession = vm::loadDetail,
                             onPrompt = { session, message, onSent ->
                                 vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
