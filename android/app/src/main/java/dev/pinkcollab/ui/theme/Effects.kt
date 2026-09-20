@@ -24,36 +24,34 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-/** Brand gradient: bright purple → deep violet, used for buttons, borders and glows. */
-val PrimaryGradientBrush = Brush.linearGradient(listOf(Purple400, Violet400))
+val BrandGradient: Brush = Brush.linearGradient(listOf(BrandPurple, BrandPink))
 
-/** Full-bleed near-black canvas with layered purple glow orbs. */
+/** Full-bleed near-black canvas with restrained brand-color glow orbs. */
 @Composable
 fun GlowBackground(modifier: Modifier = Modifier) {
     Canvas(modifier) {
         drawRect(Base0)
-        // top-left electric-purple bloom
+        // Violet bloom anchors the navigation area.
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Purple400.copy(alpha = 0.19f), Color.Transparent),
+                colors = listOf(BrandPurple.copy(alpha = 0.18f), Color.Transparent),
                 center = Offset(size.width * 0.12f, -size.height * 0.08f),
                 radius = size.minDimension * 1.05f,
             ),
         )
-        // bottom-right violet bloom
+        // Orchid bloom gives the content depth without lifting the black base.
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Violet400.copy(alpha = 0.16f), Color.Transparent),
+                colors = listOf(BrandPink.copy(alpha = 0.14f), Color.Transparent),
                 center = Offset(size.width * 1.02f, size.height * 0.95f),
                 radius = size.minDimension * 0.95f,
             ),
@@ -69,9 +67,9 @@ fun GlowBackground(modifier: Modifier = Modifier) {
     }
 }
 
-/** Purple→violet hairline: white edges read as grey against the near-black base. */
+/** Brand-gradient hairline: white edges read as grey against the near-black base. */
 private fun edgeBrush(alpha: Float): Brush =
-    Brush.linearGradient(listOf(Purple200.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.42f)))
+    Brush.linearGradient(listOf(BrandPurple.copy(alpha = alpha), BrandPink.copy(alpha = alpha)))
 
 /**
  * Frosted-glass panel: translucent gradient fill plus a purple→violet hairline border.
@@ -87,13 +85,9 @@ fun Modifier.glassPanel(
     borderAlpha: Float = 0.14f,
     borderBrush: Brush? = null,
 ): Modifier = background(
-    Brush.linearGradient(listOf(Purple200.copy(alpha = fillAlpha * 0.8f), Color.White.copy(alpha = fillAlpha * 0.35f))),
+    Brush.linearGradient(listOf(BrandPurple.copy(alpha = fillAlpha), BrandPink.copy(alpha = fillAlpha * 0.72f))),
     shape,
 ).border(1.2.dp, borderBrush ?: edgeBrush(borderAlpha), shape)
-
-/** Solid-color backdrop with the brand gradient and rounded corners (buttons, FABs). */
-fun Modifier.gradientFill(shape: Shape, brush: Brush = PrimaryGradientBrush, radius: Dp = 16.dp): Modifier =
-    background(brush, shape)
 
 @Composable
 private fun rememberPulseAlpha(): Float {
@@ -113,7 +107,7 @@ fun Modifier.pulsingGlowBorder(shape: Shape, width: Dp = 1.5.dp): Modifier {
     val alpha = rememberPulseAlpha()
     return border(
         width,
-        Brush.linearGradient(listOf(Purple400.copy(alpha = alpha), Violet400.copy(alpha = alpha * 0.75f))),
+        Brush.linearGradient(listOf(BrandPurple.copy(alpha = alpha), BrandPink.copy(alpha = alpha * 0.82f))),
         shape,
     )
 }
@@ -148,32 +142,37 @@ fun StatusChip(status: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** Primary action button with the brand gradient and rounded corners. */
+/** Shared card treatment; controls use Material 3's own shape scale. */
+val CardCornerRadius = 20.dp
+val CardShape = RoundedCornerShape(CardCornerRadius)
+
+/** High-emphasis action using Material 3 sizing and the app's brand gradient. */
 @Composable
-fun GradientButton(
+fun PrimaryButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val shape = ButtonDefaults.shape
+    val fill = if (enabled) {
+        BrandGradient
+    } else {
+        Brush.linearGradient(
+            listOf(
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
+            ),
+        )
+    }
     Button(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.clip(shape).background(fill, shape),
         colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
             disabledContainerColor = Color.Transparent,
-            disabledContentColor = TextMid.copy(alpha = 0.72f),
         ),
-        modifier = modifier.drawBehind {
-            val brush = if (enabled) {
-                PrimaryGradientBrush
-            } else {
-                Brush.linearGradient(listOf(Gray400.copy(alpha = 0.34f), Gray400.copy(alpha = 0.22f)))
-            }
-            drawRoundRect(brush, cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()))
-        },
         content = content,
     )
 }

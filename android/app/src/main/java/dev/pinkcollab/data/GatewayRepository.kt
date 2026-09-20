@@ -29,7 +29,6 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         }.onFailure { error("Pairing data could not be decrypted; pair again: ${it.message}") }
     }
     fun error(message: String?) { mutable.update { it.copy(error = message) } }
-    fun loading(value: Boolean) { mutable.update { it.copy(loading = value) } }
     private fun paired(id: String) = state.value.hosts[id]?.paired ?: throw IllegalStateException("Host removed")
     suspend fun pair(url: String, token: String) {
         val base = api.validateURL(url)
@@ -133,7 +132,19 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     suspend fun listing(hostId: String, path: String): Listing { val p = paired(hostId); return JSONObject(api.request(p.url, p.credential, "/api/v1/fs/list", query = "path" to path)).listing() }
     suspend fun create(hostId: String, cwd: String, prompt: String): Session {
         val p = paired(hostId)
-        return JSONObject(api.request(p.url, p.credential, "/api/v1/sessions", "POST", JSONObject().put("hostId", hostId).put("cwd", cwd).put("prompt", prompt))).session()
+        val body = JSONObject()
+            .put("hostId", hostId)
+            .put("cwd", cwd)
+            .put("prompt", prompt)
+        val session = JSONObject(
+            api.request(p.url, p.credential, "/api/v1/sessions", "POST", body),
+        ).session()
+        mutable.update { app ->
+            val host = app.hosts[hostId] ?: return@update app
+            val sessions = host.sessions.filterNot { it.id == session.id } + session
+            app.copy(hosts = app.hosts + (hostId to host.copy(sessions = sessions)))
+        }
+        return session
     }
     suspend fun detail(hostId: String, id: String) {
         val p = paired(hostId)
