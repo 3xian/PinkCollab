@@ -37,6 +37,7 @@ private fun DirectoryListing(
     browse: (String) -> Unit,
     select: (String) -> Unit,
 ) {
+
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth().padding(16.dp).glassPanel(CardShape).padding(16.dp)) {
             Text(hostName, style = MaterialTheme.typography.labelLarge, color = Purple400)
@@ -62,7 +63,7 @@ private fun DirectoryListing(
             listing.parent?.let { parent ->
                 item {
                     TextButton(
-                        onClick = { browse(parent) },
+                        onClick = rememberHapticOnClick { browse(parent) },
                         colors = ButtonDefaults.textButtonColors(contentColor = Purple200),
                     ) {
                         Icon(Icons.Outlined.ArrowUpward, null)
@@ -73,7 +74,7 @@ private fun DirectoryListing(
             }
             items(listing.directories, key = { it.path }) { directory ->
                 TextButton(
-                    onClick = { browse(directory.path) },
+                    onClick = rememberHapticOnClick { browse(directory.path) },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.textButtonColors(contentColor = TextHigh),
                 ) {
@@ -106,6 +107,7 @@ internal fun CreateTaskScreen(
     start: (String) -> Unit,
 ) {
     var prompt by rememberSaveable(cwd) { mutableStateOf("") }
+
     LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Text("Host", style = MaterialTheme.typography.labelMedium, color = TextMid)
@@ -115,7 +117,7 @@ internal fun CreateTaskScreen(
             Text("Working directory", style = MaterialTheme.typography.labelMedium, color = TextMid)
             Text(cwd)
             TextButton(
-                onClick = changeDirectory,
+                onClick = rememberHapticOnClick(changeDirectory),
                 enabled = !busy,
                 colors = ButtonDefaults.textButtonColors(contentColor = Purple200),
                 contentPadding = PaddingValues(0.dp),
@@ -159,6 +161,7 @@ internal fun PairHostScreen(
     scan: () -> Unit,
     pair: () -> Unit,
 ) {
+
     LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Text("Connect your OMP host", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -169,7 +172,7 @@ internal fun PairHostScreen(
             )
         }
         item {
-            OutlinedButton(onClick = scan, enabled = !busy) {
+            OutlinedButton(onClick = rememberHapticOnClick(scan), enabled = !busy) {
                 Icon(Icons.Outlined.QrCodeScanner, null)
                 Spacer(Modifier.width(8.dp))
                 Text("Scan pairing code")

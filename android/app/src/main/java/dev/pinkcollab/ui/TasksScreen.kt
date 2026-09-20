@@ -8,7 +8,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.outlined.ChevronLeft
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.EditNote
@@ -156,41 +155,6 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
                 Modifier.fillMaxWidth().widthIn(max = 520.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Row(
-                    Modifier
-                        .glassPanel(RoundedCornerShape(999.dp), fillAlpha = 0.08f, borderAlpha = 0.18f)
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(7.dp).background(Teal300, CircleShape))
-                    Spacer(Modifier.width(7.dp))
-                    Text(
-                        "SET UP IN ABOUT A MINUTE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Purple200,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Spacer(Modifier.height(18.dp))
-                Box(
-                    Modifier
-                        .size(92.dp)
-                        .glassPanel(CircleShape, fillAlpha = 0.15f, borderAlpha = 0.32f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        Modifier.size(62.dp).background(Purple400.copy(alpha = 0.14f), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Outlined.AddLink,
-                            contentDescription = null,
-                            modifier = Modifier.size(34.dp),
-                            tint = Purple200,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(18.dp))
                 Text(
                     "Bring OMP to your phone",
                     style = MaterialTheme.typography.headlineSmall,
@@ -280,6 +244,7 @@ private fun TasksTopBar(
     selectPage: (Int) -> Unit,
 ) {
     val current = sessions.getOrNull(currentPage)
+
     Column(Modifier.fillMaxWidth().background(Base0.copy(alpha = 0.90f))) {
         Row(
             Modifier.fillMaxWidth().padding(start = 20.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
@@ -294,7 +259,7 @@ private fun TasksTopBar(
                 )
             }
             IconButton(
-                onClick = openResources,
+                onClick = rememberHapticOnClick(openResources),
                 modifier = Modifier.size(48.dp).background(BrandGradient, CircleShape),
                 colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
             ) {
@@ -367,13 +332,14 @@ private fun TaskNeighborPreview(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
+
     val shape = RoundedCornerShape(14.dp)
     Row(
         modifier
             .fillMaxHeight()
             .clip(shape)
             .background(Color.White.copy(alpha = if (session == null) 0.025f else 0.055f), shape)
-            .clickable(enabled = session != null, onClick = onClick)
+            .clickable(enabled = session != null, onClick = rememberHapticOnClick(onClick))
             .padding(horizontal = 6.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

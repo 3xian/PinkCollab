@@ -31,6 +31,7 @@ internal fun ResourcesScreen(
     forget: (String) -> Unit,
 ) {
     var hostPendingRemoval by remember { mutableStateOf<Host?>(null) }
+
     if (app.hosts.isEmpty()) {
         EmptyState("No workspaces yet", "Connect a host to see the project directories it allows.", "Connect host", pair)
         return
@@ -73,14 +74,14 @@ internal fun ResourcesScreen(
                             )
                         }
                         IconButton(
-                            onClick = { refresh(hostId) },
+                            onClick = rememberHapticOnClick { refresh(hostId) },
                             enabled = !busy,
                             colors = IconButtonDefaults.iconButtonColors(contentColor = Purple200),
                         ) {
                             Icon(Icons.Outlined.Refresh, "Refresh host")
                         }
                         IconButton(
-                            onClick = { hostPendingRemoval = host.paired.host },
+                            onClick = rememberHapticOnClick { hostPendingRemoval = host.paired.host },
                             enabled = !busy,
                             colors = IconButtonDefaults.iconButtonColors(contentColor = Gray400),
                         ) {
@@ -128,7 +129,7 @@ internal fun ResourcesScreen(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = pair) {
+                OutlinedButton(onClick = rememberHapticOnClick(pair)) {
                     Icon(Icons.Outlined.AddLink, null)
                     Spacer(Modifier.width(8.dp))
                     Text("Connect another host")
@@ -144,7 +145,7 @@ internal fun ResourcesScreen(
             text = { Text("This removes “${host.name}” and its saved connection from this phone. The host itself will not be changed.") },
             confirmButton = {
                 TextButton(
-                    onClick = {
+                    onClick = rememberHapticOnClick {
                         hostPendingRemoval = null
                         forget(host.id)
                     },
@@ -153,20 +154,21 @@ internal fun ResourcesScreen(
                     Text("Remove")
                 }
             },
-            dismissButton = { TextButton(onClick = { hostPendingRemoval = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = rememberHapticOnClick { hostPendingRemoval = null }) { Text("Cancel") } },
         )
     }
 }
 
 @Composable
 private fun WorkspaceRow(workspace: Workspace, enabled: Boolean, onClick: () -> Unit) {
+
     val shape = RoundedCornerShape(14.dp)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(Color.White.copy(alpha = if (enabled) 0.055f else 0.025f), shape)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

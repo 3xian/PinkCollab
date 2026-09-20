@@ -49,6 +49,7 @@ internal fun SessionPage(
     var prompt by rememberSaveable(session.id) { mutableStateOf("") }
     val attached = session.runtimeAttached && host?.connected == true
     val displayTimeline = remember(detail.timeline) { projectSessionTimeline(detail.timeline) }
+
     val model = detail.model?.takeIf { attached }
     Column(Modifier.fillMaxSize().imePadding()) {
         if (model != null) {
@@ -58,7 +59,7 @@ internal fun SessionPage(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(
-                    onClick = onCycleModel,
+                    onClick = rememberHapticOnClick(onCycleModel),
                     enabled = !busy,
                     modifier = Modifier.widthIn(max = 220.dp),
                     colors = ButtonDefaults.textButtonColors(contentColor = Violet400),
@@ -95,7 +96,7 @@ internal fun SessionPage(
         ) {
             OutlinedTextField(prompt, { prompt = it }, placeholder = { Text(if (session.status == "running") "Steer OMP…" else "Send another prompt…") }, modifier = Modifier.fillMaxWidth(), maxLines = 4, enabled = attached && !busy && session.attention == null, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Purple400))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Row { TextButton(onClick = { onCommand("interrupt") }, enabled = attached && !busy && session.status in listOf("running", "needs_input"), colors = ButtonDefaults.textButtonColors(contentColor = Violet400)) { Text("Interrupt") }; TextButton(onClick = { onCommand("stop") }, enabled = attached && !busy, colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text("Stop") } }
+                Row { TextButton(onClick = rememberHapticOnClick { onCommand("interrupt") }, enabled = attached && !busy && session.status in listOf("running", "needs_input"), colors = ButtonDefaults.textButtonColors(contentColor = Violet400)) { Text("Interrupt") }; TextButton(onClick = rememberHapticOnClick { onCommand("stop") }, enabled = attached && !busy, colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text("Stop") } }
                 PrimaryButton(onClick = { onPrompt(prompt) { prompt = "" } }, enabled = prompt.isNotBlank() && attached && !busy && session.attention == null) { Text(if (session.status == "running") "Steer" else "Send") }
             }
         }
@@ -132,6 +133,7 @@ private fun MessageCard(item: SessionDisplayItem.Message) {
 
 @Composable
 private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
+
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
     val title = when (group.stage) {
         ActivityStage.Explore -> "Exploring · ${group.operationCount} operations"
@@ -166,7 +168,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
             )
             if (group.summary.isNotBlank()) Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid)
             if (detailKind != null) {
-                TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) {
+                TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) {
                     Text(if (expanded) "Collapse" else detailKind.action)
                 }
                 if (expanded) Text(group.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
@@ -185,6 +187,7 @@ private val ActivityDetailKind.action: String
 
 @Composable
 private fun ErrorCard(item: SessionDisplayItem.Error) {
+
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
     Card(
         Modifier
@@ -201,7 +204,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
             Text("Error", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Red400)
             Text(item.text)
             if (item.details.isNotBlank() && item.details != item.text) {
-                TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "Collapse" else "View error") }
+                TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "Collapse" else "View error") }
                 if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
             }
         }
@@ -210,6 +213,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
 
 @Composable
 private fun RawTimelineCard(item: TimelineItem) {
+
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
     val isDetail = item.kind in listOf("tool", "subagent")
     val detail = item.tool?.let { tool ->
@@ -226,13 +230,14 @@ private fun RawTimelineCard(item: TimelineItem) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Purple200; "error" -> Red400; else -> Violet400 })
             Text(item.text, style = if (isDetail) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge)
-            if (isDetail && detail.isNotBlank()) { TextButton(onClick = { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
+            if (isDetail && detail.isNotBlank()) { TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
         }
     }
 }
 
 @Composable
 private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSONObject) -> Unit) {
+
     var answer by rememberSaveable(attention.id) { mutableStateOf("") }
     fun response() = JSONObject().put("id", attention.id)
     Card(
@@ -252,10 +257,10 @@ private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSON
             Text(attention.text)
             when (attention.type) {
                 "select" -> attention.options.forEach { option ->
-                    OutlinedButton(onClick = { respond(response().put("value", option)) }, enabled = enabled) { Text(option) }
+                    OutlinedButton(onClick = rememberHapticOnClick { respond(response().put("value", option)) }, enabled = enabled) { Text(option) }
                 }
                 "confirm" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    OutlinedButton(onClick = { respond(response().put("confirmed", false)) }, enabled = enabled) { Text("Decline") }
+                    OutlinedButton(onClick = rememberHapticOnClick { respond(response().put("confirmed", false)) }, enabled = enabled) { Text("Decline") }
                     Spacer(Modifier.width(8.dp))
                     PrimaryButton(onClick = { respond(response().put("confirmed", true)) }, enabled = enabled) { Text("Confirm") }
                 }
@@ -266,7 +271,7 @@ private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSON
                     }
                 }
             }
-            TextButton(onClick = { respond(response().put("cancelled", true)) }, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = TextMid)) { Text("Cancel") }
+            TextButton(onClick = rememberHapticOnClick { respond(response().put("cancelled", true)) }, enabled = enabled, colors = ButtonDefaults.textButtonColors(contentColor = TextMid)) { Text("Cancel") }
         }
     }
 }

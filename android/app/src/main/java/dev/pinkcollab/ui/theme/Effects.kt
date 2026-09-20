@@ -154,6 +154,7 @@ fun PrimaryButton(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
+
     val shape = ButtonDefaults.shape
     val fill = if (enabled) {
         BrandGradient
@@ -166,7 +167,7 @@ fun PrimaryButton(
         )
     }
     Button(
-        onClick = onClick,
+        onClick = rememberHapticOnClick(onClick),
         enabled = enabled,
         modifier = modifier.clip(shape).background(fill, shape),
         colors = ButtonDefaults.buttonColors(

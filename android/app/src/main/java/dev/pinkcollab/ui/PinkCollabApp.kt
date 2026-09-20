@@ -19,6 +19,7 @@ import dev.pinkcollab.data.Listing
 import dev.pinkcollab.ui.theme.GlowBackground
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.Purple200
+import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 
@@ -150,7 +151,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                         .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                                         .setPrompt("Scan the pairing code from the Gateway")
                                         .setBeepEnabled(false)
-                                        .setOrientationLocked(false),
+                                        .setOrientationLocked(true),
                                 )
                             },
                             pair = {
@@ -166,7 +167,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
 
             if (secondary) {
                 IconButton(
-                    onClick = { route = route.back() },
+                    onClick = rememberHapticOnClick { route = route.back() },
                     modifier = Modifier.statusBarsPadding().padding(start = 12.dp, top = 4.dp),
                 ) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", Modifier.size(28.dp), tint = Purple200)
