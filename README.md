@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/pinkcollab-logo.png" width="200" alt="PinkCollab logo" />
+  <img src="docs/assets/pinkcollab-logo.png" width="144" alt="PinkCollab logo" />
 </p>
 
 # PinkCollab
