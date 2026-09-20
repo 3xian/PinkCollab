@@ -33,28 +33,14 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
 
 /** Brand gradient: bright purple → deep violet, used for buttons, borders and glows. */
 val PrimaryGradientBrush = Brush.linearGradient(listOf(Purple400, Violet400))
 
-/** Real backdrop-blur style for the chrome bars (top bar / bottom navigation). */
-val GlassBarStyle = HazeStyle(
-    backgroundColor = Base0,
-    tints = listOf(HazeTint(Color(0xFF100B18).copy(alpha = 0.62f)), HazeTint(Purple400.copy(alpha = 0.06f))),
-    blurRadius = 24.dp,
-    noiseFactor = 0.02f,
-    fallbackTint = HazeTint(Color(0xFF100B18).copy(alpha = 0.86f)),
-)
-
 /** Full-bleed near-black canvas with layered purple glow orbs. */
 @Composable
-fun GlowBackground(state: HazeState, modifier: Modifier = Modifier) {
-    Canvas(modifier.hazeSource(state)) {
+fun GlowBackground(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
         drawRect(Base0)
         // top-left electric-purple bloom
         drawCircle(
@@ -176,15 +162,15 @@ fun GradientButton(
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
-            contentColor = Color.White,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             disabledContainerColor = Color.Transparent,
-            disabledContentColor = Color.White.copy(alpha = 0.35f),
+            disabledContentColor = TextMid.copy(alpha = 0.72f),
         ),
         modifier = modifier.drawBehind {
             val brush = if (enabled) {
                 PrimaryGradientBrush
             } else {
-                Brush.linearGradient(listOf(Gray400.copy(alpha = 0.25f), Gray400.copy(alpha = 0.15f)))
+                Brush.linearGradient(listOf(Gray400.copy(alpha = 0.34f), Gray400.copy(alpha = 0.22f)))
             }
             drawRoundRect(brush, cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()))
         },

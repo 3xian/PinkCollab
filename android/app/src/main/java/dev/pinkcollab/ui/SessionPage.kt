@@ -68,7 +68,7 @@ fun SessionPage(detail: SessionDetail?, host: HostState?, loading: Boolean, onPr
             if (displayTimeline.isEmpty()) item { Text("Waiting for the agent…", style = MaterialTheme.typography.bodySmall, color = TextMid) }
             items(displayTimeline, key = { it.id }) { item -> DisplayItem(item) }
             if (detail.streaming.isNotBlank()) item {
-                Card(Modifier.fillMaxWidth().glassPanel(CardShape, fillAlpha = 0.09f), shape = CardShape, colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
+                Card(Modifier.fillMaxWidth().glassPanel(CardShape, fillAlpha = 0.09f), shape = CardShape, colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh)) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         GlowDot(Purple400, pulse = true)
                         Spacer(Modifier.width(10.dp))
@@ -108,7 +108,7 @@ private fun MessageCard(item: SessionDisplayItem.Message) {
             .then(if (isUser) Modifier.pulsingGlowBorder(CardShape, width = 1.dp) else Modifier)
             .glassPanel(CardShape, fillAlpha = if (isUser) 0.12f else 0.06f),
         shape = CardShape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (isUser) "You" else "Assistant", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = if (isUser) Purple200 else Violet400)
@@ -139,7 +139,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
     Card(
         Modifier.fillMaxWidth().glassPanel(CardShape, fillAlpha = 0.045f, borderAlpha = 0.10f),
         shape = CardShape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -182,7 +182,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
                 borderBrush = Brush.linearGradient(listOf(Red400.copy(alpha = 0.7f), Red400.copy(alpha = 0.2f))),
             ),
         shape = CardShape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Error", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Red400)
@@ -208,7 +208,7 @@ private fun RawTimelineCard(item: TimelineItem) {
     Card(
         Modifier.fillMaxWidth().glassPanel(CardShape, fillAlpha = 0.05f, borderAlpha = 0.10f),
         shape = CardShape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Purple200; "error" -> Red400; else -> Violet400 })
@@ -228,7 +228,7 @@ private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSON
             .pulsingGlowBorder(CardShape)
             .glassPanel(CardShape, fillAlpha = 0.12f),
         shape = CardShape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

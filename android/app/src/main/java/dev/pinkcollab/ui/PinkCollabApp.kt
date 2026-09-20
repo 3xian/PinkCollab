@@ -2,10 +2,17 @@ package dev.pinkcollab.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,14 +34,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeEffect
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import org.json.JSONObject
@@ -55,7 +61,6 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     var pairURL by rememberSaveable { mutableStateOf("") }
     var pairToken by rememberSaveable { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
-    val hazeState = remember { HazeState() }
     LaunchedEffect(app.error) { app.error?.let { snackbar.showSnackbar(it); repo.error(null) } }
     fun back() { page = rootPage }
     fun openSession(s: Session) {
@@ -79,9 +84,10 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     BackHandler(secondary) { back() }
     PinkCollabTheme {
         Box(Modifier.fillMaxSize()) {
-            GlowBackground(hazeState, Modifier.matchParentSize())
+            GlowBackground(Modifier.matchParentSize())
             Scaffold(
                 containerColor = Color.Transparent,
+                contentColor = MaterialTheme.colorScheme.onBackground,
                 // Content draws edge-to-edge. Navigation is an overlay so the background and
                 // scrolling timeline continue behind it instead of stopping above the pill.
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -132,7 +138,6 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                 ) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", tint = Purple200) }
             } else {
                 FloatingPillNav(
-                    hazeState = hazeState,
                     current = page,
                     onSelect = { key -> page = key; rootPage = key },
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -168,14 +173,13 @@ private fun GlowFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 .background(PrimaryGradientBrush, CircleShape)
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Outlined.Add, "New task", tint = Color(0xFF10051F)) }
+        ) { Icon(Icons.Outlined.Add, "New task", tint = MaterialTheme.colorScheme.onPrimary) }
     }
 }
 
-/** Floating capsule navigation with a fixed-width indicator that slides between tabs. */
+/** Floating capsule navigation: the selected tab expands while one shared indicator moves. */
 @Composable
 private fun FloatingPillNav(
-    hazeState: HazeState,
     current: String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -186,6 +190,24 @@ private fun FloatingPillNav(
         Triple("hosts", "Hosts", Icons.Outlined.Dns),
     )
     val selectedIndex = items.indexOfFirst { it.first == current }.coerceAtLeast(0)
+    val collapsedWidth = 58.dp
+    val expandedWidths = listOf(108.dp, 146.dp, 108.dp)
+    val indicatorX by animateDpAsState(
+        targetValue = 6.dp + collapsedWidth * selectedIndex,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "tabIndicatorX",
+    )
+    val indicatorWidth by animateDpAsState(
+        targetValue = expandedWidths[selectedIndex],
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium,
+        ),
+        label = "tabIndicatorWidth",
+    )
     Box(
         modifier
             .fillMaxWidth()
@@ -193,10 +215,8 @@ private fun FloatingPillNav(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        BoxWithConstraints(
+        Box(
             Modifier
-                .fillMaxWidth()
-                .height(60.dp)
                 .drawBehind {
                     drawRoundRect(
                         brush = Brush.radialGradient(listOf(Purple400.copy(alpha = 0.30f), Color.Transparent)),
@@ -206,38 +226,70 @@ private fun FloatingPillNav(
                     )
                 }
                 .clip(PillShape)
-                .hazeEffect(hazeState) { style = GlassBarStyle }
+                .background(Base1.copy(alpha = 0.96f), PillShape)
                 .glassPanel(PillShape, fillAlpha = 0.11f, borderAlpha = 0.22f),
         ) {
-            val tabWidth = (maxWidth - 12.dp) / items.size
-            val indicatorX by animateDpAsState(
-                targetValue = 6.dp + tabWidth * selectedIndex,
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                label = "tabIndicatorX",
-            )
             Box(
                 Modifier
                     .offset(x = indicatorX, y = 6.dp)
-                    .width(tabWidth)
+                    .width(indicatorWidth)
                     .height(48.dp)
-                    .background(PrimaryGradientBrush, PillShape),
+                    .background(PrimaryGradientBrush, PillShape)
+                    .border(1.dp, Purple200.copy(alpha = 0.34f), PillShape),
             )
-            Row(Modifier.fillMaxSize().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                items.forEach { (key, title, icon) ->
+            Row(Modifier.padding(6.dp).height(48.dp), verticalAlignment = Alignment.CenterVertically) {
+                items.forEachIndexed { index, (key, title, icon) ->
                     val selected = current == key
+                    val itemWidth by animateDpAsState(
+                        targetValue = if (selected) expandedWidths[index] else collapsedWidth,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMedium,
+                        ),
+                        label = "${key}Width",
+                    )
+                    val contentColor by animateColorAsState(
+                        targetValue = if (selected) MaterialTheme.colorScheme.onPrimary else Gray400,
+                        animationSpec = tween(durationMillis = 260),
+                        label = "${key}ContentColor",
+                    )
+                    val iconScale by animateFloatAsState(
+                        targetValue = if (selected) 1.05f else 1f,
+                        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                        label = "${key}IconScale",
+                    )
                     Row(
                         Modifier
-                            .weight(1f)
+                            .width(itemWidth)
                             .fillMaxHeight()
                             .clip(PillShape)
                             .clickable { onSelect(key) },
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(icon, title, Modifier.size(22.dp), tint = if (selected) Color(0xFF10051F) else Gray400)
-                        if (selected) {
-                            Spacer(Modifier.width(7.dp))
-                            Text(title, color = Color(0xFF10051F), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Icon(
+                            icon,
+                            title,
+                            Modifier
+                                .size(22.dp)
+                                .graphicsLayer { scaleX = iconScale; scaleY = iconScale },
+                            tint = contentColor,
+                        )
+                        AnimatedVisibility(
+                            visible = selected,
+                            enter = fadeIn(tween(durationMillis = 140, delayMillis = 40)),
+                            exit = fadeOut(tween(durationMillis = 80)),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Spacer(Modifier.width(7.dp))
+                                Text(
+                                    title,
+                                    color = contentColor,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     }
                 }
@@ -291,7 +343,7 @@ private fun SessionCard(s: Session, host: HostState?, onClick: () -> Unit) {
             .then(if (s.needsAttention) Modifier.pulsingGlowBorder(CardShape) else Modifier)
             .glassPanel(CardShape, fillAlpha = if (s.needsAttention) 0.11f else 0.07f),
         shape = CardShape,
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -310,7 +362,7 @@ private fun HostsPage(app: AppState, pair: () -> Unit, refresh: (String) -> Unit
     if (app.hosts.isEmpty()) { EmptyState("No hosts yet", "Every machine running the Gateway pairs on its own.", "Connect host", pair); return }
     LazyColumn(contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         items(app.hosts.values.toList(), key = { it.paired.host.id }) { h ->
-            Card(Modifier.fillMaxWidth().glassPanel(CardShape), shape = CardShape, colors = CardDefaults.cardColors(containerColor = Color.Transparent)) {
+            Card(Modifier.fillMaxWidth().glassPanel(CardShape), shape = CardShape, colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(h.paired.host.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -345,7 +397,7 @@ private fun WorkspacePage(app: AppState, browse: (String, String) -> Unit, pair:
                     enabled = h.connected,
                     modifier = Modifier.fillMaxWidth().glassPanel(CardShape),
                     shape = CardShape,
-                    colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                    colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
                 ) { Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.FolderOpen, null, tint = Purple400); Spacer(Modifier.width(16.dp))
                     Column(Modifier.weight(1f)) { Text(w.name, style = MaterialTheme.typography.titleMedium); Text(w.path, style = MaterialTheme.typography.bodySmall, color = TextMid) }; Icon(Icons.Outlined.ChevronRight, null, tint = Gray400)

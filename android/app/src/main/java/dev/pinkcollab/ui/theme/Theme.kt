@@ -11,12 +11,12 @@ val Base1 = Color(0xFF0B0811) // lifted surface
 val Purple400 = Color(0xFF9B6CFF) // primary electric purple
 val Purple200 = Color(0xFFD8C7FF)
 val Purple700 = Color(0xFF4B287F)
-val Violet400 = Color(0xFF7C4DFF)
+val Violet400 = Color(0xFF916BFF)
 val Teal300 = Color(0xFF4DE0BE)
 val Red400 = Color(0xFFFF5470)
-val Gray400 = Color(0xFF8C849B)
+val Gray400 = Color(0xFFA39AAF)
 val TextHigh = Color(0xFFF4F0FA)
-val TextMid = Color(0xFFB1A7C0)
+val TextMid = Color(0xFFC2B8D0)
 
 val PinkCollabScheme = darkColorScheme(
     primary = Purple400,
