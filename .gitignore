@@ -35,6 +35,7 @@ google-services.json
 
 # Rust and local artifacts
 target/
+target-*/
 /dist/
 pairing*.png
 .pinkcollab/
