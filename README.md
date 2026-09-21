@@ -43,27 +43,64 @@ flowchart LR
 
 ## Quick start
 
-Prerequisites: **Rust 1.89+** for the Gateway, **JDK 17+ / Android SDK 36** for Android, and **OMP installed on every host** that will run tasks.
+This path gets one computer and one Android phone connected through **Tailscale Funnel**. For a private tailnet or your own reverse proxy, see [Connect Android](#connect-android).
+
+### 1. Install the prerequisites
+
+On the computer that will run tasks, install:
+
+- **OMP**, with `omp --version` working in your terminal
+- **Rust 1.89+**
+- **Tailscale**, signed in and connected
+- **JDK 17+ and Android SDK 36** to build the Android app
+
+Your tailnet must also [allow Tailscale Funnel](#tailscale-funnel--public-simplest).
+
+### 2. Build and initialize the Gateway
+
+From the repository root, replace `/absolute/path/to/projects` with a directory that contains the projects the phone may access. Repeat `--workspace` to allow more than one directory.
 
 ```sh
 cd gateway
 cargo build --release --locked --bin pinkcollab-gateway
-./target/release/pinkcollab-gateway init --workspace /absolute/path/to/projects --workspace /another/root
+./target/release/pinkcollab-gateway init --workspace /absolute/path/to/projects
 ./target/release/pinkcollab-gateway status
+```
+
+On Windows, use `.\target\release\pinkcollab-gateway.exe` instead of `./target/release/pinkcollab-gateway` and a workspace such as `C:\code`.
+
+Run `init` only once. It creates `~/.pinkcollab/config.yaml`; edit its `workspaces` list later if you need to change the allowed directories. Continue only when `status` ends with `status: ready`.
+
+### 3. Build and install the Android app
+
+```sh
+cd ../android
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+On Windows, run the build with `cmd.exe /c gradlew.bat :app:assembleDebug`. You can also open `android/` in Android Studio and install the app from there. See [Build Android](#build-android) if the SDK or `adb` is not configured yet.
+
+### 4. Start the Gateway
+
+Return to `gateway/` and keep this terminal open:
+
+```sh
+cd ../gateway
 ./target/release/pinkcollab-gateway serve
 ```
 
-On Windows, use `target\release\pinkcollab-gateway.exe` wherever these commands say `./target/release/pinkcollab-gateway`.
+### 5. Publish and pair
 
-The five steps, in order:
+In a second terminal, from `gateway/`, run:
 
-1. **Build** — `cargo build` leaves the binary in `gateway/target/release/`.
-2. **`init` once** — creates `~/.pinkcollab` and `config.yaml` with every `--workspace` root, and records `omp` as the absolute path it resolved, so a service manager's different `PATH` cannot break it. On Unix both are private to your user (`0700` / `0600`); Windows keeps the directory's default ACL. It only writes the config, never starts the server, and refuses to overwrite an existing one — add more roots by editing `workspaces`.
-3. **`status`** — preflights the config, every root, OMP, database, Tailscale state, and listen socket. Run it before `serve`; it exits non-zero if the configured port is already occupied or another prerequisite is broken.
-4. **`serve`** — runs the Gateway and holds that terminal busy; [a background service](#run-as-a-background-service) is the alternative.
-5. **`pair`** — in a second terminal, mint the code the phone scans: [`setup-funnel --pair`](#tailscale-funnel--public-simplest) brings up a public front end and pairs in one go, `pair --url <front-end root>` uses one you already run. A fresh `init` leaves `public_url` empty, so bare `pair` fails until one of them supplies it. Then scan the code in Android and create your first task.
+```sh
+./target/release/pinkcollab-gateway setup-funnel --pair
+```
 
-> Every subcommand reads the same data directory (`--data-dir`, default `~/.pinkcollab`). Pass the same one to `init`, `serve`, `pair`, and the service: a different directory means a different config and a different set of credentials, so the phone would be pairing against nothing.
+This publishes the local Gateway over HTTPS, saves its public URL, and prints a single-use QR code. Open PinkCollab on the phone and scan it within **5 minutes**. Then choose a workspace, create a task, and enter your first prompt.
+
+> All commands use `~/.pinkcollab` by default. If you pass `--data-dir`, use the same value for every command and for the background service.
 
 ## Commands
 
