@@ -53,17 +53,17 @@ cargo build --release --locked --bin pinkcollab-gateway
 ./target/release/pinkcollab-gateway serve
 ```
 
-On Windows, use `target\release\pinkcollab-gateway.exe`.
+On Windows, use `target\release\pinkcollab-gateway.exe` wherever these commands say `./target/release/pinkcollab-gateway`.
 
 The five steps, in order:
 
-1. **Build** the Gateway binary.
+1. **Build** — `cargo build` leaves the binary in `gateway/target/release/`.
 2. **`init` once** — creates `~/.pinkcollab` and `config.yaml` with every `--workspace` root, and records `omp` as the absolute path it resolved, so a service manager's different `PATH` cannot break it. On Unix both are private to your user (`0700` / `0600`); Windows keeps the directory's default ACL. It only writes the config, never starts the server, and refuses to overwrite an existing one — add more roots by editing `workspaces`.
 3. **`status`** — preflights the config, every root, OMP, database, Tailscale state, and listen socket. Run it before `serve`; it exits non-zero if the configured port is already occupied or another prerequisite is broken.
-4. **Run it** — in the foreground, or [as a background service](#run-as-a-background-service). A phone that cannot reach loopback also needs [a TLS front end](#connect-android).
-5. **`pair`**, scan the code, then create your first task.
+4. **`serve`** — runs the Gateway and holds that terminal busy; [a background service](#run-as-a-background-service) is the alternative.
+5. **`pair`** — in a second terminal, mint the code the phone scans: [`setup-funnel --pair`](#tailscale-funnel--public-simplest) brings up a public front end and pairs in one go, `pair --url <front-end root>` uses one you already run. A fresh `init` leaves `public_url` empty, so bare `pair` fails until one of them supplies it. Then scan the code in Android and create your first task.
 
-> Use the same `--data-dir` for `init`, `serve`, `pair`, and the service. A different directory means a different config and a different set of credentials — the phone would be pairing against nothing.
+> Every subcommand reads the same data directory (`--data-dir`, default `~/.pinkcollab`). Pass the same one to `init`, `serve`, `pair`, and the service: a different directory means a different config and a different set of credentials, so the phone would be pairing against nothing.
 
 ## Commands
 
