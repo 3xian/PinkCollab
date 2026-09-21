@@ -43,7 +43,7 @@ flowchart LR
 
 ## Quick start
 
-This path gets one computer and one Android phone connected through **Tailscale Funnel**. For a private tailnet or your own reverse proxy, see [Connect Android](#connect-android).
+This path builds the Gateway and Android app, then pairs one computer with one phone. The phone can use any supported HTTPS front end; Tailscale Funnel is optional.
 
 ### 1. Install the prerequisites
 
@@ -51,10 +51,7 @@ On the computer that will run tasks, install:
 
 - **OMP**, with `omp --version` working in your terminal
 - **Rust 1.89+**
-- **Tailscale**, signed in and connected
 - **JDK 17+ and Android SDK 36** to build the Android app
-
-Your tailnet must also [allow Tailscale Funnel](#tailscale-funnel--public-simplest).
 
 ### 2. Build and initialize the Gateway
 
@@ -90,15 +87,21 @@ cd ../gateway
 ./target/release/pinkcollab-gateway serve
 ```
 
-### 5. Publish and pair
+### 5. Connect and pair
 
-In a second terminal, from `gateway/`, run:
+The phone needs an HTTPS address that forwards to the Gateway. In a second terminal, from `gateway/`, choose one option:
 
 ```sh
+# Use an HTTPS front end you already run:
+./target/release/pinkcollab-gateway pair --url https://gateway.example.com
+
+# Or set up Tailscale Funnel and pair in one command:
 ./target/release/pinkcollab-gateway setup-funnel --pair
 ```
 
-This publishes the local Gateway over HTTPS, saves its public URL, and prints a single-use QR code. Open PinkCollab on the phone and scan it within **5 minutes**. Then choose a workspace, create a task, and enter your first prompt.
+If `public_url` is already set in `config.yaml`, run `pinkcollab-gateway pair` without `--url`. You do not need to recreate an existing Funnel, Serve, or reverse-proxy setup each time.
+
+Each command prints a single-use QR code. Open PinkCollab on the phone and scan it within **5 minutes**. Then choose a workspace, create a task, and enter your first prompt. See [Connect Android](#connect-android) for all networking options.
 
 > All commands use `~/.pinkcollab` by default. If you pass `--data-dir`, use the same value for every command and for the background service.
 
