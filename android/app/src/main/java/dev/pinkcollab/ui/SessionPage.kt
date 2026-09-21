@@ -93,7 +93,7 @@ internal fun SessionPage(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 top = 8.dp,
-                bottom = maxOf(16.dp, composerClearance),
+                bottom = 0.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -119,12 +119,34 @@ internal fun SessionPage(
                     Column {
                         Text("OMP · replying", style = MaterialTheme.typography.labelMedium, color = Purple200)
                         Spacer(Modifier.height(4.dp))
-                        Text(detail.streaming, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
+                        Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
                     }
                 }
             }
             session.attention?.let { attention -> item { AttentionCard(attention, !busy && attached, onRespond) } }
+            item(key = "composer-placeholder") {
+                Spacer(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(composerClearance + 12.dp)
+                        .background(TimelineBandBase),
+                )
+            }
         }
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(composerClearance + 104.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0.00f to Color.Transparent,
+                        0.42f to Color.Black.copy(alpha = 0.08f),
+                        0.72f to Color.Black.copy(alpha = 0.54f),
+                        1.00f to Color.Black.copy(alpha = 0.86f),
+                    ),
+                ),
+        )
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -207,7 +229,7 @@ internal fun SessionPage(
                     label = "Stop",
                     onClick = { showStopConfirmation = true },
                     enabled = attached && !busy,
-                    color = Red400,
+                    color = TextMid,
                 )
                 Spacer(Modifier.weight(1f))
                 ComposerSendButton(
@@ -238,200 +260,6 @@ internal fun SessionPage(
                 onCommand("stop")
             },
         )
-    }
-}
-
-@Composable
-private fun StopConfirmationDialog(
-    dismiss: () -> Unit,
-    confirm: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = dismiss,
-        icon = { Icon(Icons.Outlined.StopCircle, null, tint = Red400) },
-        title = { Text("Stop this task?") },
-        text = {
-            Text(
-                "This ends the current OMP process. The conversation will remain visible, but the action cannot be undone.",
-                color = TextMid,
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = rememberHapticOnClick(confirm),
-                colors = ButtonDefaults.textButtonColors(contentColor = Red400),
-            ) { Text("Stop task", fontWeight = FontWeight.SemiBold) }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = rememberHapticOnClick(dismiss),
-                colors = ButtonDefaults.textButtonColors(contentColor = TextMid),
-            ) { Text("Keep running") }
-        },
-        shape = RoundedCornerShape(24.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 0.dp,
-    )
-}
-
-@Composable
-private fun ComposerActionButton(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    enabled: Boolean,
-    color: Color,
-) {
-    TextButton(
-        onClick = rememberHapticOnClick(onClick),
-        enabled = enabled,
-        modifier = Modifier.height(40.dp),
-        contentPadding = PaddingValues(horizontal = 5.dp),
-        colors = ButtonDefaults.textButtonColors(
-            contentColor = color,
-            disabledContentColor = Gray400.copy(alpha = 0.34f),
-        ),
-    ) {
-        Icon(icon, null, Modifier.size(17.dp))
-        Spacer(Modifier.width(5.dp))
-        Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium)
-    }
-}
-
-@Composable
-private fun ComposerSendButton(
-    onClick: () -> Unit,
-    enabled: Boolean,
-) {
-    val shape = RoundedCornerShape(14.dp)
-    TextButton(
-        onClick = rememberHapticOnClick(onClick),
-        enabled = enabled,
-        modifier = Modifier
-            .height(40.dp)
-            .then(if (enabled) Modifier.background(BrandGradient, shape) else Modifier),
-        shape = shape,
-        contentPadding = PaddingValues(horizontal = 8.dp),
-        colors = ButtonDefaults.textButtonColors(
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            disabledContentColor = Gray400.copy(alpha = 0.34f),
-        ),
-    ) {
-        Icon(Icons.AutoMirrored.Outlined.Send, null, Modifier.size(17.dp))
-        Spacer(Modifier.width(5.dp))
-        Text("Send", maxLines = 1, style = MaterialTheme.typography.labelMedium)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ModelPickerSheet(
-    state: LoadState<List<ModelInfo>>?,
-    current: ModelInfo?,
-    enabled: Boolean,
-    dismiss: () -> Unit,
-    retry: () -> Unit,
-    select: (ModelInfo) -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = dismiss, containerColor = MaterialTheme.colorScheme.surface) {
-        Column(
-            Modifier.fillMaxWidth().padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(Modifier.padding(horizontal = 24.dp)) {
-                Text("Ctrl+P models", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Mirrors OMP's quick-switch cycle",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMid,
-                )
-                current?.let {
-                    Spacer(Modifier.height(10.dp))
-                    Text("Current · ${it.provider} · ${it.name}", style = MaterialTheme.typography.bodySmall, color = TextMid)
-                }
-            }
-            when (state) {
-                null, LoadState.Loading -> Box(
-                    Modifier.fillMaxWidth().height(160.dp),
-                    contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator(color = Purple400) }
-                is LoadState.Failed -> Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(state.message, color = MaterialTheme.colorScheme.error)
-                    OutlinedButton(onClick = rememberHapticOnClick(retry)) { Text("Retry") }
-                }
-                is LoadState.Ready -> if (state.value.isEmpty()) {
-                    Text(
-                        "No Ctrl+P models are configured.",
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
-                        color = TextMid,
-                    )
-                } else {
-                    val selectedIndex = state.value.indexOfFirst { model ->
-                        current?.let { it.provider == model.provider && it.id == model.id } == true
-                    }
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                        itemsIndexed(
-                            state.value,
-                            key = { _, model -> "${model.role}/${model.provider}/${model.id}" },
-                        ) { index, model ->
-                            val selected = index == selectedIndex
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable(enabled = enabled) { select(model) }
-                                    .padding(horizontal = 20.dp, vertical = 11.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        model.role?.let { role ->
-                                            Surface(
-                                                color = Purple400.copy(alpha = 0.12f),
-                                                shape = RoundedCornerShape(7.dp),
-                                            ) {
-                                                Text(
-                                                    role.uppercase(),
-                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = Purple200,
-                                                )
-                                            }
-                                            Spacer(Modifier.width(9.dp))
-                                        }
-                                        Text(model.name, style = MaterialTheme.typography.bodyLarge)
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        buildString {
-                                            append(model.provider)
-                                            append(" · ")
-                                            append(model.id)
-                                            model.thinkingLevel?.let {
-                                                append(" · ")
-                                                append(it)
-                                            }
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextMid,
-                                    )
-                                }
-                                RadioButton(
-                                    selected = selected,
-                                    onClick = { if (enabled) select(model) },
-                                    enabled = enabled,
-                                    colors = RadioButtonDefaults.colors(selectedColor = Purple400),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -487,7 +315,7 @@ private fun MessageCard(item: SessionDisplayItem.Message) {
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Text(if (isUser) "You" else "Assistant", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = if (isUser) Purple200 else Violet400)
-        Text(item.text, style = MaterialTheme.typography.bodyLarge, color = TextHigh)
+        Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
     }
 }
 
@@ -567,7 +395,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Error", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Red400)
-        Text(item.text, color = TextHigh)
+        Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (item.details.isNotBlank() && item.details != item.text) {
             TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "Collapse" else "View error") }
             if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
@@ -601,7 +429,7 @@ private fun RawTimelineCard(item: TimelineItem) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Purple200; "error" -> Red400; else -> Violet400 })
-        Text(item.text, style = if (isDetail) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge, color = TextHigh)
+        Text(item.text, style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (isDetail && detail.isNotBlank()) { TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
     }
 }
@@ -624,9 +452,9 @@ private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSON
         Row(verticalAlignment = Alignment.CenterVertically) {
             GlowDot(Purple400, pulse = true)
             Spacer(Modifier.width(8.dp))
-            Text("OMP needs your reply", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Purple200)
+            Text("OMP needs your reply", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = Purple200)
         }
-        Text(attention.text, color = TextHigh)
+        Text(attention.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         when (attention.type) {
             "select" -> attention.options.forEach { option ->
                 OutlinedButton(onClick = rememberHapticOnClick { respond(response().put("value", option)) }, enabled = enabled) { Text(option) }

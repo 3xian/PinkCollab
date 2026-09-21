@@ -1,6 +1,8 @@
 package dev.pinkcollab.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -13,11 +15,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.pinkcollab.data.Listing
+import dev.pinkcollab.data.StartupState
 import dev.pinkcollab.ui.theme.GlowBackground
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.Purple200
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 @Composable
@@ -33,7 +37,13 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     }
     var pairAttemptSequence by rememberSaveable { mutableLongStateOf(0L) }
     var selectedSessionId by rememberSaveable { mutableStateOf("") }
+    var minimumStartupElapsed by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+
+    LaunchedEffect(Unit) {
+        delay(900)
+        minimumStartupElapsed = true
+    }
 
     LaunchedEffect(app.error) {
         app.error?.let {
@@ -52,7 +62,14 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     BackHandler(secondary) { route = route.back() }
 
     PinkCollabTheme {
-        Box(Modifier.fillMaxSize()) {
+        Crossfade(
+            targetState = app.startupState == StartupState.Ready && minimumStartupElapsed,
+            animationSpec = tween(420),
+            label = "startupContent",
+        ) { ready ->
+            if (!ready) {
+                StartupLoadingScreen()
+            } else Box(Modifier.fillMaxSize()) {
             GlowBackground(Modifier.matchParentSize())
             Scaffold(
                 containerColor = Color.Transparent,
@@ -167,6 +184,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                     }
                 },
             )
+            }
         }
     }
 }

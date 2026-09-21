@@ -2,10 +2,13 @@ package dev.pinkcollab.data
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -22,11 +25,28 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     private val mutable = MutableStateFlow(AppState())
     val state = mutable.asStateFlow()
     private val jobs = mutableMapOf<String, Job>()
+    private val initialHostLock = Any()
+    private val pendingInitialHosts = mutableSetOf<String>()
     init {
         runCatching { credentials.read() }.onSuccess { saved ->
-            mutable.update { it.copy(hosts = saved.associate { paired -> paired.host.id to HostState(paired) }) }
+            synchronized(initialHostLock) {
+                pendingInitialHosts += saved.map { it.host.id }
+            }
+            mutable.update {
+                it.copy(
+                    hosts = saved.associate { paired -> paired.host.id to HostState(paired) },
+                    startupState = if (saved.isEmpty()) StartupState.Ready else StartupState.Loading,
+                )
+            }
             saved.forEach { connect(it) }
-        }.onFailure { error("Pairing data could not be decrypted; pair again: ${it.message}") }
+        }.onFailure {
+            mutable.update { state ->
+                state.copy(
+                    error = "Pairing data could not be decrypted; pair again: ${it.message}",
+                    startupState = StartupState.Ready,
+                )
+            }
+        }
     }
     fun error(message: String?) { mutable.update { it.copy(error = message) } }
     private fun paired(id: String) = state.value.hosts[id]?.paired ?: throw IllegalStateException("Host removed")
@@ -50,8 +70,24 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     private fun connect(paired: PairedHost) {
         jobs[paired.host.id] = scope.launch {
             var backoff = 1000L
+            var initialAttempt = true
             while (isActive) {
-                runCatching { refreshHost(paired.host.id) }
+                if (initialAttempt) {
+                    initialAttempt = false
+                    try {
+                        withTimeout(INITIAL_HOST_TIMEOUT_MS) { refreshHost(paired.host.id) }
+                    } catch (_: TimeoutCancellationException) {
+                        startupHostFailed(paired.host.id, "Connection timed out")
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        startupHostFailed(paired.host.id, error.message ?: "Connection failed")
+                    } finally {
+                        initialHostLoaded(paired.host.id)
+                    }
+                } else {
+                    runCatching { refreshHost(paired.host.id) }
+                }
                 suspendCancellableCoroutine<Unit> { continuation ->
                     val socket = api.client.newWebSocket(Request.Builder().url(paired.url + "/api/v1/events").header("Authorization", "Bearer ${paired.credential}").build(), object : WebSocketListener() {
                         override fun onOpen(webSocket: WebSocket, response: Response) { backoff = 1000L }
@@ -69,6 +105,17 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                 delay(backoff); backoff = (backoff * 2).coerceAtMost(30000L)
             }
         }
+    }
+    private fun initialHostLoaded(hostId: String) {
+        val complete = synchronized(initialHostLock) {
+            pendingInitialHosts.remove(hostId)
+            pendingInitialHosts.isEmpty()
+        }
+        if (complete) mutable.update { it.copy(startupState = StartupState.Ready) }
+    }
+    private fun startupHostFailed(hostId: String, reason: String) {
+        val name = state.value.hosts[hostId]?.paired?.host?.name ?: "OMP host"
+        mutable.update { it.copy(error = "$name is offline: $reason") }
     }
     private fun event(hostId: String, frame: JSONObject) {
         val payload = frame.getJSONObject("payload")
@@ -188,5 +235,9 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
 
     suspend fun command(hostId: String, id: String, command: String, body: JSONObject = JSONObject()) {
         val p = paired(hostId); api.request(p.url, p.credential, "/api/v1/sessions/$id/$command", "POST", body); detail(hostId, id)
+    }
+
+    private companion object {
+        const val INITIAL_HOST_TIMEOUT_MS = 5_000L
     }
 }

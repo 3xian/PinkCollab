@@ -1,0 +1,214 @@
+package dev.pinkcollab.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.StopCircle
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import dev.pinkcollab.data.ModelInfo
+import dev.pinkcollab.ui.theme.*
+
+@Composable
+internal fun StopConfirmationDialog(
+    dismiss: () -> Unit,
+    confirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = dismiss,
+        icon = { Icon(Icons.Outlined.StopCircle, null, tint = TextMid) },
+        title = { Text("Stop this task?") },
+        text = {
+            Text(
+                "This ends the current OMP process. The conversation will remain visible, but the action cannot be undone.",
+                color = TextMid,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = rememberHapticOnClick(confirm),
+                colors = ButtonDefaults.textButtonColors(contentColor = TextHigh),
+            ) { Text("Stop task", fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = rememberHapticOnClick(dismiss),
+                colors = ButtonDefaults.textButtonColors(contentColor = TextMid),
+            ) { Text("Keep running") }
+        },
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp,
+    )
+}
+
+@Composable
+internal fun ComposerActionButton(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    color: Color,
+) {
+    TextButton(
+        onClick = rememberHapticOnClick(onClick),
+        enabled = enabled,
+        modifier = Modifier.height(40.dp),
+        contentPadding = PaddingValues(horizontal = 5.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = color,
+            disabledContentColor = Gray400.copy(alpha = 0.34f),
+        ),
+    ) {
+        Icon(icon, null, Modifier.size(17.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
+internal fun ComposerSendButton(
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    TextButton(
+        onClick = rememberHapticOnClick(onClick),
+        enabled = enabled,
+        modifier = Modifier
+            .height(40.dp)
+            .then(if (enabled) Modifier.background(BrandGradient, shape) else Modifier),
+        shape = shape,
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            disabledContentColor = Gray400.copy(alpha = 0.34f),
+        ),
+    ) {
+        Icon(Icons.AutoMirrored.Outlined.Send, null, Modifier.size(17.dp))
+        Spacer(Modifier.width(5.dp))
+        Text("Send", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+internal fun isSelectedModel(current: ModelInfo?, candidate: ModelInfo): Boolean {
+    current ?: return false
+    if (current.provider != candidate.provider || current.id != candidate.id) return false
+    if (current.role != null) return current.role == candidate.role &&
+        current.thinkingLevel == candidate.thinkingLevel
+    return candidate.thinkingLevel == null || current.thinkingLevel == candidate.thinkingLevel
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ModelPickerSheet(
+    state: LoadState<List<ModelInfo>>?,
+    current: ModelInfo?,
+    enabled: Boolean,
+    dismiss: () -> Unit,
+    retry: () -> Unit,
+    select: (ModelInfo) -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = dismiss, containerColor = MaterialTheme.colorScheme.surface) {
+        Column(
+            Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Column(Modifier.padding(horizontal = 24.dp)) {
+                Text("Models", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                current?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Current · ${it.provider} · ${it.name}", style = MaterialTheme.typography.bodySmall, color = TextMid)
+                }
+            }
+            when (state) {
+                null, LoadState.Loading -> Box(
+                    Modifier.fillMaxWidth().height(160.dp),
+                    contentAlignment = Alignment.Center,
+                ) { CircularProgressIndicator(color = Purple400) }
+                is LoadState.Failed -> Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(state.message, color = MaterialTheme.colorScheme.error)
+                    OutlinedButton(onClick = rememberHapticOnClick(retry)) { Text("Retry") }
+                }
+                is LoadState.Ready -> if (state.value.isEmpty()) {
+                    Text(
+                        "No Ctrl+P models are configured.",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
+                        color = TextMid,
+                    )
+                } else {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+                        itemsIndexed(
+                            state.value,
+                            key = { _, model -> "${model.role}/${model.provider}/${model.id}/${model.thinkingLevel}" },
+                        ) { _, model ->
+                            val selected = isSelectedModel(current, model)
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = enabled) { select(model) }
+                                    .padding(horizontal = 20.dp, vertical = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        model.role?.let { role ->
+                                            Surface(
+                                                color = Purple400.copy(alpha = 0.12f),
+                                                shape = RoundedCornerShape(7.dp),
+                                            ) {
+                                                Text(
+                                                    role.uppercase(),
+                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Purple200,
+                                                )
+                                            }
+                                            Spacer(Modifier.width(9.dp))
+                                        }
+                                        Text(model.name, style = MaterialTheme.typography.bodyLarge)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        buildString {
+                                            append(model.provider)
+                                            append(" · ")
+                                            append(model.id)
+                                            model.thinkingLevel?.let {
+                                                append(" · ")
+                                                append(it)
+                                            }
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMid,
+                                    )
+                                }
+                                RadioButton(
+                                    selected = selected,
+                                    onClick = { if (enabled) select(model) },
+                                    enabled = enabled,
+                                    colors = RadioButtonDefaults.colors(selectedColor = Purple400),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -52,7 +52,13 @@ data class SessionDetail(val session: Session, val timeline: List<TimelineItem>,
 data class Workspace(val name: String, val path: String)
 data class Listing(val path: String, val parent: String?, val directories: List<Workspace>, val branch: String?, val gitStatus: String?)
 data class HostState(val paired: PairedHost, val connected: Boolean = false, val sessions: List<Session> = emptyList(), val workspaces: List<Workspace> = emptyList(), val revision: Long = 0)
-data class AppState(val hosts: Map<String, HostState> = emptyMap(), val details: Map<String, SessionDetail> = emptyMap(), val error: String? = null)
+enum class StartupState { Loading, Ready }
+data class AppState(
+    val hosts: Map<String, HostState> = emptyMap(),
+    val details: Map<String, SessionDetail> = emptyMap(),
+    val error: String? = null,
+    val startupState: StartupState = StartupState.Loading,
+)
 
 fun JSONObject.host() = Host(getString("id"), getString("name"), getString("os"), optString("ompVersion"), optString("gatewayVersion"))
 fun Host.json() = JSONObject().put("id", id).put("name", name).put("os", os).put("ompVersion", ompVersion).put("gatewayVersion", gatewayVersion)
