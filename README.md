@@ -236,8 +236,19 @@ Removing a pairing in Android only clears the phone's local copy — use `revoke
 
 ## Run as a background service
 
-All three run as the same regular OS user that owns `~/.pinkcollab` and the workspaces. `init` already
-wrote an absolute `omp` path, which is what these need: only edit it if OMP moved.
+All three run as the same regular OS user that owns `~/.pinkcollab` and the workspaces, and all three
+expect the Gateway at `~/.local/bin/pinkcollab-gateway` on macOS and Linux. From the repository root:
+
+```sh
+mkdir -p ~/.local/bin
+cp gateway/target/release/pinkcollab-gateway ~/.local/bin/
+chmod 755 ~/.local/bin/pinkcollab-gateway
+```
+
+Edit `ExecStart`/`ProgramArguments` instead if you keep the binary elsewhere. `init` already wrote an
+absolute `omp` path into `config.yaml`, so OMP only has to stay where it is; the units still set `PATH`
+because that path is usually a launcher script that resolves `bun` or `node` from a shell environment a
+service manager does not inherit.
 
 ### Windows
 
@@ -254,7 +265,26 @@ sc.exe stop PinkCollab
 
 ### Linux (systemd)
 
-Copy `deploy/pinkcollab.service` to `~/.config/systemd/user/`:
+Write `~/.config/systemd/user/pinkcollab.service`:
+
+```ini
+[Unit]
+Description=PinkCollab Oh My Pi Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/pinkcollab-gateway --data-dir %h/.pinkcollab serve
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+UMask=0077
+
+[Install]
+WantedBy=default.target
+```
 
 ```sh
 systemctl --user daemon-reload
@@ -266,7 +296,27 @@ Add `loginctl enable-linger YOUR_USER` to keep it running after logout.
 
 ### macOS (launchd)
 
-Replace `YOUR_USER` in `deploy/dev.pinkcollab.gateway.plist` and copy it to `~/Library/LaunchAgents/`:
+Write `~/Library/LaunchAgents/dev.pinkcollab.gateway.plist`, replacing `YOUR_USER`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>Label</key><string>dev.pinkcollab.gateway</string>
+    <key>ProgramArguments</key><array>
+        <string>/Users/YOUR_USER/.local/bin/pinkcollab-gateway</string>
+        <string>--data-dir</string><string>/Users/YOUR_USER/.pinkcollab</string>
+        <string>serve</string>
+    </array>
+    <key>EnvironmentVariables</key><dict>
+        <key>PATH</key><string>/Users/YOUR_USER/.local/bin:/Users/YOUR_USER/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+    <key>StandardOutPath</key><string>/Users/YOUR_USER/.pinkcollab/gateway.log</string>
+    <key>StandardErrorPath</key><string>/Users/YOUR_USER/.pinkcollab/gateway-error.log</string>
+</dict></plist>
+```
 
 ```sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.pinkcollab.gateway.plist
@@ -336,7 +386,6 @@ cd ../android
 ```text
 gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace · windows
 android/app/src/main/java/dev/pinkcollab/   data · ui · ui/theme
-deploy/        systemd and launchd templates
 docs/          API protocol (protocol.md)
 ```
 
