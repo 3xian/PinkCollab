@@ -16,11 +16,11 @@ A remote control plane for **Oh My Pi (OMP)**: start and follow agent tasks on y
 - Browse an allowed project directory and create a task in it.
 - Watch streaming replies, tool activity, and questions the agent asks.
 - Send **Prompt / Steer**, answer those questions, **Interrupt**, or **Stop**.
-- See tasks from several hosts at once, grouped into **Needs Attention**, **Running**, and **Recent**.
+- See tasks from every paired host in one list, newest first, each with its live status.
 
 Gateway: **Rust / Tokio / Axum / SQLite**, shipped as one standalone executable.
 Android: **Kotlin / Jetpack Compose / Material 3**.
-Model provider credentials stay on the host. *(why: the Gateway only forwards prompts to a local OMP process — the phone never talks to a model provider, so no API key ever leaves the machine.)*
+Model provider credentials stay on the host — the phone talks to your Gateway, never to a model provider.
 
 <p align="center">
   <img src="docs/assets/pinkcollab-better-life.webp" width="480" alt="Before PinkCollab: late-night work at a desk. With PinkCollab: relaxing while managing agent tasks from a phone." />
@@ -39,7 +39,7 @@ flowchart LR
 - **Gateway** authenticates the caller, enforces the workspace allowlist, and owns the task lifecycle.
 - **OMP** runs as one subprocess per task (`omp --mode rpc-ui`); the Gateway speaks NDJSON to it over stdin/stdout.
 
-*Why one subprocess per task: it isolates failures — a crashed task cannot take down the others, and each keeps its own conversation history.*
+*Why one subprocess per task: a crashed task cannot take down the others.*
 
 ## Quick start
 
@@ -57,7 +57,7 @@ On Windows, use `target\release\pinkcollab-gateway.exe`.
 The five steps, in order:
 
 1. **Build** the Gateway binary.
-2. **`init` once** — creates `~/.pinkcollab` (mode `0700`) and `config.yaml` (mode `0600`) with `--workspace` as its single allowed root. It never starts the server and refuses to overwrite an existing config, so add more roots by editing `workspaces`.
+2. **`init` once** — creates `~/.pinkcollab` and `config.yaml` with `--workspace` as its single allowed root. On Unix both are private to your user (`0700` / `0600`); Windows keeps the directory's default ACL. It only writes the config, never starts the server, and refuses to overwrite an existing one — add more roots by editing `workspaces`.
 3. **Edit the config** for an absolute `omp` path, more workspaces, or HTTPS.
 4. **Run it** — in the foreground, or [as a background service](#run-as-a-background-service).
 5. **`pair`**, scan the QR code, then create your first task.
@@ -81,19 +81,19 @@ Lives at `~/.pinkcollab/config.yaml`; see [`gateway/config.example.yaml`](gatewa
 
 | Key | Default | What it decides |
 | --- | --- | --- |
-| `listen` | `127.0.0.1:8787` | The socket to bind — **must be a loopback address**. *(why: the Gateway serves plain HTTP and never handles TLS, so loopback is the only safe place for it; HTTPS is always produced by whatever sits in front.)* |
+| `listen` | `127.0.0.1:8787` | The socket to bind — **must be a loopback address**. |
 | `public_url` | empty | The root URL the phone dials, baked into the QR code. Must be `https://…` in production. |
 | `name` | hostname | The host label shown in Android. |
 | `workspaces` | `[]` | Allowed root directories — the Gateway refuses to touch anything outside them. *This is the sandbox for all file access.* |
 | `omp` | `omp` | The OMP executable. **Use an absolute path for services**: their `PATH` differs from your terminal's, so a bare `omp` fails there. |
 | `omp_args` | `[]` | Extra OMP flags; may not override `--mode` or session storage. |
-| `max_sessions` | `8` | Concurrent OMP runtimes (1–100). Finished sessions keep their slot until stopped, so **Stop** frees capacity. |
+| `max_sessions` | `8` | Concurrent **live** OMP processes (1–100). A session frees its slot as soon as its process exits — on completion, failure, or **Stop** — so finished tasks do not count against it. |
 
 Startup validation rejects: empty `workspaces`, `max_sessions` outside 1–100, a non-loopback `listen`, a `public_url` that is not a bare root URL, and `omp_args` that override mode or session storage.
 
 ## Connect Android
 
-Android requires **HTTPS/WSS**. Plain HTTP is allowed only in debug builds for `localhost`, `127.0.0.1`, and the emulator host `10.0.2.2`. *(why: the phone carries a long-lived credential; sending it in cleartext over any real network would hand over full access to your host.)*
+Android requires **HTTPS/WSS**. Plain HTTP is allowed only in debug builds for `localhost`, `127.0.0.1`, and the emulator host `10.0.2.2`.
 
 The Gateway **always listens on loopback and never handles TLS**; something in front of it terminates HTTPS and forwards to `127.0.0.1:8787`. That front end is the only thing you pick:
 
@@ -146,8 +146,6 @@ tailscale serve --bg http://127.0.0.1:8787
 listen: 127.0.0.1:8787
 public_url: https://<hostname>.ts.net
 ```
-
-This is the private counterpart of Funnel — same command shape, no public entry point.
 
 ### Your own reverse proxy
 
@@ -229,7 +227,9 @@ launchctl kickstart -k gui/$(id -u)/dev.pinkcollab.gateway
 
 ### Updates
 
-Stop the service, replace the binary, start it again. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started. Configs created by releases with embedded TLS remain compatible when `tls_cert` and `tls_key` are null; deployments that used those fields must move TLS termination to Funnel, Serve, or a reverse proxy and remove the fields.
+Stop the service, replace the binary, start it again. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started.
+
+Configs written before embedded TLS was removed must drop `tls_cert` and `tls_key` entirely — the Gateway rejects any config that still sets them — and move TLS termination to Funnel, Serve, or a reverse proxy.
 
 ## Build Android
 
@@ -246,7 +246,15 @@ Install on a connected device:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-To start a task: **Workspaces → choose a directory → create a task → enter a prompt → start**. Sending a message while the agent runs uses Steer; an idle or finished session accepts another Prompt. Interrupt keeps the runtime; Stop closes it.
+To start a task: **Workspaces → choose a directory → create a task → enter a prompt → start**. The directory browser shows each project's Git branch and working-tree status when `git` is available.
+
+Actions on a task:
+
+- **Prompt / Steer** — the button label and the `streamingBehavior` sent to OMP both key off `status == "running"`: a running session is steered, anything else (idle, completed, failed) starts a new turn.
+- **Interrupt** sends OMP `abort` and keeps the runtime attached, so you can keep prompting.
+- **Stop** closes OMP's stdin and terminates the process; the session then takes no further commands.
+- **Switch model** cycles the model scope configured on that host, and appears only while a runtime is attached and OMP reports a model.
+- **Delete** is not exposed in the app: `DELETE /api/v1/sessions/:id` drops Gateway-side management metadata once the session is stopped, and never touches OMP's own session files.
 
 On some Windows/JDK setups Gradle fails with `Unable to establish loopback connection` — create `C:/tmp` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/tmp`.
 
@@ -267,19 +275,19 @@ cd gateway
 cargo fmt --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-features --locked
-cargo test --test omp_smoke -- --ignored   # handshake smoke test against installed OMP
+cargo test --test omp_smoke -- --ignored   # #[ignore]d: needs OMP installed, or OMP_EXECUTABLE set
 
 cd ../android
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
-Tests drive real HTTP/WebSocket connections and real NDJSON subprocess I/O. The deterministic `omp-fixture` builds only with the `test-fixtures` feature.
+`omp-fixture`, the deterministic stand-in for a real OMP, builds only with the `test-fixtures` feature.
 
 ## Project layout
 
 ```text
-gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace
-android/app/src/main/java/dev/pinkcollab/   data · ui
+gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace · windows
+android/app/src/main/java/dev/pinkcollab/   data · ui · ui/theme
 deploy/        systemd and launchd templates
 docs/          API protocol (protocol.md)
 ```
@@ -288,7 +296,6 @@ docs/          API protocol (protocol.md)
 
 - No terminal emulator, Git client, code editor, or Cloud Relay.
 - No multi-user permissions — one host identity with paired devices.
-- Cannot attach to OMP sessions started manually in a terminal.
-- Restarting does not restore exited OMP processes.
+- Sessions are managed, not adopted: one started by hand in a terminal cannot be attached, and an exited process is not restored on restart (it shows as **offline**).
 - Live tool events are buffered in memory; after a restart, history is restored from OMP files without the full tool transcript.
-- Android background notifications are planned; **Needs Attention** updates while the app is open.
+- Android background notifications are planned; a task waiting on your input only shows it while the app is open.
