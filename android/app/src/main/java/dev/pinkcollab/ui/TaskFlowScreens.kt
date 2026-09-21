@@ -9,7 +9,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.Listing
@@ -29,7 +28,6 @@ internal fun DirectoryBrowserScreen(
         is LoadState.Ready -> DirectoryListing(listing.value, hostName, browse, select)
     }
 }
-
 @Composable
 private fun DirectoryListing(
     listing: Listing,
@@ -97,7 +95,6 @@ private fun DirectoryListing(
         }
     }
 }
-
 @Composable
 internal fun CreateTaskScreen(
     host: HostState?,
@@ -145,64 +142,6 @@ internal fun CreateTaskScreen(
                     Icon(Icons.Outlined.PlayArrow, null)
                     Spacer(Modifier.width(8.dp))
                     Text(if (busy) "Starting OMP…" else "Start task")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun PairHostScreen(
-    url: String,
-    token: String,
-    busy: Boolean,
-    onURL: (String) -> Unit,
-    onToken: (String) -> Unit,
-    scan: () -> Unit,
-    pair: () -> Unit,
-) {
-
-    LazyColumn(contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item {
-            Text("Connect your OMP host", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Run the pair command on the host and scan the QR code it prints. The code expires in 5 minutes.",
-                color = TextMid,
-            )
-        }
-        item {
-            OutlinedButton(onClick = rememberHapticOnClick(scan), enabled = !busy) {
-                Icon(Icons.Outlined.QrCodeScanner, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Scan pairing code")
-            }
-        }
-        item { Text("Or enter it manually", style = MaterialTheme.typography.labelLarge, color = TextMid) }
-        item {
-            OutlinedTextField(
-                url,
-                onURL,
-                label = { Text("Gateway address") },
-                placeholder = { Text("https://dev-server.example.com") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !busy,
-            )
-        }
-        item {
-            OutlinedTextField(
-                token,
-                onToken,
-                label = { Text("One-time pairing token") },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !busy,
-            )
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                PrimaryButton(onClick = pair, enabled = url.isNotBlank() && token.isNotBlank() && !busy) {
-                    Text("Pair")
                 }
             }
         }

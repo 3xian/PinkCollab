@@ -1,7 +1,6 @@
 package dev.pinkcollab.ui
 
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -13,8 +12,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 import dev.pinkcollab.data.Listing
 import dev.pinkcollab.ui.theme.GlowBackground
 import dev.pinkcollab.ui.theme.PinkCollabTheme
@@ -30,6 +27,10 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val operations by vm.operations.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
     var route by rememberSaveable(stateSaver = AppRouteSaver) { mutableStateOf<AppRoute>(AppRoute.Tasks) }
+    var pairHost by rememberSaveable(stateSaver = PairHostSheetStateSaver) {
+        mutableStateOf(PairHostSheetState())
+    }
+    var pairAttemptSequence by rememberSaveable { mutableLongStateOf(0L) }
     var selectedSessionId by rememberSaveable { mutableStateOf("") }
     val snackbar = remember { SnackbarHostState() }
 
@@ -40,13 +41,9 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
         }
     }
 
-    val scanner = rememberLauncherForActivityResult(ScanContract()) { result ->
-        result.contents?.let { value ->
-            runCatching {
-                val json = JSONObject(value)
-                require(json.getInt("version") == 1) { "Unsupported pairing code version" }
-                route = AppRoute.PairHost(json.getString("url"), json.getString("token"))
-            }.onFailure { repo.error("Unrecognized PinkCollab pairing code: ${it.message}") }
+    LaunchedEffect(pairHost.attemptId, operations) {
+        if (pairHost.attemptId != 0L && OperationKey.PairHost !in operations) {
+            pairHost = pairHost.copy(attemptId = 0)
         }
     }
 
@@ -78,7 +75,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             selectedSessionId = selectedSessionId,
                             onSessionSelected = { selectedSessionId = it },
                             openResources = { route = AppRoute.Resources },
-                            connectHost = { route = AppRoute.PairHost() },
+                            connectHost = { pairHost = PairHostSheetState(visible = true) },
                             loadSession = vm::loadDetail,
                             onPrompt = { session, message, onSent ->
                                 vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
@@ -107,7 +104,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             app = app,
                             hostBusy = { OperationKey.Host(it) in operations },
                             browse = { hostId, path -> route = AppRoute.Browser(hostId, path) },
-                            pair = { route = AppRoute.PairHost() },
+                            pair = { pairHost = PairHostSheetState(visible = true) },
                             refresh = { hostId -> vm.run(OperationKey.Host(hostId)) { repo.refreshHost(hostId) } },
                             forget = { hostId -> vm.run(OperationKey.Host(hostId)) { repo.forget(hostId) } },
                         )
@@ -139,28 +136,6 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             )
                         }
 
-                        is AppRoute.PairHost -> PairHostScreen(
-                            url = current.url,
-                            token = current.token,
-                            busy = OperationKey.PairHost in operations,
-                            onURL = { route = current.copy(url = it) },
-                            onToken = { route = current.copy(token = it) },
-                            scan = {
-                                scanner.launch(
-                                    ScanOptions()
-                                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                                        .setPrompt("Scan the pairing code from the Gateway")
-                                        .setBeepEnabled(false)
-                                        .setOrientationLocked(true),
-                                )
-                            },
-                            pair = {
-                                vm.run(OperationKey.PairHost, "Unable to connect host") {
-                                    repo.pair(current.url, current.token)
-                                    route = AppRoute.Resources
-                                }
-                            },
-                        )
                     }
                 }
             }
@@ -173,6 +148,31 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", Modifier.size(28.dp), tint = Purple200)
                 }
             }
+
+            PairHostModal(
+                state = pairHost,
+                onStateChange = { pairHost = it },
+                onPair = { url, token ->
+                    pairAttemptSequence += 1
+                    val attemptId = pairAttemptSequence
+                    pairHost = pairHost.copy(error = null, attemptId = attemptId)
+                    vm.run(
+                        key = OperationKey.PairHost,
+                        errorMessage = "Unable to connect host",
+                        onError = { message ->
+                            if (pairHost.attemptId == attemptId) {
+                                pairHost = pairHost.copy(error = message, attemptId = 0)
+                            }
+                        },
+                    ) {
+                        repo.pair(url, token)
+                        if (pairHost.attemptId == attemptId) {
+                            pairHost = PairHostSheetState()
+                            route = AppRoute.Resources
+                        }
+                    }
+                },
+            )
         }
     }
 }

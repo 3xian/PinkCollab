@@ -26,6 +26,7 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
     internal fun run(
         key: OperationKey,
         errorMessage: String = "Action failed",
+        onError: ((String) -> Unit)? = null,
         action: suspend () -> Unit,
     ) {
         val started = synchronized(operationLock) {
@@ -38,13 +39,14 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (!started) return
         viewModelScope.launch {
-            repository.error(null)
+            if (onError == null) repository.error(null)
             try {
                 action()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                repository.error(e.message ?: errorMessage)
+                val message = e.message ?: errorMessage
+                if (onError == null) repository.error(message) else onError(message)
             } finally {
                 synchronized(operationLock) { mutableOperations.value -= key }
             }

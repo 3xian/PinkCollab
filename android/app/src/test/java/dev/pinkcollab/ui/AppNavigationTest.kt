@@ -13,7 +13,6 @@ class AppNavigationTest {
     fun nestedPagesReturnOneLevelAtATime() {
         assertEquals(AppRoute.Browser("host", "F:/code"), AppRoute.CreateTask("host", "F:/code").back())
         assertEquals(AppRoute.Resources, AppRoute.Browser("host", "F:/code").back())
-        assertEquals(AppRoute.Resources, AppRoute.PairHost().back())
     }
 
     @Test
@@ -23,7 +22,6 @@ class AppNavigationTest {
             AppRoute.Resources,
             AppRoute.Browser("host-1", "F:/code/PinkCollab"),
             AppRoute.CreateTask("host-1", "F:/code/PinkCollab"),
-            AppRoute.PairHost("https://gateway.example", "secret"),
         )
 
         routes.forEach { route -> assertEquals(route, restoreRoute(route.savedState())) }
