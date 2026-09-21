@@ -104,3 +104,44 @@ impl Config {
         Ok(c)
     }
 }
+/// Resolves an executable to an absolute path, looking up bare names on `PATH` and honouring
+/// `PATHEXT` on Windows.
+pub fn resolve_executable(name: &str) -> Option<PathBuf> {
+    let given = Path::new(name);
+    if given.components().count() > 1 {
+        return given
+            .canonicalize()
+            .ok()
+            .filter(|candidate| executable(candidate));
+    }
+    let extensions: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+            .split(';')
+            .filter(|e| !e.is_empty())
+            .map(str::to_owned)
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    std::env::split_paths(&std::env::var_os("PATH")?).find_map(|dir| {
+        extensions
+            .iter()
+            .map(|extension| dir.join(format!("{name}{extension}")))
+            // Windows needs the bare name too, for a caller that already spelled out `omp.exe`.
+            .chain(std::iter::once(dir.join(name)))
+            .find(|candidate| executable(candidate))
+            .map(|candidate| candidate.canonicalize().unwrap_or(candidate))
+    })
+}
+fn executable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        path.is_file() && std::fs::metadata(path).is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(windows)]
+    {
+        path.is_file()
+    }
+}

@@ -1,5 +1,6 @@
 use crate::storage::id;
 use anyhow::{Context, Result, bail, ensure};
+use parking_lot::Mutex;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -7,11 +8,12 @@ use std::{
     path::Path,
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
+use tokio::process::Command as TokioCommand;
 use tokio::sync::{mpsc, oneshot, watch};
 
 /// Framing limit for a single NDJSON frame in either direction. This is PinkCollab's own bound:
@@ -24,6 +26,22 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long OMP may take to exit after its stdin closes before it is killed.
 const TERMINATE_GRACE: Duration = Duration::from_secs(3);
+/// One bounded `omp --version` probe; `unavailable` covers a missing binary and any failure.
+pub async fn version(executable: &str) -> String {
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        TokioCommand::new(executable)
+            .kill_on_drop(true)
+            .arg("--version")
+            .output(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .filter(|output| output.status.success())
+    .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    .unwrap_or_else(|| "unavailable".into())
+}
 
 pub enum Output {
     Frame(Value),
@@ -47,7 +65,7 @@ impl Process {
         if self.terminated.swap(true, Ordering::SeqCst) {
             return None;
         }
-        let mut child = self.child.lock().unwrap();
+        let mut child = self.child.lock();
         let deadline = Instant::now() + grace;
         loop {
             match child.try_wait() {
@@ -87,7 +105,7 @@ impl Shutdown {
             (!*self.requested.borrow() && status.is_some_and(|status| !status.success()))
                 .then(|| "OMP process exited unexpectedly".to_string())
         });
-        self.pending.lock().unwrap().clear();
+        self.pending.lock().clear();
         let _ = self.exited.send(true);
         let _ = self.output.blocking_send(Output::Exited(reason));
     }
@@ -166,8 +184,7 @@ impl Runtime {
                     let _ = ready_tx.send(true);
                 }
                 if string(&value, "type") == "response"
-                    && let Some(responder) =
-                        reader_pending.lock().unwrap().remove(string(&value, "id"))
+                    && let Some(responder) = reader_pending.lock().remove(string(&value, "id"))
                 {
                     let _ = responder.send(value);
                     continue;
@@ -206,7 +223,7 @@ impl Runtime {
                     }
                 };
                 // Releasing the last stdin handle asks OMP to exit on its own.
-                let _ = stdin.lock().unwrap().take();
+                let _ = stdin.lock().take();
                 reason
             });
             writer.finish(reason);
@@ -258,7 +275,7 @@ impl Runtime {
         let request_id = id("req_");
         frame["id"] = json!(request_id);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(request_id.clone(), tx);
+        self.pending.lock().insert(request_id.clone(), tx);
         let result = async {
             self.write(frame).await?;
             let response = tokio::time::timeout(Duration::from_secs(15), rx)
@@ -273,7 +290,7 @@ impl Runtime {
             Ok(response)
         }
         .await;
-        self.pending.lock().unwrap().remove(&request_id);
+        self.pending.lock().remove(&request_id);
         result
     }
 
@@ -311,7 +328,7 @@ async fn write_frame(pipe: &Arc<Mutex<Option<Box<dyn Write + Send>>>>, value: Va
     bytes.push(b'\n');
     let pipe = pipe.clone();
     let write = tokio::task::spawn_blocking(move || -> Result<()> {
-        let mut guard = pipe.lock().unwrap();
+        let mut guard = pipe.lock();
         let stream = guard.as_mut().context("OMP stdin is closed")?;
         stream.write_all(&bytes)?;
         stream.flush()?;

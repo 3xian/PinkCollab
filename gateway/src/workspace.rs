@@ -27,20 +27,30 @@ pub struct Listing {
 pub struct Browser {
     roots: Vec<PathBuf>,
 }
+/// Canonicalizes, validates and de-duplicates workspace roots while preserving their order.
+pub fn canonical_roots(roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    ensure!(!roots.is_empty(), "at least one workspace required");
+    let mut canonical = Vec::with_capacity(roots.len());
+    for root in roots {
+        let root = root
+            .canonicalize()
+            .with_context(|| format!("workspace unavailable: {}", root.display()))?;
+        ensure!(
+            root.is_dir(),
+            "workspace must be a directory: {}",
+            root.display()
+        );
+        if !canonical.contains(&root) {
+            canonical.push(root);
+        }
+    }
+    Ok(canonical)
+}
 impl Browser {
     pub fn new(roots: &[PathBuf]) -> Result<Self> {
-        let roots: Vec<PathBuf> = roots
-            .iter()
-            .map(|r| {
-                r.canonicalize()
-                    .with_context(|| format!("workspace unavailable: {}", r.display()))
-            })
-            .collect::<Result<_>>()?;
-        ensure!(
-            !roots.is_empty() && roots.iter().all(|p| p.is_dir()),
-            "workspaces must be existing directories"
-        );
-        Ok(Self { roots })
+        Ok(Self {
+            roots: canonical_roots(roots)?,
+        })
     }
     pub fn roots(&self) -> Vec<Directory> {
         self.roots

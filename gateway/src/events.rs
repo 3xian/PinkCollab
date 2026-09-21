@@ -4,8 +4,8 @@ use crate::{
     storage::id,
 };
 use chrono::Utc;
+use parking_lot::Mutex;
 use serde_json::{Value, json};
-use std::sync::Mutex;
 use tokio::sync::broadcast;
 
 pub struct Bus {
@@ -21,7 +21,7 @@ impl Default for Bus {
 }
 impl Bus {
     pub fn publish(&self, kind: &str, payload: Value) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock();
         state.0 += 1;
         let _ = state.1.send(Event {
             sequence: state.0,
@@ -31,7 +31,7 @@ impl Bus {
         });
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
-        self.state.lock().unwrap().1.subscribe()
+        self.state.lock().1.subscribe()
     }
 }
 #[derive(Default)]

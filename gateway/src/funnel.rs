@@ -51,11 +51,32 @@ fn node(status: &serde_json::Value) -> Result<&str> {
         .filter(|v| !v.is_empty())
         .context("cannot read this node's tailnet DNS name; enable MagicDNS in the admin console")
 }
+pub struct NodeStatus {
+    pub backend_state: String,
+    pub dns_name: Option<String>,
+}
+/// Tailscale connection state for diagnostics. This does not imply that Serve or Funnel is set up.
+pub fn state(binary: &Path) -> Result<NodeStatus> {
+    let status = status(binary)?;
+    Ok(NodeStatus {
+        backend_state: status["BackendState"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_owned(),
+        dns_name: status["Self"]["DNSName"]
+            .as_str()
+            .map(|value| value.trim_end_matches('.'))
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned),
+    })
+}
 /// Publish the loopback Gateway on the internet through Tailscale Funnel.
 ///
 /// Funnel only solves reachability: pairing, bearer credentials, revocation and the
 /// workspace allowlist keep protecting the Gateway exactly as they do on a private network.
-pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<()> {
+///
+/// Returns the public URL it published, or `None` when this was a dry run.
+pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<Option<String>> {
     let port = config.listen.port();
     ensure!(
         allows_https_port(options.https_port),
@@ -85,7 +106,7 @@ pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<()> {
             options.https_port,
             dir.join("config.yaml").display()
         );
-        return Ok(());
+        return Ok(None);
     }
     let output = Command::new(binary)
         .args([
@@ -113,11 +134,10 @@ pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<()> {
     println!(
         "public_url set to {public} in {}\n\
          This URL is reachable from the internet: keep pairing single-use, keep credentials revocable,\n\
-         and do not rely on the URL being hard to guess.\n\
-         Next: pinkcollab-gateway pair",
+         and do not rely on the URL being hard to guess.",
         path.display()
     );
-    Ok(())
+    Ok(Some(public))
 }
 /// Rewrite only the public_url line, so hand-written comments survive.
 fn set_public_url(path: &Path, url: &str) -> Result<()> {

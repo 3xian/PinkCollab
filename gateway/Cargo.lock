@@ -1053,6 +1053,7 @@ dependencies = [
  "futures-util",
  "hex",
  "image",
+ "parking_lot",
  "qrcode",
  "rand",
  "reqwest",

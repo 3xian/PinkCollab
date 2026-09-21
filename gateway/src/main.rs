@@ -1,16 +1,18 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use pinkcollab_gateway::{
     api::{self, App},
     config::{self, Config},
     events::Bus,
-    funnel,
     model::Host,
+    omp,
     session::Registry,
-    storage::{self, Store},
+    storage::Store,
     workspace::Browser,
 };
 use std::{path::PathBuf, sync::Arc, time::Duration};
+
+mod admin;
 
 #[cfg(windows)]
 mod windows;
@@ -25,20 +27,30 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Commands {
+    /// One-time bootstrap: write config.yaml with the allowed workspace roots.
     Init {
-        #[arg(long)]
-        workspace: PathBuf,
+        /// Allowed root directory; repeat the flag for more than one root.
+        #[arg(long, required = true, num_args = 1..)]
+        workspace: Vec<PathBuf>,
     },
+    /// Run the Gateway. This is what a bare invocation does.
     Serve,
     /// Run under the Windows Service Control Manager.
     #[cfg(windows)]
     Service,
+    /// Print a single-use pairing code for one phone.
     Pair {
+        /// Gateway root URL the phone dials; defaults to the configured public_url.
         #[arg(long)]
         url: Option<String>,
-        #[arg(long, default_value = "pairing.png")]
-        qr: PathBuf,
+        /// Also write the code to this PNG file.
+        #[arg(long)]
+        qr: Option<PathBuf>,
     },
+    /// List the devices paired with this Gateway.
+    Clients,
+    /// Preflight the configuration, roots, OMP, database and listen port.
+    Status,
     /// Publish the loopback Gateway on the internet with Tailscale Funnel.
     SetupFunnel {
         /// Public HTTPS port offered by Funnel: 443, 8443 or 10000.
@@ -50,7 +62,11 @@ enum Commands {
         /// Path to the tailscale executable, when it is not on PATH.
         #[arg(long)]
         tailscale: Option<PathBuf>,
+        /// Print a pairing code as soon as Funnel publishes the Gateway.
+        #[arg(long)]
+        pair: bool,
     },
+    /// Delete a paired device's credential on the host.
     Revoke {
         #[arg(long)]
         client: String,
@@ -63,81 +79,38 @@ async fn main() -> Result<()> {
     if matches!(cli.command, Some(Commands::Service)) {
         return windows::dispatch(cli.data_dir);
     }
-    if let Some(Commands::Init { workspace }) = &cli.command {
-        let root = workspace.canonicalize().context("workspace unavailable")?;
-        Browser::new(std::slice::from_ref(&root))?;
-        storage::private_dir(&cli.data_dir)?;
-        let path = cli.data_dir.join("config.yaml");
-        ensure!(
-            !path.exists(),
-            "config.yaml already exists; edit it to add workspaces"
-        );
-        let config = Config {
-            workspaces: vec![PathBuf::from(pinkcollab_gateway::workspace::display(&root))],
-            ..Config::default()
-        };
-        storage::private_file(&path, serde_yaml::to_string(&config)?.as_bytes())?;
-        println!("Configuration created: {}", path.display());
-        return Ok(());
-    }
-    let config = Config::load(&cli.data_dir)?;
-    let store = Arc::new(Store::open(&cli.data_dir)?);
     match cli.command.unwrap_or(Commands::Serve) {
-        Commands::Pair { url, qr } => {
-            let base = url.unwrap_or(config.public_url);
-            let parsed = config::root_url(&base).context("pair requires --url https://<host>")?;
-            ensure!(
-                parsed.scheme() == "https"
-                    || (parsed.scheme() == "http"
-                        && ["127.0.0.1", "localhost", "10.0.2.2"]
-                            .contains(&parsed.host_str().unwrap_or_default())),
-                "pair URL requires HTTPS; HTTP is for loopback/emulator development only"
-            );
-            let token = store.new_pairing()?;
-            let payload =
-                serde_json::json!({"version":1,"url":base.trim_end_matches('/'),"token":token})
-                    .to_string();
-            let code = qrcode::QrCode::new(payload.as_bytes())?;
-            let image = code
-                .render::<image::Luma<u8>>()
-                .min_dimensions(384, 384)
-                .build();
-            let mut png = std::io::Cursor::new(Vec::new());
-            image.write_to(&mut png, image::ImageFormat::Png)?;
-            storage::private_file(&qr, &png.into_inner())?;
-            println!(
-                "{payload}\nPairing QR: {} (single use, expires in 5 minutes)",
-                qr.display()
-            );
-        }
+        Commands::Init { workspace } => admin::init(&cli.data_dir, &workspace),
+        Commands::Pair { url, qr } => admin::pair(&cli.data_dir, url, qr),
+        Commands::Clients => admin::clients(&cli.data_dir),
+        Commands::Status => admin::status(&cli.data_dir).await,
+        Commands::Revoke { client } => admin::revoke(&cli.data_dir, &client),
         Commands::SetupFunnel {
             https,
             dry_run,
             tailscale,
-        } => funnel::setup(
+            pair,
+        } => admin::setup_funnel(
             &cli.data_dir,
-            &config,
-            funnel::Options {
+            pinkcollab_gateway::funnel::Options {
                 https_port: https,
                 dry_run,
                 binary: tailscale.as_deref(),
             },
-        )?,
-        Commands::Revoke { client } => store.revoke(&client)?,
-        Commands::Serve => serve(config, store).await?,
+            pair,
+        ),
+        Commands::Serve => {
+            let config = Config::load(&cli.data_dir)?;
+            serve_until(config, Arc::new(Store::open(&cli.data_dir)?), shutdown()).await
+        }
         #[cfg(windows)]
         Commands::Service => unreachable!(),
-        Commands::Init { .. } => unreachable!(),
     }
-    Ok(())
-}
-async fn serve(config: Config, store: Arc<Store>) -> Result<()> {
-    serve_until(config, store, shutdown()).await
 }
 async fn serve_until(
     config: Config,
     store: Arc<Store>,
-    stop: impl std::future::Future<Output = ()>,
+    stop: impl Future<Output = ()>,
 ) -> Result<()> {
     let browser = Arc::new(Browser::new(&config.workspaces)?);
     let host_id = store.host_id()?;
@@ -151,26 +124,14 @@ async fn serve_until(
         config.omp_args.clone(),
         config.max_sessions,
     )?;
-    let omp_version = tokio::time::timeout(
-        Duration::from_secs(5),
-        tokio::process::Command::new(&config.omp)
-            .kill_on_drop(true)
-            .arg("--version")
-            .output(),
-    )
-    .await
-    .ok()
-    .and_then(Result::ok)
-    .filter(|v| v.status.success())
-    .map(|v| String::from_utf8_lossy(&v.stdout).trim().to_owned())
-    .unwrap_or_else(|| "unavailable".into());
+    let version = omp::version(&config.omp).await;
     let app = api::router(App {
         host: Host {
             id: host_id,
             name: config.name.clone(),
             os: std::env::consts::OS.into(),
             status: "online".into(),
-            omp_version,
+            omp_version: version,
             gateway_version: env!("CARGO_PKG_VERSION").into(),
         },
         store,

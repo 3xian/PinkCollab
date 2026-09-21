@@ -48,7 +48,8 @@ Prerequisites: **Rust 1.89+** for the Gateway, **JDK 17+ / Android SDK 36** for 
 ```sh
 cd gateway
 cargo build --release --locked --bin pinkcollab-gateway
-./target/release/pinkcollab-gateway init --workspace /absolute/path/to/projects
+./target/release/pinkcollab-gateway init --workspace /absolute/path/to/projects --workspace /another/root
+./target/release/pinkcollab-gateway status
 ./target/release/pinkcollab-gateway serve
 ```
 
@@ -57,10 +58,10 @@ On Windows, use `target\release\pinkcollab-gateway.exe`.
 The five steps, in order:
 
 1. **Build** the Gateway binary.
-2. **`init` once** — creates `~/.pinkcollab` and `config.yaml` with `--workspace` as its single allowed root. On Unix both are private to your user (`0700` / `0600`); Windows keeps the directory's default ACL. It only writes the config, never starts the server, and refuses to overwrite an existing one — add more roots by editing `workspaces`.
-3. **Edit the config** for an absolute `omp` path, more workspaces, or HTTPS.
-4. **Run it** — in the foreground, or [as a background service](#run-as-a-background-service).
-5. **`pair`**, scan the QR code, then create your first task.
+2. **`init` once** — creates `~/.pinkcollab` and `config.yaml` with every `--workspace` root, and records `omp` as the absolute path it resolved, so a service manager's different `PATH` cannot break it. On Unix both are private to your user (`0700` / `0600`); Windows keeps the directory's default ACL. It only writes the config, never starts the server, and refuses to overwrite an existing one — add more roots by editing `workspaces`.
+3. **`status`** — preflights the config, every root, OMP, database, Tailscale state, and listen socket. Run it before `serve`; it exits non-zero if the configured port is already occupied or another prerequisite is broken.
+4. **Run it** — in the foreground, or [as a background service](#run-as-a-background-service). A phone that cannot reach loopback also needs [a TLS front end](#connect-android).
+5. **`pair`**, scan the code, then create your first task.
 
 > Use the same `--data-dir` for `init`, `serve`, `pair`, and the service. A different directory means a different config and a different set of credentials — the phone would be pairing against nothing.
 
@@ -68,11 +69,13 @@ The five steps, in order:
 
 | Command | What it does |
 | --- | --- |
-| `init --workspace <dir>` | One-time bootstrap: creates the data dir and `config.yaml`. |
+| `init --workspace <dir>...` | One-time bootstrap: creates the data dir and `config.yaml` with every `--workspace` root. |
 | `serve` | Runs the Gateway. **This is the default when no subcommand is given** — after `init`, running the binary alone is enough. |
-| `pair [--url <root>] [--qr <file>]` | Prints a pairing QR code. `--url` defaults to `public_url`; `--qr` defaults to `pairing.png`. |
-| `setup-funnel [--https 443] [--dry-run] [--tailscale <path>]` | Publishes the loopback Gateway on the internet with Tailscale Funnel and writes `public_url`. |
-| `revoke --client <clientId>` | Deletes a paired device's credential on the host. |
+| `status` | Preflights config, roots, OMP, database, Tailscale and port state without starting the Gateway. Run it while the Gateway is stopped; exits non-zero while a problem remains. |
+| `pair [--url <root>] [--qr <file>]` | Prints single-use pairing JSON on stdout and, in a terminal, a scannable QR code. `--url` defaults only to the configured `public_url`; when neither is present the command fails instead of guessing an endpoint. `--qr` additionally writes a PNG. |
+| `clients` | Lists paired devices: `clientId`, name, pairing time. |
+| `setup-funnel [--https 443] [--dry-run] [--tailscale <path>] [--pair]` | Publishes the loopback Gateway on the internet with Tailscale Funnel, writes `public_url`, and with `--pair` prints a pairing code straight away. |
+| `revoke --client <clientId>` | Deletes a paired device's credential on the host. Fails when the id is unknown. |
 | `service` *(Windows only)* | Runs under the Windows Service Control Manager. |
 
 ## Configuration
@@ -85,7 +88,7 @@ Lives at `~/.pinkcollab/config.yaml`; see [`gateway/config.example.yaml`](gatewa
 | `public_url` | empty | The root URL the phone dials, baked into the QR code. Must be `https://…` in production. |
 | `name` | hostname | The host label shown in Android. |
 | `workspaces` | `[]` | Allowed root directories — the Gateway refuses to touch anything outside them. *This is the sandbox for all file access.* |
-| `omp` | `omp` | The OMP executable. **Use an absolute path for services**: their `PATH` differs from your terminal's, so a bare `omp` fails there. |
+| `omp` | absolute path `init` resolved | The OMP executable. `init` stores the absolute path it found, which is what a service needs: their `PATH` differs from your terminal's, so a bare `omp` fails there. |
 | `omp_args` | `[]` | Extra OMP flags; may not override `--mode` or session storage. |
 | `max_sessions` | `8` | Concurrent **live** OMP processes (1–100). A session frees its slot as soon as its process exits — on completion, failure, or **Stop** — so finished tasks do not count against it. |
 
@@ -120,8 +123,9 @@ public_url: https://my-host.example-tailnet.ts.net
 ```
 
 ```sh
-pinkcollab-gateway setup-funnel     # checks Tailscale, publishes the port, writes public_url
-# equivalent: tailscale funnel --bg --https=443 --yes http://127.0.0.1:8787
+pinkcollab-gateway setup-funnel --pair     # publishes the port, writes public_url, prints a code
+# equivalent, minus the pairing code:
+#   tailscale funnel --bg --https=443 --yes http://127.0.0.1:8787
 tailscale funnel status
 ```
 
@@ -170,6 +174,7 @@ flowchart TB
 ```
 
 - The QR carries only the Gateway root URL and a one-time token.
+- `pair` uses an explicit `--url` or the configured `public_url`. If neither exists it stops with instructions instead of guessing from Tailscale node identity or producing an unreachable loopback URL. Pairing JSON stays on stdout for scripts; the QR is shown only when stderr is a terminal, and `--qr <file>` also writes a PNG.
 - `/api/v1/pair` is the **only** endpoint reachable without a credential. *(why: the phone has nothing to authenticate with yet, so trust has to start somewhere.)*
 - Everything else — including the WebSocket — returns `401` without a valid `Bearer` credential.
 
@@ -181,15 +186,18 @@ flowchart TB
 *Why so tight: the 192-bit random code is the only thing between the internet and your host until pairing succeeds, so it is short-lived and consumed transactionally on first use.*
 
 ```sh
-pinkcollab-gateway pair --url https://dev-server.example.com --qr pairing.png
-pinkcollab-gateway revoke --client client_xxx     # clientId from the pairing response
+pinkcollab-gateway pair                        # code for the configured public_url
+pinkcollab-gateway pair --qr pairing.png       # ... and a PNG for another screen
+pinkcollab-gateway clients                     # clientId, name, pairing time
+pinkcollab-gateway revoke --client client_xxx  # fails when the id does not exist
 ```
 
 Removing a pairing in Android only clears the phone's local copy — use `revoke` to actually cut host-side access.
 
 ## Run as a background service
 
-All three run as the same regular OS user that owns `~/.pinkcollab` and the workspaces, and all need an absolute `omp` path.
+All three run as the same regular OS user that owns `~/.pinkcollab` and the workspaces. `init` already
+wrote an absolute `omp` path, which is what these need: only edit it if OMP moved.
 
 ### Windows
 

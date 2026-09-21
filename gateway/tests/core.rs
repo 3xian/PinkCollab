@@ -6,6 +6,7 @@ use pinkcollab_gateway::{
     storage::Store,
     workspace::Browser,
 };
+use rusqlite::Connection;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -20,12 +21,50 @@ fn pairing_is_single_use_and_revocable() {
     let (client, credential) = store.pair(&token, "phone").unwrap();
     assert!(store.authenticate(&credential));
     assert!(store.pair(&token, "replay").is_err());
-    store.revoke(&client).unwrap();
+    assert_eq!(store.clients().unwrap().len(), 1);
+    // An unknown id must not look like a successful revocation.
+    assert!(!store.revoke("client_missing").unwrap());
+    assert!(store.revoke(&client).unwrap());
     assert!(!store.authenticate(&credential));
+    assert!(store.clients().unwrap().is_empty());
     drop(store);
     assert_eq!(
         Store::open(dir.path()).unwrap().host_id().unwrap(),
         identity
+    );
+}
+
+#[test]
+fn legacy_client_schema_migrates_without_losing_devices() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    db.execute_batch(
+        "CREATE TABLE clients (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            token_hash TEXT UNIQUE NOT NULL
+        );
+        INSERT INTO clients (id,name,token_hash)
+        VALUES ('client_legacy','Older phone','legacy_hash');",
+    )
+    .unwrap();
+    drop(db);
+
+    let store = Store::open(dir.path()).unwrap();
+    let clients = store.clients().unwrap();
+    assert_eq!(clients.len(), 1);
+    assert_eq!(clients[0].id, "client_legacy");
+    assert_eq!(clients[0].name, "Older phone");
+    assert_eq!(clients[0].created_at, None);
+
+    let token = store.new_pairing().unwrap();
+    let (new_client, _) = store.pair(&token, "New phone").unwrap();
+    let clients = store.clients().unwrap();
+    assert_eq!(clients.len(), 2);
+    assert!(
+        clients
+            .iter()
+            .any(|client| client.id == new_client && client.created_at.is_some())
     );
 }
 #[test]
