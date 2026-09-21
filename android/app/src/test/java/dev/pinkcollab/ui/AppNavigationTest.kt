@@ -10,8 +10,7 @@ class AppNavigationTest {
     }
 
     @Test
-    fun nestedPagesReturnOneLevelAtATime() {
-        assertEquals(AppRoute.Browser("host", "F:/code"), AppRoute.CreateTask("host", "F:/code").back())
+    fun browserReturnsToWorkspaces() {
         assertEquals(AppRoute.Resources, AppRoute.Browser("host", "F:/code").back())
     }
 
@@ -21,7 +20,6 @@ class AppNavigationTest {
             AppRoute.Tasks,
             AppRoute.Resources,
             AppRoute.Browser("host-1", "F:/code/PinkCollab"),
-            AppRoute.CreateTask("host-1", "F:/code/PinkCollab"),
         )
 
         routes.forEach { route -> assertEquals(route, restoreRoute(route.savedState())) }
@@ -30,5 +28,13 @@ class AppNavigationTest {
     @Test
     fun incompleteSavedRouteFallsBackToTasks() {
         assertEquals(AppRoute.Tasks, restoreRoute(listOf("browser", "host-without-path")))
+    }
+
+    @Test
+    fun legacyCreateRouteResumesAtItsDirectory() {
+        assertEquals(
+            AppRoute.Browser("host-1", "F:/code/PinkCollab"),
+            restoreRoute(listOf("create", "host-1", "F:/code/PinkCollab")),
+        )
     }
 }

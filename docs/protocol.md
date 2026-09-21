@@ -14,17 +14,19 @@ Except for pairing, every REST request and WebSocket handshake must include `Aut
 | GET | `/api/v1/fs/list?path=...` | `{path,parent?,directories:[{name,path}],git?:{branch,status}}` |
 | GET | `/api/v1/sessions` | Session array, sorted by update time in descending order |
 | GET | `/api/v1/sessions/:id` | `{session,timeline,model?}` |
-| POST | `/api/v1/sessions` | `{hostId,cwd,prompt,title?}` → Session, 201 |
+| POST | `/api/v1/sessions` | `{hostId,cwd,prompt?,title?}` → Session, 201. An omitted or blank prompt starts an attached, idle OMP task. |
 | DELETE | `/api/v1/sessions/:id` | Deletes management metadata only when no runtime remains, 204; does not delete original OMP data |
 | POST | `/api/v1/sessions/:id/prompt` | `{message}`; automatically sets OMP streamingBehavior=steer while running |
 | POST | `/api/v1/sessions/:id/interrupt` | No request fields; sends OMP abort and transitions to idle |
 | POST | `/api/v1/sessions/:id/stop` | No request fields; closes stdin and terminates OMP if it has not exited after 3 seconds |
 | POST | `/api/v1/sessions/:id/respond` | See input responses below |
-| POST | `/api/v1/sessions/:id/model/cycle` | Cycles OMP's model scope and returns `{model:{provider,id,name}}` |
+| GET | `/api/v1/sessions/:id/models` | Returns `{models:[{provider,id,name,role,thinkingLevel?}]}` in OMP's Ctrl+P cycle order |
+| POST | `/api/v1/sessions/:id/model` | Selects one cycle entry using `{provider,id,role}` and returns `{model:{provider,id,name}}` |
+| POST | `/api/v1/sessions/:id/model/cycle` | Legacy model-cycle command; returns `{model:{provider,id,name}}` |
 
 Unless the table specifies a response, successful commands return `{ok:true}`. Rejected commands return 409, rejected session creation returns 422, out-of-bounds directories return 403, and authentication failures return 401. Business errors return `{error:string}`; the HTTP framework returns 400/415/422 for JSON decoding errors. Request bodies are limited to 512 KiB, and prompts and input values to 256 KiB.
 
-The Gateway owns model state: `GET /api/v1/sessions/:id` carries it as `model`, which is present only while a runtime is attached and OMP reports a model. Clients must treat `model` as optional — a Gateway that omits the field offers no model control — and follow `model.updated` events for changes it did not initiate. Cycling requires an attached runtime and uses OMP's `cycle_model` command, which cycles the model scope configured on that Host, or every available model when no scope is configured. When OMP reports no alternative model, the command is rejected with 409.
+The Gateway owns model state: `GET /api/v1/sessions/:id` carries it as `model`, which is present only while a runtime is attached and OMP reports a model. Clients must treat `model` as optional and follow `model.updated` events for changes they did not initiate. Listing models resolves OMP's effective `modelRoles` and `cycleOrder` against `get_available_models`, matching the choices and order used by Ctrl+P. Selecting a choice calls `set_model` and applies that role's configured thinking level. The role is required so duplicate model targets in the cycle remain unambiguous. The cycle endpoint remains for older clients and is rejected with 409 when OMP reports no alternative model.
 
 ## Session
 

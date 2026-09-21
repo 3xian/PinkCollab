@@ -7,10 +7,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.Listing
 import dev.pinkcollab.ui.theme.*
 
@@ -18,6 +16,7 @@ import dev.pinkcollab.ui.theme.*
 internal fun DirectoryBrowserScreen(
     listing: LoadState<Listing>,
     hostName: String,
+    creating: Boolean,
     browse: (String) -> Unit,
     select: (String) -> Unit,
     retry: () -> Unit,
@@ -25,13 +24,14 @@ internal fun DirectoryBrowserScreen(
     when (listing) {
         LoadState.Loading -> EmptyState("Reading directory", "Loading this workspace from $hostName…")
         is LoadState.Failed -> EmptyState("Directory unavailable", listing.message, "Retry", retry)
-        is LoadState.Ready -> DirectoryListing(listing.value, hostName, browse, select)
+        is LoadState.Ready -> DirectoryListing(listing.value, hostName, creating, browse, select)
     }
 }
 @Composable
 private fun DirectoryListing(
     listing: Listing,
     hostName: String,
+    creating: Boolean,
     browse: (String) -> Unit,
     select: (String) -> Unit,
 ) {
@@ -53,7 +53,13 @@ private fun DirectoryListing(
             }
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                PrimaryButton(onClick = { select(listing.path) }) { Text("Create task here") }
+                PrimaryButton(onClick = { select(listing.path) }, enabled = !creating) {
+                    if (creating) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(if (creating) "Creating task…" else "Create task here")
+                }
             }
         }
         HorizontalDivider(color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f))
@@ -90,58 +96,6 @@ private fun DirectoryListing(
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextMid,
                     )
-                }
-            }
-        }
-    }
-}
-@Composable
-internal fun CreateTaskScreen(
-    host: HostState?,
-    cwd: String,
-    busy: Boolean,
-    changeDirectory: () -> Unit,
-    start: (String) -> Unit,
-) {
-    var prompt by rememberSaveable(cwd) { mutableStateOf("") }
-
-    LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item {
-            Text("Host", style = MaterialTheme.typography.labelMedium, color = TextMid)
-            Text(host?.paired?.host?.name.orEmpty(), style = MaterialTheme.typography.titleMedium)
-        }
-        item {
-            Text("Working directory", style = MaterialTheme.typography.labelMedium, color = TextMid)
-            Text(cwd)
-            TextButton(
-                onClick = rememberHapticOnClick(changeDirectory),
-                enabled = !busy,
-                colors = ButtonDefaults.textButtonColors(contentColor = Purple200),
-                contentPadding = PaddingValues(0.dp),
-            ) {
-                Text("Change")
-            }
-        }
-        item {
-            OutlinedTextField(
-                value = prompt,
-                onValueChange = { prompt = it },
-                label = { Text("What should OMP do?") },
-                placeholder = { Text("Fix the checkout race and run the tests") },
-                minLines = 5,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !busy,
-            )
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                PrimaryButton(
-                    onClick = { start(prompt) },
-                    enabled = prompt.isNotBlank() && !busy && host?.connected == true,
-                ) {
-                    Icon(Icons.Outlined.PlayArrow, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (busy) "Starting OMP…" else "Start task")
                 }
             }
         }

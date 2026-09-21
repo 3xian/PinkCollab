@@ -47,6 +47,29 @@ pub struct ModelInfo {
     pub name: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelChoice {
+    pub provider: String,
+    pub id: String,
+    pub name: String,
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
+}
+
+impl ModelChoice {
+    pub fn from_model(model: ModelInfo, role: String, thinking_level: Option<String>) -> Self {
+        Self {
+            provider: model.provider,
+            id: model.id,
+            name: model.name,
+            role,
+            thinking_level,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimelineItem {
     pub id: String,

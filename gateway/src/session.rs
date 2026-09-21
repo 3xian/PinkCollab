@@ -1,6 +1,7 @@
 use crate::{
     events::{self, Bus},
-    model::{Detail, ModelInfo, Session, TimelineItem},
+    model::{Detail, ModelChoice, ModelInfo, Session, TimelineItem},
+    model_cycle,
     omp::{self, Output, Runtime},
     storage::{self, Store},
     workspace::{self, Browser},
@@ -141,6 +142,63 @@ impl Registry {
             .filter(|model| !model.is_null())
             .context("no alternative model is configured")?;
         let model = model_info(model)?;
+        self.set_model(id, Some(model.clone())).await;
+        Ok(model)
+    }
+    pub async fn available_models(&self, id: &str) -> Result<Vec<ModelChoice>> {
+        let (cwd, current) = {
+            let state = self.state.lock().await;
+            let entry = state.entries.get(id).context("session not found")?;
+            (entry.session.cwd.clone(), entry.model.clone())
+        };
+        let (gate, runtime) = self.runtime(id).await?;
+        let _guard = gate.lock().await;
+        let response = runtime
+            .request(json!({"type":"get_available_models"}))
+            .await?;
+        let available: Vec<ModelInfo> = response["data"]
+            .get("models")
+            .and_then(Value::as_array)
+            .context("OMP returned an invalid model list")?
+            .iter()
+            .map(model_info)
+            .collect::<Result<_>>()?;
+        Ok(model_cycle::choices(
+            Path::new(&cwd),
+            available,
+            current.as_ref(),
+        ))
+    }
+    pub async fn select_model(
+        &self,
+        id: &str,
+        provider: &str,
+        model_id: &str,
+        role: &str,
+    ) -> Result<ModelInfo> {
+        ensure!(
+            !provider.trim().is_empty() && !model_id.trim().is_empty() && !role.trim().is_empty(),
+            "provider, model id and role required"
+        );
+        let choice = self
+            .available_models(id)
+            .await?
+            .into_iter()
+            .find(|choice| {
+                choice.provider == provider && choice.id == model_id && choice.role == role
+            })
+            .context("model is not in OMP's Ctrl+P cycle")?;
+        let (gate, runtime) = self.runtime(id).await?;
+        let _guard = gate.lock().await;
+        let response = runtime
+            .request(json!({"type":"set_model","provider":provider,"modelId":model_id}))
+            .await?;
+        let model = model_info(&response["data"])?;
+        if let Some(level) = choice.thinking_level {
+            runtime
+                .request(json!({"type":"set_thinking_level","level":level}))
+                .await?;
+        }
         self.set_model(id, Some(model.clone())).await;
         Ok(model)
     }
@@ -330,12 +388,23 @@ impl Registry {
             "hostId does not match this gateway"
         );
         let cwd = self.browser.validate(Path::new(&cwd))?;
+        let has_initial_prompt = !prompt.trim().is_empty();
         ensure!(
-            !prompt.trim().is_empty() && prompt.len() <= 262144,
-            "prompt must be 1..262144 bytes"
+            prompt.len() <= 262144,
+            "prompt must be at most 262144 bytes"
         );
         let title = if title.is_empty() {
-            prompt.chars().take(80).collect()
+            if has_initial_prompt {
+                prompt.chars().take(80).collect()
+            } else {
+                cwd.file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("New task")
+                    .chars()
+                    .take(80)
+                    .collect()
+            }
         } else {
             title.chars().take(80).collect()
         };
@@ -424,18 +493,25 @@ impl Registry {
                 let e = state.entries.get_mut(&session_id).unwrap();
                 e.session.session_file = omp::string(&response["data"], "sessionFile").into();
                 e.model = state_model(&response);
-                self.item(e, events::item("user", &prompt, ""));
+                if has_initial_prompt {
+                    self.item(e, events::item("user", &prompt, ""));
+                } else {
+                    e.session.status = "idle".into();
+                    e.session.activity = "Ready".into();
+                }
                 self.save(e)?;
             }
-            let ack = runtime
-                .request(json!({"type":"prompt","message":prompt}))
-                .await?;
-            if ack["data"]["agentInvoked"] == false {
-                self.apply(
-                    &session_id,
-                    json!({"type":"prompt_result","success":true,"data":{"agentInvoked":false}}),
-                )
-                .await?;
+            if has_initial_prompt {
+                let ack = runtime
+                    .request(json!({"type":"prompt","message":prompt}))
+                    .await?;
+                if ack["data"]["agentInvoked"] == false {
+                    self.apply(
+                        &session_id,
+                        json!({"type":"prompt_result","success":true,"data":{"agentInvoked":false}}),
+                    )
+                    .await?;
+                }
             }
             Ok::<(), anyhow::Error>(())
         }
@@ -445,7 +521,12 @@ impl Registry {
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(&session_id).unwrap();
                 e.session.status = "failed".into();
-                e.session.activity = "OMP startup or initial prompt failed".into();
+                e.session.activity = if has_initial_prompt {
+                    "OMP startup or initial prompt failed"
+                } else {
+                    "OMP startup failed"
+                }
+                .into();
                 self.save(e)?;
             }
             runtime.stop().await;

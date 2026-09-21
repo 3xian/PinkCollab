@@ -95,6 +95,21 @@ fn main() {
                     );
                 }
             }
+            "get_available_models" => ack(json!({"models":models})),
+            "set_model" => {
+                let selected = models.iter().position(|model| {
+                    model["provider"] == frame["provider"] && model["id"] == frame["modelId"]
+                });
+                if let Some(selected) = selected {
+                    model_index = selected;
+                    ack(models[model_index].clone());
+                    emit(json!({"type":"model_changed"}));
+                } else {
+                    emit(
+                        json!({"type":"response","id":frame["id"],"command":frame["type"],"success":false,"error":"model not found"}),
+                    );
+                }
+            }
             "prompt" => {
                 let message = frame["message"].as_str().unwrap_or_default();
                 if message == "fail" {

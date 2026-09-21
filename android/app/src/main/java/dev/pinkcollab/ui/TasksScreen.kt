@@ -34,16 +34,18 @@ import org.json.JSONObject
 internal fun TasksScreen(
     app: AppState,
     detailLoads: Map<SessionKey, LoadState<Unit>>,
+    modelLoads: Map<SessionKey, LoadState<List<ModelInfo>>>,
     operations: Set<OperationKey>,
     selectedSessionId: String,
     onSessionSelected: (String) -> Unit,
     openResources: () -> Unit,
     connectHost: () -> Unit,
     loadSession: (Session, Boolean) -> Unit,
+    loadModels: (Session, Boolean) -> Unit,
     onPrompt: (Session, String, () -> Unit) -> Unit,
     onCommand: (Session, String) -> Unit,
     onRespond: (Session, JSONObject) -> Unit,
-    onCycleModel: (Session) -> Unit,
+    onSelectModel: (Session, ModelInfo) -> Unit,
 ) {
     // updatedAt changes continuously while an agent works; createdAt keeps the pager stable.
     val sessions = app.hosts.values
@@ -77,7 +79,7 @@ internal fun TasksScreen(
                 Box(Modifier.weight(1f)) {
                     EmptyState(
                         title = "No tasks yet",
-                        description = "Choose a workspace and enter your first prompt.",
+                        description = "Choose a workspace to create your first task.",
                         action = "Open workspaces",
                         onAction = openResources,
                     )
@@ -110,7 +112,9 @@ internal fun TasksScreen(
                     onPrompt = { message, onSent -> onPrompt(session, message, onSent) },
                     onCommand = { command -> onCommand(session, command) },
                     onRespond = { body -> onRespond(session, body) },
-                    onCycleModel = { onCycleModel(session) },
+                    modelState = modelLoads[key],
+                    onLoadModels = { force -> loadModels(session, force) },
+                    onSelectModel = { model -> onSelectModel(session, model) },
                 )
             }
         }

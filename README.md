@@ -294,14 +294,14 @@ Install on a connected device:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-To start a task: **Workspaces → choose a directory → create a task → enter a prompt → start**. The directory browser shows each project's Git branch and working-tree status when `git` is available.
+To start a task: **Workspaces → choose a directory → create a task → enter the first prompt in the task composer**. The directory browser shows each project's Git branch and working-tree status when `git` is available.
 
 Actions on a task:
 
 - **Prompt / Steer** — the button label and the `streamingBehavior` sent to OMP both key off `status == "running"`: a running session is steered, anything else (idle, completed, failed) starts a new turn.
 - **Interrupt** sends OMP `abort` and keeps the runtime attached, so you can keep prompting.
 - **Stop** closes OMP's stdin and terminates the process; the session then takes no further commands.
-- **Switch model** cycles the model scope configured on that host, and appears only while a runtime is attached and OMP reports a model.
+- **Model** opens a single-choice list matching OMP's Ctrl+P cycle (including role order and thinking level), and stays in the composer action row with Interrupt, Stop, and Send.
 - **Delete** is not exposed in the app: `DELETE /api/v1/sessions/:id` drops Gateway-side management metadata once the session is stopped, and never touches OMP's own session files.
 
 On some Windows/JDK setups Gradle fails with `Unable to establish loopback connection` — create `C:/tmp` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/tmp`.

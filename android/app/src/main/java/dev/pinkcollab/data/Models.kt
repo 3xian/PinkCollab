@@ -6,7 +6,13 @@ import org.json.JSONObject
 data class Host(val id: String, val name: String, val os: String, val ompVersion: String, val gatewayVersion: String)
 data class PairedHost(val host: Host, val url: String, val credential: String, val clientId: String)
 data class Attention(val id: String, val type: String, val text: String, val options: List<String>)
-data class ModelInfo(val provider: String, val id: String, val name: String)
+data class ModelInfo(
+    val provider: String,
+    val id: String,
+    val name: String,
+    val role: String? = null,
+    val thinkingLevel: String? = null,
+)
 data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean)
 data class ToolArguments(
     val raw: String = "",
@@ -72,7 +78,13 @@ fun JSONObject.item(): TimelineItem {
     }
     return TimelineItem(getString("id"), getString("kind"), getString("text"), optString("detail"), getString("timestamp"), tool)
 }
-fun JSONObject.modelInfo() = ModelInfo(getString("provider"), getString("id"), getString("name"))
+fun JSONObject.modelInfo() = ModelInfo(
+    provider = getString("provider"),
+    id = getString("id"),
+    name = getString("name"),
+    role = optString("role").takeIf { it.isNotBlank() },
+    thinkingLevel = optString("thinkingLevel").takeIf { it.isNotBlank() },
+)
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
 fun JSONArray.strings(): List<String> = (0 until length()).map { getString(it) }

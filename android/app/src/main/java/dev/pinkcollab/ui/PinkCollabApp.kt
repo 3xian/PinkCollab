@@ -26,6 +26,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val app by repo.state.collectAsStateWithLifecycle()
     val operations by vm.operations.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
+    val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
     var route by rememberSaveable(stateSaver = AppRouteSaver) { mutableStateOf<AppRoute>(AppRoute.Tasks) }
     var pairHost by rememberSaveable(stateSaver = PairHostSheetStateSaver) {
         mutableStateOf(PairHostSheetState())
@@ -71,12 +72,14 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                         AppRoute.Tasks -> TasksScreen(
                             app = app,
                             detailLoads = detailLoads,
+                            modelLoads = modelLoads,
                             operations = operations,
                             selectedSessionId = selectedSessionId,
                             onSessionSelected = { selectedSessionId = it },
                             openResources = { route = AppRoute.Resources },
                             connectHost = { pairHost = PairHostSheetState(visible = true) },
                             loadSession = vm::loadDetail,
+                            loadModels = vm::loadModels,
                             onPrompt = { session, message, onSent ->
                                 vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
                                     repo.command(session.hostId, session.id, "prompt", JSONObject().put("message", message))
@@ -93,9 +96,9 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                     repo.command(session.hostId, session.id, "respond", body)
                                 }
                             },
-                            onCycleModel = { session ->
+                            onSelectModel = { session, model ->
                                 vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.cycleModel(session.hostId, session.id)
+                                    repo.selectModel(session.hostId, session.id, model)
                                 }
                             },
                         )
@@ -112,29 +115,20 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                         is AppRoute.Browser -> BrowserRoute(
                             route = current,
                             hostName = app.hosts[current.hostId]?.paired?.host?.name.orEmpty(),
+                            creating = OperationKey.CreateTask(current.hostId, current.path) in operations,
                             load = { repo.listing(current.hostId, current.path) },
                             browse = { path -> route = current.copy(path = path) },
-                            select = { path -> route = AppRoute.CreateTask(current.hostId, path) },
+                            select = { path ->
+                                val operation = OperationKey.CreateTask(current.hostId, path)
+                                vm.run(operation, "Unable to create task") {
+                                    val session = repo.create(current.hostId, path)
+                                    selectedSessionId = session.id
+                                    route = AppRoute.Tasks
+                                    vm.loadDetail(session)
+                                    vm.run(OperationKey.Host(current.hostId)) { repo.refreshHost(current.hostId) }
+                                }
+                            },
                         )
-
-                        is AppRoute.CreateTask -> {
-                            val operation = OperationKey.CreateTask(current.hostId, current.cwd)
-                            CreateTaskScreen(
-                                host = app.hosts[current.hostId],
-                                cwd = current.cwd,
-                                busy = operation in operations,
-                                changeDirectory = { route = AppRoute.Browser(current.hostId, current.cwd) },
-                                start = { prompt ->
-                                    vm.run(operation, "Unable to create task") {
-                                        val session = repo.create(current.hostId, current.cwd, prompt)
-                                        selectedSessionId = session.id
-                                        route = AppRoute.Tasks
-                                        vm.loadDetail(session)
-                                        vm.run(OperationKey.Host(current.hostId)) { repo.refreshHost(current.hostId) }
-                                    }
-                                },
-                            )
-                        }
 
                     }
                 }
@@ -181,6 +175,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
 private fun BrowserRoute(
     route: AppRoute.Browser,
     hostName: String,
+    creating: Boolean,
     load: suspend () -> Listing,
     browse: (String) -> Unit,
     select: (String) -> Unit,
@@ -204,6 +199,7 @@ private fun BrowserRoute(
     DirectoryBrowserScreen(
         listing = listing,
         hostName = hostName,
+        creating = creating,
         browse = browse,
         select = select,
         retry = { retry++ },

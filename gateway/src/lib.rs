@@ -3,6 +3,7 @@ pub mod config;
 pub mod events;
 pub mod funnel;
 pub mod model;
+mod model_cycle;
 pub mod omp;
 pub mod session;
 pub mod storage;

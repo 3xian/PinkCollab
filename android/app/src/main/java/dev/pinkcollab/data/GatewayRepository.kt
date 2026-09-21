@@ -130,12 +130,11 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         }
     }
     suspend fun listing(hostId: String, path: String): Listing { val p = paired(hostId); return JSONObject(api.request(p.url, p.credential, "/api/v1/fs/list", query = "path" to path)).listing() }
-    suspend fun create(hostId: String, cwd: String, prompt: String): Session {
+    suspend fun create(hostId: String, cwd: String): Session {
         val p = paired(hostId)
         val body = JSONObject()
             .put("hostId", hostId)
             .put("cwd", cwd)
-            .put("prompt", prompt)
         val session = JSONObject(
             api.request(p.url, p.credential, "/api/v1/sessions", "POST", body),
         ).session()
@@ -159,9 +158,26 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             app.copy(details = app.details + (id to SessionDetail(latest, merged, if (latest.status in listOf("completed", "failed", "stopped", "idle", "offline")) "" else old?.streaming.orEmpty(), raw.optJSONObject("model")?.modelInfo())))
         }
     }
-    suspend fun cycleModel(hostId: String, id: String) {
+    suspend fun models(hostId: String, id: String): List<ModelInfo> {
         val p = paired(hostId)
-        api.request(p.url, p.credential, "/api/v1/sessions/$id/model/cycle", "POST")
+        val raw = JSONObject(api.request(p.url, p.credential, "/api/v1/sessions/$id/models"))
+        return raw.getJSONArray("models").objects().map { it.modelInfo() }
+    }
+    suspend fun selectModel(hostId: String, id: String, model: ModelInfo) {
+        val p = paired(hostId)
+        val raw = JSONObject(
+            api.request(
+                p.url,
+                p.credential,
+                "/api/v1/sessions/$id/model",
+                "POST",
+                JSONObject()
+                    .put("provider", model.provider)
+                    .put("id", model.id)
+                    .put("role", requireNotNull(model.role)),
+            ),
+        )
+        setModel(id, raw.getJSONObject("model").modelInfo())
     }
     private fun setModel(id: String, model: ModelInfo?) {
         mutable.update { app ->

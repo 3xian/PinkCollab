@@ -132,6 +132,57 @@ impl Drop for Harness {
 }
 
 #[tokio::test]
+async fn task_can_start_without_an_initial_prompt() {
+    let h = Harness::new(8).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let cwd = h.cwd("empty-task");
+
+    let response = client
+        .post(format!("{}/api/v1/sessions", h.url))
+        .bearer_auth(&credential)
+        .json(&json!({"hostId":h.host.id,"cwd":cwd}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let session: Value = response.json().await.unwrap();
+    let id = session["id"].as_str().unwrap();
+    assert_eq!(session["status"], "idle");
+    assert_eq!(session["runtimeAttached"], true);
+    assert_eq!(session["title"], "empty-task");
+
+    let command = format!("{}/api/v1/sessions/{id}", h.url);
+    let detail: Value = client
+        .get(&command)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(detail["timeline"].as_array().unwrap().is_empty());
+
+    assert_eq!(
+        client
+            .post(format!("{command}/prompt"))
+            .bearer_auth(&credential)
+            .json(&json!({"message":"hold"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    h.wait_status(id, "running").await;
+    h.registry
+        .command(id.into(), "stop".into(), String::new(), Default::default())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn phone_to_gateway_to_omp_closed_loop() {
     let h = Harness::new(8).await;
     let client = reqwest::Client::new();
@@ -429,6 +480,81 @@ async fn cycling_without_an_alternative_model_is_rejected() {
     assert_eq!(response.status(), 409);
     let body: Value = response.json().await.unwrap();
     assert_eq!(body["error"], "no alternative model is configured");
+    h.registry.close().await;
+}
+
+#[tokio::test]
+async fn available_models_can_be_selected_explicitly() {
+    let h = Harness::new(1).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let cwd = h.cwd("models");
+    let omp_dir = std::path::Path::new(&cwd).join(".omp");
+    std::fs::create_dir_all(&omp_dir).unwrap();
+    std::fs::write(
+        omp_dir.join("config.yml"),
+        "modelRoles:\n  default: fixture/fast\n  smart: fixture/smart\ncycleOrder:\n  - default\n  - smart\n",
+    )
+    .unwrap();
+    let created: Value = client
+        .post(format!("{}/api/v1/sessions", h.url))
+        .bearer_auth(&credential)
+        .json(&json!({"hostId":h.host.id,"cwd":cwd,"prompt":"hold"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let command = format!(
+        "{}/api/v1/sessions/{}",
+        h.url,
+        created["id"].as_str().unwrap()
+    );
+
+    let available: Value = client
+        .get(format!("{command}/models"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(available["models"].as_array().unwrap().len(), 2);
+    assert_eq!(available["models"][1]["id"], "smart");
+    assert_eq!(available["models"][1]["role"], "smart");
+
+    let selected: Value = client
+        .post(format!("{command}/model"))
+        .bearer_auth(&credential)
+        .json(&json!({"provider":"fixture","id":"smart","role":"smart"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(selected["model"]["id"], "smart");
+    let detail: Value = client
+        .get(&command)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail["model"]["id"], "smart");
+
+    let rejected = client
+        .post(format!("{command}/model"))
+        .bearer_auth(&credential)
+        .json(&json!({"provider":"fixture","id":"missing","role":"smart"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), 409);
     h.registry.close().await;
 }
 

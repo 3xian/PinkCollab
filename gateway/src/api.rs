@@ -55,6 +55,8 @@ pub fn router(app: App) -> Router {
         .route("/api/v1/sessions/{id}/interrupt", post(interrupt))
         .route("/api/v1/sessions/{id}/stop", post(stop))
         .route("/api/v1/sessions/{id}/respond", post(respond))
+        .route("/api/v1/sessions/{id}/models", get(available_models))
+        .route("/api/v1/sessions/{id}/model", post(select_model))
         .route("/api/v1/sessions/{id}/model/cycle", post(cycle_model))
         .route("/api/v1/events", get(stream))
         .route_layer(middleware::from_fn_with_state(app.clone(), authenticate));
@@ -166,6 +168,7 @@ async fn detail(State(app): State<App>, Path(id): Path<String>) -> ApiResult {
 struct Create {
     host_id: String,
     cwd: String,
+    #[serde(default)]
     prompt: String,
     #[serde(default)]
     title: String,
@@ -233,6 +236,29 @@ async fn respond(
 }
 async fn cycle_model(State(app): State<App>, Path(id): Path<String>) -> ApiResult {
     let model = app.registry.cycle_model(&id).await.map_err(invalid)?;
+    Ok(Json(json!({"model":model})))
+}
+async fn available_models(State(app): State<App>, Path(id): Path<String>) -> ApiResult {
+    let models = app.registry.available_models(&id).await.map_err(invalid)?;
+    Ok(Json(json!({"models":models})))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectModel {
+    provider: String,
+    id: String,
+    role: String,
+}
+async fn select_model(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Json(body): Json<SelectModel>,
+) -> ApiResult {
+    let model = app
+        .registry
+        .select_model(&id, &body.provider, &body.id, &body.role)
+        .await
+        .map_err(invalid)?;
     Ok(Json(json!({"model":model})))
 }
 
