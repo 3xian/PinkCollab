@@ -42,6 +42,32 @@ fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
 }
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
+    if args.get(1).map(String::as_str) == Some("config")
+        && args.get(2).map(String::as_str) == Some("list")
+    {
+        let project = std::fs::read(std::env::current_dir().unwrap().join(".omp/config.yml"))
+            .ok()
+            .and_then(|bytes| serde_yaml::from_slice::<Value>(&bytes).ok())
+            .unwrap_or_else(|| json!({}));
+        let roles = project
+            .get("modelRoles")
+            .cloned()
+            .unwrap_or_else(|| json!({"default":"fixture/fast","smart":"fixture/smart"}));
+        let cycle = project
+            .get("cycleOrder")
+            .cloned()
+            .unwrap_or_else(|| json!(["default", "smart"]));
+        let providers = project
+            .get("modelProviderOrder")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        emit(json!({
+            "modelRoles":{"value":roles},
+            "cycleOrder":{"value":cycle},
+            "modelProviderOrder":{"value":providers}
+        }));
+        return;
+    }
     // `--flood-stdout` never finishes a line, which is how a bounded reader is told apart from one
     // that grows a buffer until OMP stops writing.
     if args.iter().any(|arg| arg == "--flood-stdout") {
@@ -62,6 +88,7 @@ fn main() {
         &all_models
     };
     let mut model_index = 0;
+    let mut thinking_level = "medium".to_owned();
     emit(json!({"type":"ready","protocolVersion":1}));
     // `--stall-stdin` announces itself and then never drains its pipe, so a write larger than the
     // pipe buffer stays blocked exactly as a wedged OMP would leave it.
@@ -82,9 +109,9 @@ fn main() {
             )
         };
         match frame["type"].as_str().unwrap_or_default() {
-            "get_state" => {
-                ack(json!({"sessionFile":log,"sessionId":"fixture","model":models[model_index]}))
-            }
+            "get_state" => ack(
+                json!({"sessionFile":log,"sessionId":"fixture","model":models[model_index],"thinkingLevel":thinking_level}),
+            ),
             "cycle_model" => {
                 if models.len() == 1 {
                     ack(Value::Null)
@@ -109,6 +136,10 @@ fn main() {
                         json!({"type":"response","id":frame["id"],"command":frame["type"],"success":false,"error":"model not found"}),
                     );
                 }
+            }
+            "set_thinking_level" => {
+                thinking_level = frame["level"].as_str().unwrap_or("medium").to_owned();
+                ack(json!({}));
             }
             "prompt" => {
                 let message = frame["message"].as_str().unwrap_or_default();

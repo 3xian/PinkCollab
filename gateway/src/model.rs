@@ -45,6 +45,10 @@ pub struct ModelInfo {
     pub provider: String,
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -65,6 +69,16 @@ impl ModelChoice {
             id: model.id,
             name: model.name,
             role,
+            thinking_level,
+        }
+    }
+
+    pub fn active_model(&self, thinking_level: Option<String>) -> ModelInfo {
+        ModelInfo {
+            provider: self.provider.clone(),
+            id: self.id.clone(),
+            name: self.name.clone(),
+            role: Some(self.role.clone()),
             thinking_level,
         }
     }

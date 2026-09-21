@@ -141,7 +141,11 @@ impl Registry {
             .get("model")
             .filter(|model| !model.is_null())
             .context("no alternative model is configured")?;
-        let model = model_info(model)?;
+        let mut model = model_info(model)?;
+        model.thinking_level = response["data"]
+            .get("thinkingLevel")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         self.set_model(id, Some(model.clone())).await;
         Ok(model)
     }
@@ -163,11 +167,14 @@ impl Registry {
             .iter()
             .map(model_info)
             .collect::<Result<_>>()?;
-        Ok(model_cycle::choices(
+        model_cycle::choices(
+            &self.executable,
+            &self.args,
             Path::new(&cwd),
             available,
             current.as_ref(),
-        ))
+        )
+        .await
     }
     pub async fn select_model(
         &self,
@@ -193,21 +200,40 @@ impl Registry {
         let response = runtime
             .request(json!({"type":"set_model","provider":provider,"modelId":model_id}))
             .await?;
-        let model = model_info(&response["data"])?;
-        if let Some(level) = choice.thinking_level {
+        model_info(&response["data"])?;
+        if let Some(level) = choice.thinking_level.as_deref() {
             runtime
                 .request(json!({"type":"set_thinking_level","level":level}))
                 .await?;
         }
-        self.set_model(id, Some(model.clone())).await;
-        Ok(model)
+        let response = runtime.request(json!({"type":"get_state"})).await?;
+        let thinking_level = response["data"]
+            .get("thinkingLevel")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let active = choice.active_model(thinking_level);
+        self.set_model(id, Some(active.clone())).await;
+        Ok(active)
     }
     /// OMP can switch models without Gateway involvement, so re-read its state to keep the cache canonical.
     async fn refresh_model(&self, id: &str) -> Result<()> {
         let (gate, runtime) = self.runtime(id).await?;
         let _guard = gate.lock().await;
         let response = runtime.request(json!({"type":"get_state"})).await?;
-        self.set_model(id, state_model(&response)).await;
+        let mut refreshed = state_model(&response);
+        let previous = {
+            let state = self.state.lock().await;
+            state.entries.get(id).and_then(|entry| entry.model.clone())
+        };
+        if let (Some(next), Some(previous)) = (&mut refreshed, previous)
+            && next.provider == previous.provider
+            && next.id == previous.id
+            && previous.role.is_some()
+            && (previous.thinking_level.is_none() || previous.thinking_level == next.thinking_level)
+        {
+            next.role = previous.role;
+        }
+        self.set_model(id, refreshed).await;
         Ok(())
     }
     async fn set_model(&self, id: &str, model: Option<ModelInfo>) {
@@ -713,10 +739,15 @@ impl Registry {
 }
 
 fn state_model(response: &Value) -> Option<ModelInfo> {
-    response["data"]
+    let mut model = response["data"]
         .get("model")
         .filter(|model| !model.is_null())
-        .and_then(|model| model_info(model).ok())
+        .and_then(|model| model_info(model).ok())?;
+    model.thinking_level = response["data"]
+        .get("thinkingLevel")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    Some(model)
 }
 
 fn model_info(value: &Value) -> Result<ModelInfo> {
@@ -731,6 +762,8 @@ fn model_info(value: &Value) -> Result<ModelInfo> {
         provider: provider.into(),
         id: id.into(),
         name: name.into(),
+        role: None,
+        thinking_level: None,
     })
 }
 

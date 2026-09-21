@@ -493,7 +493,7 @@ async fn available_models_can_be_selected_explicitly() {
     std::fs::create_dir_all(&omp_dir).unwrap();
     std::fs::write(
         omp_dir.join("config.yml"),
-        "modelRoles:\n  default: fixture/fast\n  smart: fixture/smart\ncycleOrder:\n  - default\n  - smart\n",
+        "modelRoles:\n  default: fixture/fast\n  smart: fixture/smart:low\n  deep: fixture/smart:high\ncycleOrder:\n  - default\n  - smart\n  - deep\n",
     )
     .unwrap();
     let created: Value = client
@@ -521,14 +521,16 @@ async fn available_models_can_be_selected_explicitly() {
         .json()
         .await
         .unwrap();
-    assert_eq!(available["models"].as_array().unwrap().len(), 2);
+    assert_eq!(available["models"].as_array().unwrap().len(), 3);
     assert_eq!(available["models"][1]["id"], "smart");
     assert_eq!(available["models"][1]["role"], "smart");
+    assert_eq!(available["models"][2]["id"], "smart");
+    assert_eq!(available["models"][2]["role"], "deep");
 
     let selected: Value = client
         .post(format!("{command}/model"))
         .bearer_auth(&credential)
-        .json(&json!({"provider":"fixture","id":"smart","role":"smart"}))
+        .json(&json!({"provider":"fixture","id":"smart","role":"deep"}))
         .send()
         .await
         .unwrap()
@@ -536,6 +538,8 @@ async fn available_models_can_be_selected_explicitly() {
         .await
         .unwrap();
     assert_eq!(selected["model"]["id"], "smart");
+    assert_eq!(selected["model"]["role"], "deep");
+    assert_eq!(selected["model"]["thinkingLevel"], "high");
     let detail: Value = client
         .get(&command)
         .bearer_auth(&credential)
@@ -546,6 +550,8 @@ async fn available_models_can_be_selected_explicitly() {
         .await
         .unwrap();
     assert_eq!(detail["model"]["id"], "smart");
+    assert_eq!(detail["model"]["role"], "deep");
+    assert_eq!(detail["model"]["thinkingLevel"], "high");
 
     let rejected = client
         .post(format!("{command}/model"))

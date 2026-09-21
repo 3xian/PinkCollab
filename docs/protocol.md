@@ -21,12 +21,12 @@ Except for pairing, every REST request and WebSocket handshake must include `Aut
 | POST | `/api/v1/sessions/:id/stop` | No request fields; closes stdin and terminates OMP if it has not exited after 3 seconds |
 | POST | `/api/v1/sessions/:id/respond` | See input responses below |
 | GET | `/api/v1/sessions/:id/models` | Returns `{models:[{provider,id,name,role,thinkingLevel?}]}` in OMP's Ctrl+P cycle order |
-| POST | `/api/v1/sessions/:id/model` | Selects one cycle entry using `{provider,id,role}` and returns `{model:{provider,id,name}}` |
+| POST | `/api/v1/sessions/:id/model` | Selects one cycle entry using `{provider,id,role}` and returns `{model:{provider,id,name,role,thinkingLevel?}}` |
 | POST | `/api/v1/sessions/:id/model/cycle` | Legacy model-cycle command; returns `{model:{provider,id,name}}` |
 
 Unless the table specifies a response, successful commands return `{ok:true}`. Rejected commands return 409, rejected session creation returns 422, out-of-bounds directories return 403, and authentication failures return 401. Business errors return `{error:string}`; the HTTP framework returns 400/415/422 for JSON decoding errors. Request bodies are limited to 512 KiB, and prompts and input values to 256 KiB.
 
-The Gateway owns model state: `GET /api/v1/sessions/:id` carries it as `model`, which is present only while a runtime is attached and OMP reports a model. Clients must treat `model` as optional and follow `model.updated` events for changes they did not initiate. Listing models resolves OMP's effective `modelRoles` and `cycleOrder` against `get_available_models`, matching the choices and order used by Ctrl+P. Selecting a choice calls `set_model` and applies that role's configured thinking level. The role is required so duplicate model targets in the cycle remain unambiguous. The cycle endpoint remains for older clients and is rejected with 409 when OMP reports no alternative model.
+The Gateway owns model state: `GET /api/v1/sessions/:id` carries it as `model`, which is present only while a runtime is attached and OMP reports a model. Clients must treat `model` as optional and follow `model.updated` events for changes they did not initiate. Listing models asks OMP for its merged effective settings, applies the running process's model flags, then resolves `modelRoles`, `cycleOrder`, and `modelProviderOrder` against `get_available_models`, matching the choices and order used by Ctrl+P. Selecting a choice calls `set_model`, applies that role's configured thinking level, and preserves the selected role plus OMP's actual thinking level in session state. The role is required so duplicate model targets in the cycle remain unambiguous. The cycle endpoint remains for older clients and is rejected with 409 when OMP reports no alternative model.
 
 ## Session
 
