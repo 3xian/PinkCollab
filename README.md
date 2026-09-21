@@ -2,7 +2,7 @@
   <img src="docs/assets/pinkcollab-logo.png" width="144" alt="PinkCollab logo" />
 </p>
 
-# PinkCollab
+# PinkCollab - Oh My Pi (OMP) Android Controller
 
 [![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)](#build-android)
 [![Min SDK: API 26+](https://img.shields.io/badge/Min_SDK-API_26%2B-3DDC84?logo=android&logoColor=white)](android/app/build.gradle.kts)
