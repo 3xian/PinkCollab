@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/pinkcollab-logo.png" width="144" alt="PinkCollab logo" />
+  <img src="docs/assets/pinkcollab-logo.png" width="96" alt="PinkCollab logo" />
 </p>
 
 # PinkCollab - Oh My Pi (OMP) Android Controller
