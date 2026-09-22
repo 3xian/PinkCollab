@@ -1,5 +1,10 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,11 +25,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
@@ -294,6 +302,65 @@ internal fun Modifier.timelineBand(
         )
     }
 
+private fun Modifier.userMessageBand(
+    container: Color,
+    primary: Color,
+    secondary: Color,
+): Modifier = background(container)
+    .background(
+        Brush.horizontalGradient(
+            listOf(
+                primary.copy(alpha = 0.20f),
+                Color.Transparent,
+                secondary.copy(alpha = 0.10f),
+                primary.copy(alpha = 0.06f),
+            ),
+        ),
+    )
+    .drawBehind {
+        drawLine(
+            color = Color.White.copy(alpha = 0.07f),
+            start = Offset(0f, size.height),
+            end = Offset(size.width, size.height),
+            strokeWidth = 1.dp.toPx(),
+        )
+    }
+
+@Composable
+private fun Modifier.runningActivityBackground(active: Boolean): Modifier {
+    if (!active) return this
+    val transition = rememberInfiniteTransition(label = "runningActivityBackground")
+    val progress = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_350, easing = LinearEasing),
+        ),
+        label = "runningActivityBackgroundSweep",
+    )
+    return drawWithCache {
+        val shimmerWidth = size.width * 0.46f
+        val shimmer = Brush.horizontalGradient(
+            listOf(
+                Color.Transparent,
+                Purple400.copy(alpha = 0.10f),
+                Purple200.copy(alpha = 0.26f),
+                Color.White.copy(alpha = 0.15f),
+                Purple400.copy(alpha = 0.10f),
+                Color.Transparent,
+            ),
+            startX = 0f,
+            endX = shimmerWidth,
+        )
+        onDrawBehind {
+            val left = -shimmerWidth + progress.value * (size.width + shimmerWidth)
+            translate(left = left) {
+                drawRect(brush = shimmer, size = Size(shimmerWidth, size.height))
+            }
+        }
+    }
+}
+
 @Composable
 private fun DisplayItem(item: SessionDisplayItem) {
     when (item) {
@@ -307,18 +374,29 @@ private fun DisplayItem(item: SessionDisplayItem) {
 @Composable
 private fun MessageCard(item: SessionDisplayItem.Message) {
     val isUser = item.role == "user"
+    val colors = MaterialTheme.colorScheme
+    val band = if (isUser) {
+        Modifier.userMessageBand(colors.primaryContainer, colors.primary, colors.secondary)
+    } else {
+        Modifier.timelineBand(tint = Teal300, tintAlpha = 0.026f)
+    }
+    val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
         Modifier
             .fillMaxWidth()
-            .timelineBand(
-                tint = if (isUser) Purple400 else Teal300,
-                tintAlpha = if (isUser) 0.075f else 0.026f,
-            )
+            .then(band)
             .padding(horizontal = 20.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Text(if (isUser) "You" else "Assistant", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = if (isUser) Purple200 else TextHigh)
-        Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
+        if (!isUser) {
+            Text(
+                "Assistant",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = TextHigh,
+            )
+        }
+        Text(item.text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
     }
 }
 
@@ -353,6 +431,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
                 },
                 tintAlpha = 0.035f,
             )
+            .runningActivityBackground(group.status == ActivityStatus.Running)
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -408,8 +487,9 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
 
 @Composable
 private fun RawTimelineCard(item: TimelineItem) {
-
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
+    val isUser = item.kind == "user"
+    val colors = MaterialTheme.colorScheme
     val isDetail = item.kind in listOf("tool", "subagent")
     val detail = item.tool?.let { tool ->
         buildList {
@@ -417,24 +497,61 @@ private fun RawTimelineCard(item: TimelineItem) {
             if (tool.result.isNotBlank()) add("Result\n${tool.result}")
         }.joinToString("\n\n")
     }.orEmpty().ifBlank { item.detail }
+    val band = if (isUser) {
+        Modifier.userMessageBand(colors.primaryContainer, colors.primary, colors.secondary)
+    } else {
+        Modifier.timelineBand(
+            tint = when (item.kind) {
+                "error" -> Red400
+                "assistant" -> Teal300
+                else -> Gray400
+            },
+        )
+    }
+    val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
         Modifier
             .fillMaxWidth()
-            .timelineBand(
-                tint = when (item.kind) {
-                    "error" -> Red400
-                    "user" -> Purple400
-                    "assistant" -> Teal300
-                    else -> Gray400
-                },
-                tintAlpha = if (item.kind == "user") 0.075f else 0.025f,
-            )
+            .then(band)
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Purple200; "assistant" -> TextHigh; "error" -> Red400; else -> TextMid })
-        Text(item.text, style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium, color = TextHigh)
-        if (isDetail && detail.isNotBlank()) { TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
+        if (!isUser) {
+            Text(
+                when (item.kind) {
+                    "assistant" -> "Assistant"
+                    "tool" -> "Tool call"
+                    "subagent" -> "Subagent"
+                    "error" -> "Error"
+                    else -> "Activity"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (item.kind == "error") Red400 else if (item.kind == "assistant") TextHigh else TextMid,
+            )
+        }
+        Text(
+            item.text,
+            style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+            color = contentColor,
+        )
+        if (isDetail && detail.isNotBlank()) {
+            TextButton(
+                onClick = rememberHapticOnClick { expanded = !expanded },
+                contentPadding = PaddingValues(0.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = Purple200),
+            ) {
+                Text(if (expanded) "Collapse details" else "Expand details")
+            }
+            if (expanded) {
+                Text(
+                    detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = TextMid,
+                )
+            }
+        }
     }
 }
 
