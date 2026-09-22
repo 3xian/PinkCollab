@@ -906,6 +906,14 @@
       transform-origin: 0 0;
       transition: transform 0.18s ease;
     }
+    /* Reserve the diagram box from the first paint. The SVG carries its viewBox
+       (1120x620) but no intrinsic height until the camera script settles it, so
+       without this the container collapses and re-expands: a layout shift. */
+    .diagram-container > svg {
+      aspect-ratio: 1120 / 620;
+      height: auto;
+      max-height: 100%;
+    }
 
     .diagram-container.is-camera-moving svg {
       transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
