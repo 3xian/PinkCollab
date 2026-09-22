@@ -91,7 +91,16 @@ try {
         cell: el.closest('.arch-connection').getBoundingClientRect().width,
         gap: parseFloat(getComputedStyle(el.closest('.architecture-flow')).columnGap) || 0,
       }));
+      // Any text box that cannot fit its own text is being clipped, not wrapped.
+      const clipped = [];
+      for (const el of document.querySelectorAll('p, li, dd, dt, h1, h2, h3, span, strong, a, figcaption, code')) {
+        if (!el.textContent.trim() || el.closest('.hero-scene') || el.offsetParent === null) continue;
+        if (getComputedStyle(el).overflowX !== 'visible') continue;
+        const lost = el.scrollWidth - el.clientWidth;
+        if (lost > 1 && el.clientWidth > 0) clipped.push(`${el.tagName}.${String(el.className).split(' ')[0]} loses ${lost}px`);
+      }
       return {
+        clipped,
         overflow: document.documentElement.scrollWidth - window.innerWidth,
         columns: getComputedStyle(flow).gridTemplateColumns.split(' ').length,
         labels,
@@ -111,6 +120,7 @@ try {
         `${width}px: architecture connector label (${Math.round(label)}px) overflows its ${Math.round(cell)}px column`,
       );
     }
+    check(metrics.clipped.length === 0, `${width}px: clipped text: ${metrics.clipped.slice(0, 4).join(', ')}`);
     check(metrics.preSize >= 14, `${width}px: install command text is ${metrics.preSize}px`);
     check(metrics.tabsSize >= 11, `${width}px: demo tabs are ${metrics.tabsSize}px`);
     check(metrics.navLinks >= 2, `${width}px: only ${metrics.navLinks} navigation links are reachable`);
