@@ -1,0 +1,172 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How PinkCollab works",
+    "output": "architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1120, 620],
+    "repository": {
+      "url": "https://github.com/3xian/PinkCollab",
+      "revision": "bc21f8d77c615055a4598245563e8e228da88769"
+    }
+  },
+  "components": [
+    {
+      "id": "android",
+      "type": "frontend",
+      "label": "PinkCollab Android",
+      "sublabel": "Spawn · follow · steer",
+      "sources": [
+        { "path": "android/app/src/main/java/dev/pinkcollab/data/GatewayRepository.kt", "line": 92, "end_line": 102, "label": "Live events" },
+        { "path": "android/app/src/main/java/dev/pinkcollab/data/GatewayRepository.kt", "line": 180, "end_line": 187, "label": "Create task" }
+      ],
+      "pos": [40, 240],
+      "size": [180, 76]
+    },
+    {
+      "id": "gateway",
+      "type": "backend",
+      "label": "Rust Gateway",
+      "sublabel": "Auth · task lifecycle",
+      "tag": "Axum + Tokio",
+      "sources": [
+        { "path": "gateway/src/api.rs", "line": 47, "end_line": 58, "label": "API routes" },
+        { "path": "gateway/src/session.rs", "line": 396, "end_line": 408, "label": "Task creation" }
+      ],
+      "pos": [340, 240],
+      "size": [180, 76]
+    },
+    {
+      "id": "omp",
+      "type": "backend",
+      "label": "OMP process",
+      "sublabel": "One subprocess per task",
+      "tag": "omp --mode rpc-ui",
+      "sources": [
+        { "path": "gateway/src/omp.rs", "line": 124, "end_line": 142, "label": "OMP process spawn" }
+      ],
+      "pos": [640, 240],
+      "size": [190, 76]
+    },
+    {
+      "id": "provider",
+      "type": "external",
+      "label": "Model provider",
+      "sublabel": "Credentials stay on host",
+      "sources": [
+        { "path": "android/app/src/main/java/dev/pinkcollab/data/CredentialStore.kt", "line": 16, "label": "Credential boundary" }
+      ],
+      "pos": [920, 240],
+      "size": [170, 76]
+    },
+    {
+      "id": "workspaces",
+      "type": "database",
+      "label": "Allowed workspaces",
+      "sublabel": "Browse + choose cwd",
+      "sources": [
+        { "path": "gateway/src/workspace.rs", "line": 64, "end_line": 71, "label": "Allowlist validation" }
+      ],
+      "pos": [280, 440],
+      "size": [180, 70]
+    },
+    {
+      "id": "sqlite",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "Pairing + task metadata",
+      "sources": [
+        { "path": "gateway/src/storage.rs", "line": 61, "end_line": 65, "label": "Schema" },
+        { "path": "gateway/src/storage.rs", "line": 168, "end_line": 175, "label": "Session metadata" }
+      ],
+      "pos": [490, 440],
+      "size": [170, 70]
+    },
+    {
+      "id": "history",
+      "type": "database",
+      "label": "OMP session files",
+      "sublabel": "Conversation history",
+      "sources": [
+        { "path": "gateway/src/session.rs", "line": 122, "end_line": 128, "label": "History loading" }
+      ],
+      "pos": [700, 440],
+      "size": [180, 70]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Your computer or server",
+      "wraps": ["gateway", "omp", "workspaces", "sqlite", "history"],
+      "pad": 28
+    }
+  ],
+  "connections": [
+    {
+      "id": "phone-gateway",
+      "from": "android",
+      "to": "gateway",
+      "label": "HTTPS / WSS · commands + live events",
+      "variant": "emphasis",
+      "labelAt": [280, 330]
+    },
+    {
+      "id": "gateway-omp",
+      "from": "gateway",
+      "to": "omp",
+      "label": "spawn + bidirectional NDJSON",
+      "variant": "emphasis",
+      "labelAt": [580, 330]
+    },
+    {
+      "id": "omp-provider",
+      "from": "omp",
+      "to": "provider",
+      "label": "model requests"
+    },
+    {
+      "id": "gateway-workspaces",
+      "from": "gateway",
+      "to": "workspaces",
+      "label": "allowlist + cwd",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDx": -40
+    },
+    {
+      "id": "gateway-sqlite",
+      "from": "gateway",
+      "to": "sqlite",
+      "label": "read / write metadata",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "omp-history",
+      "from": "omp",
+      "to": "history",
+      "label": "persist transcript",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "Spawn",
+      "items": ["Choose an allowed workspace", "The Gateway starts a real OMP process"]
+    },
+    {
+      "dot": "emerald",
+      "title": "Control",
+      "items": ["Commands travel over HTTPS", "Live task events return over WebSocket"]
+    },
+    {
+      "dot": "slate",
+      "title": "Keep ownership",
+      "items": ["Code and credentials remain on your host", "The phone never talks to a model provider"]
+    }
+  ]
+}

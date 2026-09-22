@@ -2,7 +2,9 @@
   <img src="docs/assets/pinkcollab-logo.png" width="96" alt="PinkCollab logo" />
 </p>
 
-# PinkCollab — Spawn and Control Oh My Pi (OMP) Tasks from Android
+<h1 align="center">PinkCollab</h1>
+
+<p align="center"><strong>Spawn and Control Oh My Pi (OMP) Tasks from Android</strong></p>
 
 [![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)](#build-android)
 [![Min SDK: API 26+](https://img.shields.io/badge/Min_SDK-API_26%2B-3DDC84?logo=android&logoColor=white)](android/app/build.gradle.kts)
