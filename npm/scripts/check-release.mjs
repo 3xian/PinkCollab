@@ -130,7 +130,11 @@ for (const [packageName, expectedVersion] of expectedDependencies) {
   }
 }
 
-const tag = process.argv[2] || process.env.GITHUB_REF_NAME;
+const githubTag =
+  process.env.GITHUB_REF_TYPE === "tag"
+    ? process.env.GITHUB_REF_NAME
+    : undefined;
+const tag = process.argv[2] || githubTag;
 if (tag && tag !== `v${version}`) {
   fail(`Release tag ${tag} does not match package version v${version}`);
 }
