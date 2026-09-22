@@ -45,21 +45,34 @@ flowchart LR
 
 ## Quick start
 
-This path installs a prebuilt Gateway, builds the Android app, then pairs one computer with one phone. The phone can use any supported HTTPS front end; Tailscale Funnel is optional.
+This path gets a Gateway running, builds the Android app, then pairs one computer with one phone. The phone can use any supported HTTPS front end; Tailscale Funnel is optional.
+
+**No release is published yet, so start from source.** The npm packages described below ship with tagged releases; until the first one exists, build the Gateway with [Build the Gateway from source](#build-the-gateway-from-source) and run `./target/release/pinkcollab-gateway` wherever a command below says `pinkcollab`. Subcommands and flags are identical on either route.
 
 ### 1. Install the prerequisites
 
 On the computer that will run tasks, install:
 
-- **OMP**, with `omp --version` working in your terminal
-- **Node.js 18+ and npm**
-- **JDK 17+ and Android SDK 36** to build the Android app
+- **OMP**, with `omp --version` working in your terminal — required either way
+- **Rust 1.89+** to build the Gateway from source, or **Node.js 18+ and npm** to install the prebuilt package — never both
 
-You do **not** need Rust to install or run the Gateway from npm. OMP remains an external dependency and is not installed by the `pinkcollab` package.
+To build the Android app yourself you additionally need **JDK 17+ and Android SDK 36**. Using the app never needs the Android toolchain; see [Build Android](#build-android) and the debug APKs attached to CI runs.
+
+OMP remains an external dependency and is not installed by the `pinkcollab` package.
 
 ### 2. Install and initialize the Gateway
 
-Install the prebuilt Gateway for your current platform. Then replace `/absolute/path/to/projects` with a directory that contains the projects the phone may access. Repeat `--workspace` to allow more than one directory.
+Build it from a checkout of this repository:
+
+```sh
+git clone https://github.com/3xian/PinkCollab.git
+cd PinkCollab/gateway
+cargo build --release --locked --bin pinkcollab-gateway
+./target/release/pinkcollab-gateway init --workspace /absolute/path/to/projects
+./target/release/pinkcollab-gateway status
+```
+
+Once a tagged release is published, the prebuilt package replaces the build step with `npm install -g pinkcollab`, after which the first two subcommands are plain `pinkcollab init --workspace /absolute/path/to/projects` and `pinkcollab status`:
 
 ```sh
 npm install -g pinkcollab
@@ -67,7 +80,7 @@ pinkcollab init --workspace /absolute/path/to/projects
 pinkcollab status
 ```
 
-On Windows, use a workspace such as `C:\code`. For a one-off invocation without a global install, `npx pinkcollab status` is also supported.
+Replace `/absolute/path/to/projects` with a directory that contains the projects the phone may access, and repeat `--workspace` to allow more than one directory. On Windows, use a workspace such as `C:\code`, and run the built binary as `.\target\release\pinkcollab-gateway.exe`. For a one-off invocation without a global install, `npx pinkcollab status` is also supported.
 
 Run `init` only once. It creates `~/.pinkcollab/config.yaml`; edit its `workspaces` list later if you need to change the allowed directories. Continue only when `status` ends with `status: ready`.
 
@@ -86,7 +99,7 @@ On Windows, run the build with `cmd.exe /c gradlew.bat :app:assembleDebug`. You 
 Keep this terminal open:
 
 ```sh
-pinkcollab serve
+pinkcollab serve   # source build: ./target/release/pinkcollab-gateway serve
 ```
 
 ### 5. Connect and pair
@@ -100,6 +113,8 @@ pinkcollab pair --url https://gateway.example.com
 # Or set up Tailscale Funnel and pair in one command:
 pinkcollab setup-funnel --pair
 ```
+
+With a source build, replace `pinkcollab` with `./target/release/pinkcollab-gateway` in every command above.
 
 If `public_url` is already set in `config.yaml`, run `pinkcollab pair` without `--url`. You do not need to recreate an existing Funnel, Serve, or reverse-proxy setup each time.
 
@@ -202,6 +217,16 @@ cd ../android
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
 ```
 
+```sh
+npm ci --prefix tools/website                 # once, for the browser checks
+node tools/website/check-site.mjs             # links, metadata, README agreement, asset budgets
+node tools/website/check-behavior.mjs         # responsive layout, tabs, copy, contrast, 404 page
+node tools/website/check-lighthouse.mjs       # Lighthouse scores plus byte and layout-shift budgets
+node tools/website/build-social-card.mjs      # regenerate website/assets/social-card.png
+```
+
+The last three drive a real browser and need a Chrome or Chromium this machine already ships: set `CHROME_PATH`, or have a Playwright install or a `google-chrome`/`chromium` on `PATH`. The same commands run in CI as the `website` job, and a failing check blocks the Pages deploy.
+
 `omp-fixture`, the deterministic stand-in for a real OMP, builds only with the `test-fixtures` feature.
 
 ## Project layout
@@ -210,6 +235,8 @@ cd ../android
 gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace · windows
 android/app/src/main/java/dev/pinkcollab/   data · ui · ui/theme
 npm/           npm launcher · platform package manifests · release validation
+website/       GitHub Pages site: index.html · styles.css · app.js · architecture.html · assets
+tools/website/ site checks, the social-card builder, and their dependencies
 docs/          deployment and networking (deployment.md) · API protocol (protocol.md)
 ```
 

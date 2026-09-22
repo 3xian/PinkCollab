@@ -210,6 +210,6 @@ launchctl kickstart -k gui/$(id -u)/dev.pinkcollab.gateway
 
 ### Updates
 
-After `npm install -g pinkcollab@latest`, stop the service, repeat the platform-specific copy above, and start it again. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started.
+After `npm install -g pinkcollab@latest`, stop the service, repeat the platform-specific copy above, and start it again. Until the first tagged release is published, rebuild from source instead ([README: Build the Gateway from source](../README.md#build-the-gateway-from-source)) and copy the fresh `target/release/pinkcollab-gateway` over the installed binary. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started.
 
 Configs written before embedded TLS was removed must drop `tls_cert` and `tls_key` entirely — the Gateway rejects any config that still sets them — and move TLS termination to Funnel, Serve, or a reverse proxy.
