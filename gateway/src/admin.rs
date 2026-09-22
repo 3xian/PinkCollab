@@ -35,7 +35,7 @@ pub fn init(dir: &Path, requested: &[PathBuf]) -> Result<()> {
     Store::open(dir)?;
     println!("Wrote {}", path.display());
     println!("OMP: {}", config.omp);
-    println!("Next: pinkcollab-gateway status");
+    println!("Next: run the `status` command with this executable");
     Ok(())
 }
 
@@ -145,7 +145,7 @@ pub fn revoke(dir: &Path, client: &str) -> Result<()> {
     let store = Store::open(dir)?;
     ensure!(
         store.revoke(client)?,
-        "no paired client with id {client}; run `pinkcollab-gateway clients`"
+        "no paired client with id {client}; run the `clients` command with this executable"
     );
     println!("Revoked {client}");
     Ok(())
@@ -163,7 +163,7 @@ pub fn setup_funnel(dir: &Path, options: funnel::Options<'_>, with_pair: bool) -
         return Ok(());
     };
     let Some(store) = pair_store else {
-        println!("Next: pinkcollab-gateway pair");
+        println!("Next: run the `pair` command with this executable");
         return Ok(());
     };
     issue_pairing(&config, &store, Some(url), None)

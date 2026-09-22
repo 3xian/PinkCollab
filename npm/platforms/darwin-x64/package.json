@@ -1,0 +1,24 @@
+{
+  "name": "@pinkcollab/gateway-darwin-x64",
+  "version": "0.1.0",
+  "description": "PinkCollab Gateway binary for macOS x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3xian/PinkCollab.git",
+    "directory": "npm/platforms/darwin-x64"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

@@ -31,7 +31,7 @@ public_url: https://my-host.example-tailnet.ts.net
 ```
 
 ```sh
-pinkcollab-gateway setup-funnel --pair     # publishes the port, writes public_url, prints a code
+pinkcollab setup-funnel --pair             # publishes the port, writes public_url, prints a code
 # equivalent, minus the pairing code:
 #   tailscale funnel --bg --https=443 --yes http://127.0.0.1:8787
 tailscale funnel status
@@ -94,30 +94,39 @@ flowchart TB
 *Why so tight: the 192-bit random code is the only thing between the internet and your host until pairing succeeds, so it is short-lived and consumed transactionally on first use.*
 
 ```sh
-pinkcollab-gateway pair                        # code for the configured public_url
-pinkcollab-gateway pair --qr pairing.png       # ... and a PNG for another screen
-pinkcollab-gateway clients                     # clientId, name, pairing time
-pinkcollab-gateway revoke --client client_xxx  # fails when the id does not exist
+pinkcollab pair                        # code for the configured public_url
+pinkcollab pair --qr pairing.png       # ... and a PNG for another screen
+pinkcollab clients                     # clientId, name, pairing time
+pinkcollab revoke --client client_xxx  # fails when the id does not exist
 ```
 
 Removing a pairing in Android only clears the phone's local copy — use `revoke` to actually cut host-side access.
 
 ## Run as a background service
 
-Run the service as the same regular OS user that owns `~/.pinkcollab` and the workspaces. The macOS and Linux examples expect the Gateway at `~/.local/bin/pinkcollab-gateway`. From the repository root:
+Run the service as the same regular OS user that owns `~/.pinkcollab` and the workspaces. Do not point a long-lived service at npm's global installation tree: npm can replace or remove that tree during an update. Copy the installed platform binary to a stable per-user location instead.
+
+On Linux:
 
 ```sh
-mkdir -p ~/.local/bin
-cp gateway/target/release/pinkcollab-gateway ~/.local/bin/
-chmod 755 ~/.local/bin/pinkcollab-gateway
+platform_package="@pinkcollab/gateway-linux-$(node -p 'process.arch')"
+package_root="$(npm root -g)/pinkcollab"
+platform_manifest="$(node -e 'console.log(require.resolve(process.argv[1] + "/package.json", { paths: [process.argv[2]] }))' "$platform_package" "$package_root")"
+install -Dm755 "$(dirname "$platform_manifest")/bin/pinkcollab-gateway" \
+  ~/.local/share/pinkcollab/bin/pinkcollab-gateway
 ```
 
-Edit `ExecStart`/`ProgramArguments` instead if you keep the binary elsewhere. `init` already wrote an absolute `omp` path into `config.yaml`, so OMP only has to stay where it is; the units still set `PATH` because that path is usually a launcher script that resolves `bun` or `node` from a shell environment a service manager does not inherit.
+`init` already wrote an absolute `omp` path into `config.yaml`, so OMP only has to stay where it is; the service still sets `PATH` because that path is usually a launcher script that resolves `bun` or `node` from a shell environment a service manager does not inherit.
 
 ### Windows
 
 ```powershell
-sc.exe create PinkCollab binPath= '"C:\PinkCollab\pinkcollab-gateway.exe" --data-dir "C:\Users\YOUR_USER\.pinkcollab" service' start= auto
+$stableDir = Join-Path $env:LOCALAPPDATA "PinkCollab/bin"
+New-Item -ItemType Directory -Force $stableDir | Out-Null
+$packageRoot = Join-Path (npm root -g) "pinkcollab"
+$platformManifest = node -e "console.log(require.resolve('@pinkcollab/gateway-win32-x64/package.json', { paths: [process.argv[1]] }))" $packageRoot
+Copy-Item (Join-Path (Split-Path $platformManifest) "bin/pinkcollab-gateway.exe") $stableDir
+sc.exe create PinkCollab binPath= "`"$stableDir\pinkcollab-gateway.exe`" --data-dir `"$env:USERPROFILE\.pinkcollab`" service" start= auto
 ```
 
 Then open **Services → PinkCollab → Properties → Log On**, switch the account from LocalSystem to that user, grant *Log on as a service*, and start it. *(why: the Gateway and OMP need that user's credentials and file permissions; LocalSystem has neither.)*
@@ -139,7 +148,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/pinkcollab-gateway --data-dir %h/.pinkcollab serve
+ExecStart=%h/.local/share/pinkcollab/bin/pinkcollab-gateway --data-dir %h/.pinkcollab serve
 Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=5
@@ -160,6 +169,18 @@ Add `loginctl enable-linger YOUR_USER` to keep it running after logout.
 
 ### macOS (launchd)
 
+Copy the npm-installed binary to a stable location:
+
+```sh
+platform_package="@pinkcollab/gateway-darwin-$(node -p 'process.arch')"
+package_root="$(npm root -g)/pinkcollab"
+platform_manifest="$(node -e 'console.log(require.resolve(process.argv[1] + "/package.json", { paths: [process.argv[2]] }))' "$platform_package" "$package_root")"
+mkdir -p "$HOME/Library/Application Support/PinkCollab/bin"
+cp "$(dirname "$platform_manifest")/bin/pinkcollab-gateway" \
+  "$HOME/Library/Application Support/PinkCollab/bin/pinkcollab-gateway"
+chmod 755 "$HOME/Library/Application Support/PinkCollab/bin/pinkcollab-gateway"
+```
+
 Write `~/Library/LaunchAgents/dev.pinkcollab.gateway.plist`, replacing `YOUR_USER`:
 
 ```xml
@@ -168,7 +189,7 @@ Write `~/Library/LaunchAgents/dev.pinkcollab.gateway.plist`, replacing `YOUR_USE
 <plist version="1.0"><dict>
     <key>Label</key><string>dev.pinkcollab.gateway</string>
     <key>ProgramArguments</key><array>
-        <string>/Users/YOUR_USER/.local/bin/pinkcollab-gateway</string>
+        <string>/Users/YOUR_USER/Library/Application Support/PinkCollab/bin/pinkcollab-gateway</string>
         <string>--data-dir</string><string>/Users/YOUR_USER/.pinkcollab</string>
         <string>serve</string>
     </array>
@@ -189,6 +210,6 @@ launchctl kickstart -k gui/$(id -u)/dev.pinkcollab.gateway
 
 ### Updates
 
-Stop the service, replace the binary, start it again. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started.
+After `npm install -g pinkcollab@latest`, stop the service, repeat the platform-specific copy above, and start it again. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started.
 
 Configs written before embedded TLS was removed must drop `tls_cert` and `tls_key` entirely — the Gateway rejects any config that still sets them — and move TLS termination to Funnel, Serve, or a reverse proxy.

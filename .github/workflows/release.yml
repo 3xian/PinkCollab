@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gateway
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify release versions
+        run: node npm/scripts/check-release.mjs "$GITHUB_REF_NAME"
+      - name: Export build matrix
+        id: matrix
+        run: echo "value=$(node npm/scripts/build-matrix.mjs)" >> "$GITHUB_OUTPUT"
+      - name: Test npm launcher
+        run: npm test --prefix npm/pinkcollab
+      - name: Inspect main npm package
+        run: npm pack ./npm/pinkcollab --dry-run
+      - name: Check Gateway formatting
+        working-directory: gateway
+        run: cargo fmt --check
+      - name: Lint Gateway
+        working-directory: gateway
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - name: Test Gateway
+        working-directory: gateway
+        run: cargo test --all-features --locked
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install musl build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes musl-tools
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gateway
+          key: ${{ matrix.target }}
+      - name: Build Gateway
+        working-directory: gateway
+        env:
+          CC_aarch64_unknown_linux_musl: musl-gcc
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --locked --bin pinkcollab-gateway --target ${{ matrix.target }}
+      - name: Stage binary
+        shell: pwsh
+        run: |
+          $source = "gateway/target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          $destination = "dist/${{ matrix.id }}/${{ matrix.binary }}"
+          New-Item -ItemType Directory -Force -Path (Split-Path $destination) | Out-Null
+          Copy-Item -LiteralPath $source -Destination $destination
+          if ("${{ runner.os }}" -ne "Windows") { chmod 755 $destination }
+      - name: Install tarballs and test launcher
+        run: node npm/scripts/smoke-package.mjs "${{ matrix.id }}" "dist/${{ matrix.id }}/${{ matrix.binary }}"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: gateway-${{ matrix.id }}
+          path: dist/${{ matrix.id }}/${{ matrix.binary }}
+          if-no-files-found: error
+
+  npm-publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: gateway-*
+          path: artifacts
+      - name: Assemble platform packages
+        run: node npm/scripts/stage-artifacts.mjs packages artifacts npm/platforms
+      - name: Validate package contents
+        run: |
+          node npm/scripts/check-release.mjs "$GITHUB_REF_NAME"
+          npm test --prefix npm/pinkcollab
+          npm pack ./npm/pinkcollab --dry-run
+          for package_dir in npm/platforms/*; do
+            npm pack "./$package_dir" --dry-run
+          done
+      - name: Publish platform packages first
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for package_dir in npm/platforms/*; do
+            npm publish "./$package_dir" --access public --provenance
+          done
+      - name: Publish main package last
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./npm/pinkcollab --access public --provenance
+
+  github-release:
+    needs: npm-publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: gateway-*
+          path: artifacts
+      - name: Prepare release assets
+        run: |
+          node npm/scripts/stage-artifacts.mjs release artifacts release-assets
+          cd release-assets
+          sha256sum pinkcollab-gateway-* > SHA256SUMS
+      - name: Create immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
