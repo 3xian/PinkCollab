@@ -23,4 +23,16 @@ The release workflow rejects a tag that differs from the Cargo or npm package ve
 
 Published package versions and GitHub Release assets are never overwritten or silently skipped. If npm publishing stops after only some platform packages were published, bump to a new version rather than rerunning the same tag. If all npm packages were published but GitHub Release creation failed, create the release from that run's artifacts and checksums instead of rebuilding or replacing binaries.
 
+If no npm package or GitHub Release was published and the failed run's artifacts
+are no longer available, recover the five binaries from the immutable tag:
+
+```sh
+gh workflow run release.yml --ref main -f tag=v0.1.0
+```
+
+A manual dispatch checks out and validates the requested tag, rebuilds and smoke
+tests every platform binary, skips npm publication, and creates the GitHub
+Release with checksums. Use it only after confirming that the tag has no release
+and none of its package versions exist on npm.
+
 Linux packages use musl targets to avoid tying the binaries to the glibc version on the build runner. The macOS and Windows packages are built on native GitHub-hosted runners.

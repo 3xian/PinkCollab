@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag whose assets must be recovered
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 permissions:
   contents: read
@@ -15,6 +24,8 @@ jobs:
       matrix: ${{ steps.matrix.outputs.value }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: rustfmt, clippy
@@ -26,7 +37,7 @@ jobs:
           node-version: "24"
           package-manager-cache: false
       - name: Verify release versions
-        run: node npm/scripts/check-release.mjs "$GITHUB_REF_NAME"
+        run: node npm/scripts/check-release.mjs "$RELEASE_TAG"
       - name: Export build matrix
         id: matrix
         run: echo "value=$(node npm/scripts/build-matrix.mjs)" >> "$GITHUB_OUTPUT"
@@ -52,6 +63,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
@@ -90,12 +103,15 @@ jobs:
 
   npm-publish:
     needs: build
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@1.89.0
       - uses: actions/setup-node@v5
         with:
@@ -110,7 +126,7 @@ jobs:
         run: node npm/scripts/stage-artifacts.mjs packages artifacts npm/platforms
       - name: Validate package contents
         run: |
-          node npm/scripts/check-release.mjs "$GITHUB_REF_NAME"
+          node npm/scripts/check-release.mjs "$RELEASE_TAG"
           npm test --prefix npm/pinkcollab
           npm pack ./npm/pinkcollab --dry-run
           for package_dir in npm/platforms/*; do
@@ -129,12 +145,15 @@ jobs:
         run: npm publish ./npm/pinkcollab --access public --provenance
 
   github-release:
-    needs: npm-publish
+    needs: [build, npm-publish]
+    if: ${{ always() && needs.build.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.npm-publish.result == 'success') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
@@ -152,4 +171,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+        run: gh release create "$RELEASE_TAG" release-assets/* --verify-tag --generate-notes --title "$RELEASE_TAG"
