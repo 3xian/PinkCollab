@@ -35,7 +35,7 @@
   <div class="site-shell">
     <header class="site-header">
       <a class="brand" href="./" aria-label="PinkCollab home"><img src="assets/logo-96.png" width="42" height="42" decoding="async" alt=""><span>PinkCollab<span class="brand-dot">.</span></span></a>
-      <nav aria-label="Main navigation"><a class="nav-source nav-start" href="#get-started">Get started</a><a class="nav-wide" href="#features">Features</a><a href="#architecture">Architecture</a><a class="nav-wide" href="#how-it-works">How it works</a><a href="https://omp.sh/">Oh My Pi <span aria-hidden="true">↗</span></a><a class="nav-source" href="https://github.com/3xian/PinkCollab">GitHub <span aria-hidden="true">↗</span></a></nav>
+      <nav aria-label="Main navigation"><a class="nav-source nav-start" href="#get-started">Get started</a><a href="#architecture">Architecture</a><a class="nav-wide" href="#how-it-works">How it works</a><a href="https://omp.sh/">Oh My Pi <span aria-hidden="true">↗</span></a><a class="nav-source" href="https://github.com/3xian/PinkCollab">GitHub <span aria-hidden="true">↗</span></a></nav>
     </header>
     <main id="main">
       <section class="hero" aria-labelledby="hero-title">
@@ -121,15 +121,7 @@ cargo build --release --locked \
           </div>
         </div>
       </section>
-      <section class="features section" id="features" aria-labelledby="features-title">
-        <div class="section-heading"><p class="eyebrow">A LITTLE DISTANCE. NO DISCONNECT.</p><h2 id="features-title">Stay close to the work.</h2><p>The useful parts of agent control,<br>made for the screen in your hand.</p></div>
-        <div class="feature-grid">
-          <article class="feature feature-wide"><div class="feature-icon" aria-hidden="true">▦</div><h3>All your hosts.<br> One task list.</h3><p>See what needs your attention, what’s running, and what’s recently finished across your computers and servers.</p><div class="mini-states" aria-hidden="true"><span><i class="pink-dot"></i>Needs attention</span><span><i class="green-dot"></i>Running</span><span><i class="purple-dot"></i>Recent</span></div></article>
-          <article class="feature"><div class="feature-icon" aria-hidden="true">↳</div><h3>A conversation,<br> wherever you are.</h3><p>Follow streaming replies and tool details. Send a new prompt, steer ongoing work, or answer when your agent asks.</p><div class="mini-conversation" aria-hidden="true"><span>Focus on the failing tests first.</span><span>On it. Checking the test output…</span></div></article>
-          <article class="feature"><div class="feature-icon" aria-hidden="true">▱</div><h3>Spawn in the<br> right directory.</h3><p>Browse allowed workspaces, pick a project, and launch a fresh OMP task with the working directory and first prompt already set.</p><div class="mini-path" aria-hidden="true"><span>projects</span><b>/</b><span>api</span><b>↗</b></div></article>
-        </div>
-        <div class="ownership-note"><span aria-hidden="true">⌁</span><p><strong>Your machines stay yours.</strong> OMP runs on your hosts. Model provider credentials stay there, too. Pair devices with a single-use QR code and revoke access when you need to.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment guide <span aria-hidden="true">↗</span></a></div>
-      </section>
+      
       <section class="architecture section" id="architecture" aria-labelledby="architecture-title">
         <div class="section-heading architecture-heading"><p class="eyebrow">FROM A TAP TO A RUNNING AGENT</p><h2 id="architecture-title">Your phone starts the work.<br>Your host stays in control.</h2><p>PinkCollab is a direct bridge to OMP — not another agent and not a cloud relay.</p></div>
         <figure class="architecture-panel">
@@ -150,6 +142,7 @@ cargo build --release --locked \
           </div>
           <figcaption class="architecture-summary"><span><b>01 · Spawn</b>The Gateway launches a real <code>omp --mode rpc-ui</code> process.</span><span><b>02 · Control</b>Commands go in; structured events stream back to Android.</span><span><b>03 · Own</b>Code, sessions, and provider credentials remain on your host.</span></figcaption>
           <a class="architecture-detail-link" href="architecture.html">Explore the detailed architecture <span aria-hidden="true">↗</span></a>
+                  <div class="ownership-note"><span aria-hidden="true">⌁</span><p><strong>Your machines stay yours.</strong> OMP runs on your hosts. Model provider credentials stay there, too. Pair devices with a single-use QR code and revoke access when you need to.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment guide <span aria-hidden="true">↗</span></a></div>
         </figure>
       </section>
       <section class="limits section" id="limits" aria-labelledby="limits-title">
