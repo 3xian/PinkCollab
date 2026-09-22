@@ -59,6 +59,28 @@
         </div>
       </section>
       <div class="principles-strip"><p>One phone.<br><strong>Every workspace.</strong></p><span>Start the work</span><span>Make the call</span><span>Keep it moving <b aria-hidden="true">↗</b></span></div>
+      <section class="architecture section" id="architecture" aria-labelledby="architecture-title">
+        <div class="section-heading architecture-heading"><p class="eyebrow">FROM A TAP TO A RUNNING AGENT</p><h2 id="architecture-title">Your phone starts the work.<br>Your host stays in control.</h2><p>PinkCollab is a direct bridge to OMP — not another agent and not a cloud relay.</p></div>
+        <figure class="architecture-panel">
+          <div class="architecture-flow" aria-label="PinkCollab architecture: the Android app connects over HTTPS and WebSocket to a Rust gateway on your host. The gateway spawns and controls Oh My Pi, which connects to your model provider. Workspaces, metadata, and session history stay on the host.">
+            <article class="arch-node arch-external arch-phone-node"><span class="arch-icon" aria-hidden="true">▣</span><span class="arch-kicker">IN YOUR HAND</span><h3>Android app</h3><p>Spawn, follow, steer</p></article>
+            <div class="arch-connection arch-connection-outer"><span>HTTPS · WSS</span><i aria-hidden="true"></i><small>commands + live events</small></div>
+            <div class="arch-host">
+              <span class="arch-boundary-label">YOUR COMPUTER OR SERVER</span>
+              <div class="arch-runtime">
+                <article class="arch-node"><span class="arch-icon" aria-hidden="true">↔</span><span class="arch-kicker">RUST SERVICE</span><h3>PinkCollab Gateway</h3><p>Auth, tasks, streaming</p></article>
+                <div class="arch-connection arch-connection-inner"><span>spawn</span><i aria-hidden="true"></i><small>NDJSON</small></div>
+                <article class="arch-node arch-omp-node"><span class="arch-icon arch-icon-word" aria-hidden="true">OMP</span><span class="arch-kicker">ONE PROCESS PER TASK</span><h3>Oh My Pi</h3><p>Plans, tools, coding</p></article>
+              </div>
+              <div class="arch-local-state"><span class="arch-state-title">Host-local state</span><div><span><b aria-hidden="true">⌁</b>Allowed workspaces</span><span><b aria-hidden="true">◫</b>Task metadata</span><span><b aria-hidden="true">≡</b>OMP session files</span></div></div>
+            </div>
+            <div class="arch-connection arch-connection-outer"><span>provider API</span><i aria-hidden="true"></i><small>model requests</small></div>
+            <article class="arch-node arch-external arch-provider-node"><span class="arch-icon" aria-hidden="true">✦</span><span class="arch-kicker">YOUR ACCOUNT</span><h3>Model provider</h3><p>Your chosen models</p></article>
+          </div>
+          <figcaption class="architecture-summary"><span><b>01 · Spawn</b>The Gateway launches a real <code>omp --mode rpc-ui</code> process.</span><span><b>02 · Control</b>Commands go in; structured events stream back to Android.</span><span><b>03 · Own</b>Code, sessions, and provider credentials remain on your host.</span></figcaption>
+          <a class="architecture-detail-link" href="architecture.html">Explore the detailed architecture <span aria-hidden="true">↗</span></a>
+        </figure>
+      </section>
       <section class="features section" id="features" aria-labelledby="features-title">
         <div class="section-heading"><p class="eyebrow">A LITTLE DISTANCE. NO DISCONNECT.</p><h2 id="features-title">Stay close to the work.</h2><p>The useful parts of agent control,<br>made for the screen in your hand.</p></div>
         <div class="feature-grid">
@@ -82,28 +104,6 @@
             <li><b>No relay in the middle.</b> HTTPS straight to your own host, via Funnel, Serve, or your own reverse proxy.</li>
           </ul>
         </div>
-      </section>
-      <section class="architecture section" id="architecture" aria-labelledby="architecture-title">
-        <div class="section-heading architecture-heading"><p class="eyebrow">FROM A TAP TO A RUNNING AGENT</p><h2 id="architecture-title">Your phone starts the work.<br>Your host stays in control.</h2><p>PinkCollab is a direct bridge to OMP — not another agent and not a cloud relay.</p></div>
-        <figure class="architecture-panel">
-          <div class="architecture-flow" aria-label="PinkCollab architecture: the Android app connects over HTTPS and WebSocket to a Rust gateway on your host. The gateway spawns and controls Oh My Pi, which connects to your model provider. Workspaces, metadata, and session history stay on the host.">
-            <article class="arch-node arch-external arch-phone-node"><span class="arch-icon" aria-hidden="true">▣</span><span class="arch-kicker">IN YOUR HAND</span><h3>Android app</h3><p>Spawn, follow, steer</p></article>
-            <div class="arch-connection arch-connection-outer"><span>HTTPS · WSS</span><i aria-hidden="true"></i><small>commands + live events</small></div>
-            <div class="arch-host">
-              <span class="arch-boundary-label">YOUR COMPUTER OR SERVER</span>
-              <div class="arch-runtime">
-                <article class="arch-node"><span class="arch-icon" aria-hidden="true">↔</span><span class="arch-kicker">RUST SERVICE</span><h3>PinkCollab Gateway</h3><p>Auth, tasks, streaming</p></article>
-                <div class="arch-connection arch-connection-inner"><span>spawn</span><i aria-hidden="true"></i><small>NDJSON</small></div>
-                <article class="arch-node arch-omp-node"><span class="arch-icon arch-icon-word" aria-hidden="true">OMP</span><span class="arch-kicker">ONE PROCESS PER TASK</span><h3>Oh My Pi</h3><p>Plans, tools, coding</p></article>
-              </div>
-              <div class="arch-local-state"><span class="arch-state-title">Host-local state</span><div><span><b aria-hidden="true">⌁</b>Allowed workspaces</span><span><b aria-hidden="true">◫</b>Task metadata</span><span><b aria-hidden="true">≡</b>OMP session files</span></div></div>
-            </div>
-            <div class="arch-connection arch-connection-outer"><span>provider API</span><i aria-hidden="true"></i><small>model requests</small></div>
-            <article class="arch-node arch-external arch-provider-node"><span class="arch-icon" aria-hidden="true">✦</span><span class="arch-kicker">YOUR ACCOUNT</span><h3>Model provider</h3><p>Your chosen models</p></article>
-          </div>
-          <figcaption class="architecture-summary"><span><b>01 · Spawn</b>The Gateway launches a real <code>omp --mode rpc-ui</code> process.</span><span><b>02 · Control</b>Commands go in; structured events stream back to Android.</span><span><b>03 · Own</b>Code, sessions, and provider credentials remain on your host.</span></figcaption>
-          <a class="architecture-detail-link" href="architecture.html">Explore the detailed architecture <span aria-hidden="true">↗</span></a>
-        </figure>
       </section>
       <section class="workflow section" id="how-it-works" aria-labelledby="workflow-title">
         <div class="section-heading"><p class="eyebrow">FROM YOUR DESK TO YOUR POCKET</p><h2 id="workflow-title">Three steps. Then you’re connected.</h2></div>
