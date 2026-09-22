@@ -54,13 +54,28 @@ data class TimelineItem(val id: String, val kind: String, val text: String, val 
 data class SessionDetail(val session: Session, val timeline: List<TimelineItem>, val streaming: String = "", val model: ModelInfo? = null)
 data class Workspace(val name: String, val path: String)
 data class Listing(val path: String, val parent: String?, val directories: List<Workspace>, val branch: String?, val gitStatus: String?)
-data class HostState(val paired: PairedHost, val connected: Boolean = false, val sessions: List<Session> = emptyList(), val workspaces: List<Workspace> = emptyList(), val revision: Long = 0)
-enum class StartupState { Loading, Ready }
+sealed interface ConnectionState {
+    data object Connecting : ConnectionState
+    data object Synchronizing : ConnectionState
+    data class Online(val sinceEpochMillis: Long) : ConnectionState
+    data class Reconnecting(val attempt: Int, val nextRetryEpochMillis: Long) : ConnectionState
+    data class Offline(val reason: String? = null) : ConnectionState
+    data object AuthenticationRequired : ConnectionState
+}
+data class HostState(
+    val paired: PairedHost,
+    val connection: ConnectionState = ConnectionState.Connecting,
+    val sessions: List<Session> = emptyList(),
+    val workspaces: List<Workspace> = emptyList(),
+    val revision: Long = 0,
+    val lastSyncedAtEpochMillis: Long? = null,
+) {
+    val connected: Boolean get() = connection is ConnectionState.Online
+}
 data class AppState(
     val hosts: Map<String, HostState> = emptyMap(),
     val details: Map<String, SessionDetail> = emptyMap(),
     val error: String? = null,
-    val startupState: StartupState = StartupState.Loading,
 )
 
 fun JSONObject.host() = Host(getString("id"), getString("name"), getString("os"), optString("ompVersion"), optString("gatewayVersion"))

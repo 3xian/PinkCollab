@@ -292,7 +292,12 @@ async fn events(socket: WebSocket, app: App, token: String) {
         sequence: 0,
         kind: "snapshot".into(),
         timestamp: chrono::Utc::now(),
-        payload: json!({"host":app.host,"sessions":app.registry.list().await,"protocolVersion":PROTOCOL_VERSION}),
+        payload: json!({
+            "host": app.host,
+            "sessions": app.registry.list().await,
+            "workspaces": app.browser.roots(),
+            "protocolVersion": PROTOCOL_VERSION,
+        }),
     };
     if !send(&mut tx, &snapshot).await {
         return;

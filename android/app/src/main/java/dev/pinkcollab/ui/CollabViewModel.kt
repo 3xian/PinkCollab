@@ -1,6 +1,9 @@
 package dev.pinkcollab.ui
 
 import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.pinkcollab.data.CredentialStore
@@ -15,6 +18,16 @@ import kotlinx.coroutines.launch
 
 class CollabViewModel(application: Application) : AndroidViewModel(application) {
     val repository = GatewayRepository(viewModelScope, CredentialStore(application))
+    private val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            repository.reconnectUnavailableHosts()
+        }
+
+        override fun onLost(network: Network) {
+            if (connectivity.activeNetwork == null) repository.networkUnavailable()
+        }
+    }
 
     private val mutableOperations = MutableStateFlow<Set<OperationKey>>(emptySet())
     internal val operations = mutableOperations.asStateFlow()
@@ -27,6 +40,15 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
     private val mutableModelLoads = MutableStateFlow<Map<SessionKey, LoadState<List<ModelInfo>>>>(emptyMap())
     internal val modelLoads = mutableModelLoads.asStateFlow()
     private val modelLoadLock = Any()
+
+    init {
+        connectivity.registerDefaultNetworkCallback(networkCallback)
+    }
+
+    override fun onCleared() {
+        connectivity.unregisterNetworkCallback(networkCallback)
+        super.onCleared()
+    }
 
     internal fun run(
         key: OperationKey,

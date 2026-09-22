@@ -12,9 +12,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Listing
-import dev.pinkcollab.data.StartupState
 import dev.pinkcollab.ui.theme.GlowBackground
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
@@ -38,6 +41,19 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     var selectedSessionId by rememberSaveable { mutableStateOf("") }
     var minimumStartupElapsed by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, repo) {
+        var hasStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                if (hasStarted) repo.reconnectUnavailableHosts()
+                hasStarted = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(Unit) {
         delay(900)
@@ -67,7 +83,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
 
     PinkCollabTheme {
         Crossfade(
-            targetState = app.startupState == StartupState.Ready && minimumStartupElapsed,
+            targetState = minimumStartupElapsed,
             animationSpec = tween(420),
             label = "startupContent",
         ) { ready ->
@@ -150,7 +166,13 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             hostBusy = { OperationKey.Host(it) in operations },
                             browse = { hostId, path -> route = AppRoute.Browser(hostId, path) },
                             pair = { pairHost = PairHostSheetState(visible = true) },
-                            refresh = { hostId -> vm.run(OperationKey.Host(hostId)) { repo.refreshHost(hostId) } },
+                            refresh = { hostId ->
+                                if (app.hosts[hostId]?.connection is ConnectionState.Online) {
+                                    vm.run(OperationKey.Host(hostId)) { repo.refreshHost(hostId) }
+                                } else {
+                                    repo.requestReconnect(hostId)
+                                }
+                            },
                             forget = { hostId -> vm.run(OperationKey.Host(hostId)) { repo.forget(hostId) } },
                         )
 

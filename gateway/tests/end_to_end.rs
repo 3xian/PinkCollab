@@ -224,6 +224,11 @@ async fn phone_to_gateway_to_omp_closed_loop() {
     let snapshot: Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
     assert_eq!(snapshot["type"], "snapshot");
     assert_eq!(snapshot["payload"]["protocolVersion"], 1);
+    assert_eq!(snapshot["payload"]["host"]["id"], h.host.id);
+    assert_eq!(
+        snapshot["payload"]["workspaces"].as_array().unwrap().len(),
+        1
+    );
     let cwd = h.cwd("shop");
     let response = client
         .post(format!("{}/api/v1/sessions", h.url))

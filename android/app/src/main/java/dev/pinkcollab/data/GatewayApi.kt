@@ -18,6 +18,7 @@ import kotlin.coroutines.resumeWithException
 
 class GatewayApi {
     val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS)
+        .pingInterval(20, TimeUnit.SECONDS)
         .callTimeout(50, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build()
     fun validateURL(value: String): String {
         val url = value.trim().trimEnd('/').toHttpUrl()

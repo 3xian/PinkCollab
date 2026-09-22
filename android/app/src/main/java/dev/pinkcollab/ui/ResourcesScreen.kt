@@ -45,6 +45,14 @@ internal fun ResourcesScreen(
             val hostId = host.paired.host.id
             val busy = hostBusy(hostId)
             val activeTasks = host.sessions.count { it.isActive }
+            val (connectionLabel, connectionColor) = when (host.connection) {
+                ConnectionState.Connecting -> "Connecting…" to Amber300
+                ConnectionState.Synchronizing -> "Syncing…" to Amber300
+                is ConnectionState.Online -> "Online" to Teal300
+                is ConnectionState.Reconnecting -> "Reconnecting…" to Amber300
+                is ConnectionState.Offline -> "Offline" to Gray400
+                ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
+            }
             Card(
                 Modifier.fillMaxWidth().glassPanel(CardShape),
                 shape = CardShape,
@@ -96,12 +104,12 @@ internal fun ResourcesScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Spacer(Modifier.width(8.dp))
-                        Box(Modifier.size(6.dp).background(if (host.connected) Teal300 else Gray400, CircleShape))
+                        Box(Modifier.size(6.dp).background(connectionColor, CircleShape))
                         Spacer(Modifier.width(5.dp))
                         Text(
-                            if (host.connected) "Online" else "Offline",
+                            connectionLabel,
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (host.connected) Teal300 else Gray400,
+                            color = connectionColor,
                         )
                     }
                     Spacer(Modifier.height(12.dp))
@@ -109,7 +117,13 @@ internal fun ResourcesScreen(
                     Spacer(Modifier.height(12.dp))
                     if (host.workspaces.isEmpty()) {
                         Text(
-                            if (host.connected) "No allowed directories" else "Reconnect this host to load its directories",
+                            when (host.connection) {
+                                ConnectionState.Connecting, ConnectionState.Synchronizing -> "Loading allowed directories"
+                                is ConnectionState.Online -> "No allowed directories"
+                                is ConnectionState.Reconnecting -> "Reconnecting to load allowed directories"
+                                is ConnectionState.Offline -> "Reconnect this host to load its directories"
+                                ConnectionState.AuthenticationRequired -> "Pair this host again to load its directories"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = Gray400,
                         )

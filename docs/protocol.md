@@ -65,14 +65,14 @@ For select requests, value must be an exact string from options. After input is 
 
 ## WebSocket
 
-After a connection to `/api/v1/events`, the Gateway registers the subscription before sending a snapshot, eliminating the gap between the initial REST state and the incremental event stream.
+After a connection to `/api/v1/events`, the Gateway registers the subscription before sending a complete host, session, and workspace snapshot. This eliminates the gap between initial state and the incremental event stream without requiring a REST request waterfall first.
 
 ```json
 {
   "sequence": 0,
   "type": "snapshot",
   "timestamp": "2026-09-14T08:00:00Z",
-  "payload": {"host":{},"sessions":[],"protocolVersion":1}
+  "payload": {"host":{},"sessions":[],"workspaces":[],"protocolVersion":1}
 }
 ```
 
