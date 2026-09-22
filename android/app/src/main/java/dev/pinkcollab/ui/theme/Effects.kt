@@ -27,14 +27,28 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 val BrandGradient: Brush = Brush.linearGradient(listOf(BrandPurple, BrandPink))
+
+/** Paint icon/vector content with the same purple-to-pink brand gradient used by text. */
+fun Modifier.brandGradientMask(): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithCache {
+            onDrawWithContent {
+                drawContent()
+                drawRect(brush = BrandGradient, blendMode = BlendMode.SrcIn)
+            }
+        }
 
 /** Full-bleed near-black canvas with restrained brand-color glow orbs. */
 @Composable

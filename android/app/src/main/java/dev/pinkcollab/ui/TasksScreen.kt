@@ -19,12 +19,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import kotlinx.coroutines.launch
@@ -66,10 +68,14 @@ internal fun TasksScreen(
 
     Column(Modifier.fillMaxSize()) {
         TasksTopBar(
+            activeTaskCount = sessions.count { it.isActive },
+            taskCount = sessions.size,
+            openResources = openResources,
+        )
+        TasksPagerBar(
             sessions = sessions,
             hosts = app.hosts,
             currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
-            openResources = openResources,
             selectPage = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
         )
         if (sessions.isEmpty()) {
@@ -241,90 +247,166 @@ private fun PairingStepRow(number: Int, step: PairingStep) {
 
 @Composable
 private fun TasksTopBar(
+    activeTaskCount: Int,
+    taskCount: Int,
+    openResources: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .background(Base0.copy(alpha = 0.90f))
+            .padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "Tasks",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.width(8.dp))
+        Row(
+            Modifier
+                .background(Violet400.copy(alpha = 0.12f), RoundedCornerShape(50))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(6.dp).background(Violet400, CircleShape))
+            Spacer(Modifier.width(5.dp))
+            Text(
+                "$activeTaskCount active",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextHigh,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "$taskCount total",
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelMedium,
+            color = TextMid,
+        )
+        TextButton(
+            onClick = rememberHapticOnClick(openResources),
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Row(
+                Modifier
+                    .height(30.dp)
+                    .background(Color.White.copy(alpha = 0.065f), RoundedCornerShape(50))
+                    .padding(horizontal = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier.brandGradientMask(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.FolderOpen,
+                        contentDescription = null,
+                        Modifier.size(16.dp),
+                        tint = Color.White,
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        "Workspaces",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TasksPagerBar(
     sessions: List<Session>,
     hosts: Map<String, HostState>,
     currentPage: Int,
-    openResources: () -> Unit,
     selectPage: (Int) -> Unit,
 ) {
-    val current = sessions.getOrNull(currentPage)
+    val current = sessions.getOrNull(currentPage) ?: return
 
-    Column(Modifier.fillMaxWidth().background(Base0.copy(alpha = 0.90f))) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(76.dp)
+            .zIndex(1f),
+    ) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 20.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
+            Modifier
+                .matchParentSize()
+                .background(Base0.copy(alpha = 0.90f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Tasks", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            TaskNeighborPreview(
+                session = sessions.getOrNull(currentPage - 1),
+                direction = -1,
+                edgeLabel = "Newest",
+                modifier = Modifier.weight(0.82f),
+                onClick = { selectPage(currentPage - 1) },
+            )
+            Spacer(Modifier.width(6.dp))
+            Column(
+                Modifier
+                    .weight(1.36f)
+                    .fillMaxHeight()
+                    .glassPanel(RoundedCornerShape(16.dp), fillAlpha = 0.13f, borderAlpha = 0.24f)
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 Text(
-                    "${sessions.size} total · ${hosts.values.count { it.connected }} hosts online",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMid,
+                    current.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            }
-            IconButton(
-                onClick = rememberHapticOnClick(openResources),
-                modifier = Modifier.size(48.dp).background(BrandGradient, CircleShape),
-                colors = IconButtonDefaults.iconButtonColors(contentColor = MaterialTheme.colorScheme.onPrimary),
-            ) {
-                Icon(Icons.Outlined.FolderOpen, "Open workspaces")
-            }
-        }
-        if (current != null) {
-            Row(
-                Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TaskNeighborPreview(
-                    session = sessions.getOrNull(currentPage - 1),
-                    direction = -1,
-                    edgeLabel = "Newest",
-                    modifier = Modifier.weight(0.82f),
-                    onClick = { selectPage(currentPage - 1) },
-                )
-                Spacer(Modifier.width(6.dp))
-                Column(
-                    Modifier
-                        .weight(1.36f)
-                        .fillMaxHeight()
-                        .glassPanel(RoundedCornerShape(16.dp), fillAlpha = 0.13f, borderAlpha = 0.24f)
-                        .padding(horizontal = 12.dp, vertical = 9.dp),
-                    verticalArrangement = Arrangement.Center,
-                ) {
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).background(statusColor(current.status), CircleShape))
+                    Spacer(Modifier.width(6.dp))
                     Text(
-                        current.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        "${statusLabel(current.status)} · ${hosts[current.hostId]?.paired?.host?.name.orEmpty()}",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMid,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(7.dp).background(statusColor(current.status), CircleShape))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "${statusLabel(current.status)} · ${hosts[current.hostId]?.paired?.host?.name.orEmpty()}",
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextMid,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text("${currentPage + 1}/${sessions.size}", style = MaterialTheme.typography.labelSmall, color = Purple200)
-                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "${currentPage + 1}/${sessions.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Purple200,
+                    )
                 }
-                Spacer(Modifier.width(6.dp))
-                TaskNeighborPreview(
-                    session = sessions.getOrNull(currentPage + 1),
-                    direction = 1,
-                    edgeLabel = "Oldest",
-                    modifier = Modifier.weight(0.82f),
-                    onClick = { selectPage(currentPage + 1) },
-                )
             }
+            Spacer(Modifier.width(6.dp))
+            TaskNeighborPreview(
+                session = sessions.getOrNull(currentPage + 1),
+                direction = 1,
+                edgeLabel = "Oldest",
+                modifier = Modifier.weight(0.82f),
+                onClick = { selectPage(currentPage + 1) },
+            )
         }
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .offset(y = 12.dp)
+                .fillMaxWidth()
+                .height(12.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Black.copy(alpha = 0.46f), Color.Transparent),
+                    ),
+                ),
+        )
     }
 }
 
@@ -336,7 +418,6 @@ private fun TaskNeighborPreview(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-
     val shape = RoundedCornerShape(14.dp)
     Row(
         modifier
@@ -350,12 +431,15 @@ private fun TaskNeighborPreview(
         if (direction < 0) {
             Icon(
                 Icons.Outlined.ChevronLeft,
-                null,
+                contentDescription = null,
                 Modifier.size(18.dp),
                 tint = if (session == null) Gray400.copy(alpha = 0.35f) else Purple200,
             )
         }
-        Column(Modifier.weight(1f), horizontalAlignment = if (direction < 0) Alignment.Start else Alignment.End) {
+        Column(
+            Modifier.weight(1f),
+            horizontalAlignment = if (direction < 0) Alignment.Start else Alignment.End,
+        ) {
             Text(
                 session?.title ?: edgeLabel,
                 style = MaterialTheme.typography.labelSmall,
@@ -374,7 +458,7 @@ private fun TaskNeighborPreview(
         if (direction > 0) {
             Icon(
                 Icons.Outlined.ChevronRight,
-                null,
+                contentDescription = null,
                 Modifier.size(18.dp),
                 tint = if (session == null) Gray400.copy(alpha = 0.35f) else Purple200,
             )

@@ -117,7 +117,7 @@ internal fun SessionPage(
                     GlowDot(Purple400, pulse = true)
                     Spacer(Modifier.width(10.dp))
                     Column {
-                        Text("OMP · replying", style = MaterialTheme.typography.labelMedium, color = Purple200)
+                        Text("OMP · replying", style = MaterialTheme.typography.labelMedium, color = Violet400)
                         Spacer(Modifier.height(4.dp))
                         Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
                     }
@@ -308,13 +308,13 @@ private fun MessageCard(item: SessionDisplayItem.Message) {
         Modifier
             .fillMaxWidth()
             .timelineBand(
-                tint = if (isUser) Purple400 else Violet400,
+                tint = if (isUser) Purple400 else Teal300,
                 tintAlpha = if (isUser) 0.075f else 0.026f,
             )
             .padding(horizontal = 20.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Text(if (isUser) "You" else "Assistant", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = if (isUser) Purple200 else Violet400)
+        Text(if (isUser) "You" else "Assistant", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = if (isUser) Purple200 else TextHigh)
         Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
     }
 }
@@ -421,14 +421,15 @@ private fun RawTimelineCard(item: TimelineItem) {
                 tint = when (item.kind) {
                     "error" -> Red400
                     "user" -> Purple400
-                    else -> Violet400
+                    "assistant" -> Teal300
+                    else -> Gray400
                 },
                 tintAlpha = if (item.kind == "user") 0.075f else 0.025f,
             )
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Purple200; "error" -> Red400; else -> Violet400 })
+        Text(when (item.kind) { "user" -> "You"; "assistant" -> "Assistant"; "tool" -> "Tool call"; "subagent" -> "Subagent"; "error" -> "Error"; else -> "Activity" }, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = when (item.kind) { "user" -> Purple200; "assistant" -> TextHigh; "error" -> Red400; else -> TextMid })
         Text(item.text, style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (isDetail && detail.isNotBlank()) { TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) { Text(if (expanded) "Collapse details" else "Expand details") }; if (expanded) Text(detail, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid) }
     }
@@ -437,6 +438,7 @@ private fun RawTimelineCard(item: TimelineItem) {
 @Composable
 private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSONObject) -> Unit) {
 
+    val attentionColor = statusColor("needs_input")
     var answer by rememberSaveable(attention.id) { mutableStateOf("") }
     fun response() = JSONObject().put("id", attention.id)
     Column(
@@ -450,9 +452,9 @@ private fun AttentionCard(attention: Attention, enabled: Boolean, respond: (JSON
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            GlowDot(Purple400, pulse = true)
+            GlowDot(attentionColor, pulse = true)
             Spacer(Modifier.width(8.dp))
-            Text("OMP needs your reply", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = Purple200)
+            Text("OMP needs your reply", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = attentionColor)
         }
         Text(attention.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         when (attention.type) {

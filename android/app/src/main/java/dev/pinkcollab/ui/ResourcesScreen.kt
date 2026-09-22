@@ -37,18 +37,14 @@ internal fun ResourcesScreen(
         return
     }
     LazyColumn(
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
-            Text("Workspaces", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(4.dp))
-            Text("Hosts and their allowed project directories", style = MaterialTheme.typography.bodyMedium, color = TextMid)
-        }
         items(app.hosts.values.toList(), key = { it.paired.host.id }) { host ->
             val hostId = host.paired.host.id
             val busy = hostBusy(hostId)
-            val activeTasks = host.sessions.count { it.status in listOf("starting", "running", "needs_input") }
+            val activeTasks = host.sessions.count { it.isActive }
             Card(
                 Modifier.fillMaxWidth().glassPanel(CardShape),
                 shape = CardShape,

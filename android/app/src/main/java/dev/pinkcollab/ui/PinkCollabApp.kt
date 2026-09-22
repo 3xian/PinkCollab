@@ -11,19 +11,18 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.pinkcollab.data.Listing
 import dev.pinkcollab.data.StartupState
 import dev.pinkcollab.ui.theme.GlowBackground
 import dev.pinkcollab.ui.theme.PinkCollabTheme
-import dev.pinkcollab.ui.theme.Purple200
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val repo = vm.repository
@@ -59,6 +58,11 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     }
 
     val secondary = route != AppRoute.Tasks
+    val secondaryTitle = when (route) {
+        AppRoute.Tasks -> null
+        AppRoute.Resources -> "Workspaces"
+        is AppRoute.Browser -> "Browse workspace"
+    }
     BackHandler(secondary) { route = route.back() }
 
     PinkCollabTheme {
@@ -75,14 +79,35 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                 containerColor = Color.Transparent,
                 contentColor = MaterialTheme.colorScheme.onBackground,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                topBar = {
+                    secondaryTitle?.let { title ->
+                        TopAppBar(
+                            title = { Text(title) },
+                            navigationIcon = {
+                                IconButton(onClick = rememberHapticOnClick { route = route.back() }) {
+                                    Icon(
+                                        Icons.AutoMirrored.Outlined.ArrowBack,
+                                        contentDescription = "Back",
+                                    )
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
+                                scrolledContainerColor = MaterialTheme.colorScheme.background,
+                                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                            ),
+                        )
+                    }
+                },
                 snackbarHost = { SnackbarHost(snackbar, Modifier.navigationBarsPadding()) },
             ) { padding ->
                 Column(
                     Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .statusBarsPadding()
-                        .padding(top = if (secondary) 56.dp else 0.dp)
+                        .consumeWindowInsets(padding)
+                        .then(if (secondary) Modifier else Modifier.statusBarsPadding())
                         .navigationBarsPadding(),
                 ) {
                     when (val current = route) {
@@ -148,15 +173,6 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                         )
 
                     }
-                }
-            }
-
-            if (secondary) {
-                IconButton(
-                    onClick = rememberHapticOnClick { route = route.back() },
-                    modifier = Modifier.statusBarsPadding().padding(start = 12.dp, top = 4.dp),
-                ) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back", Modifier.size(28.dp), tint = Purple200)
                 }
             }
 

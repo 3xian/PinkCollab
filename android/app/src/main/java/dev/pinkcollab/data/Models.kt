@@ -13,7 +13,10 @@ data class ModelInfo(
     val role: String? = null,
     val thinkingLevel: String? = null,
 )
-data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean)
+data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean) {
+    /** A task is active while its OMP runtime is live, including the startup hand-off. */
+    val isActive: Boolean get() = status == "starting" || runtimeAttached
+}
 data class ToolArguments(
     val raw: String = "",
     val strings: Map<String, String> = emptyMap(),

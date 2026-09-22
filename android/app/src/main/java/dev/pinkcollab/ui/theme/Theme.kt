@@ -8,20 +8,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-// ── Palette: black base, violet→orchid brand accents ─────────────────────────
-val Base0 = Color(0xFF050408)
-val Base1 = Color(0xFF0C0910)
+// ── Palette: neutral graphite surfaces with restrained violet accents ────────
+val Base0 = Color(0xFF07070A)
+val Base1 = Color(0xFF101014)
 val BrandPurple = Color(0xFF8360DD)
 val BrandPink = Color(0xFFC069C9)
 val Purple400 = BrandPurple
-val Purple200 = Color(0xFFE1CFEC)
-val Purple700 = Color(0xFF3C2A64)
-val Violet400 = BrandPink
+val Purple200 = Color(0xFFCFC3F7)
+val Purple700 = Color(0xFF372A57)
+val Violet400 = Color(0xFF9B87F5)
 val Teal300 = Color(0xFF4DE0BE)
+val Amber300 = Color(0xFFF2B84B)
 val Red400 = Color(0xFFFF5470)
-val Gray400 = Color(0xFFA89EAD)
-val TextHigh = Color(0xFFF7F1F8)
-val TextMid = Color(0xFFC9BDCC)
+val Gray400 = Color(0xFF85858F)
+val TextHigh = Color(0xFFF4F4F5)
+val TextMid = Color(0xFFB3B3BD)
 
 val PinkCollabScheme = darkColorScheme(
     primary = Purple400,
@@ -29,24 +30,24 @@ val PinkCollabScheme = darkColorScheme(
     primaryContainer = Purple700,
     onPrimaryContainer = Purple200,
     secondary = Violet400,
-    onSecondary = Color(0xFF260A21),
-    secondaryContainer = Color(0xFF462441),
-    onSecondaryContainer = Color(0xFFF3D8F0),
+    onSecondary = Color(0xFF171126),
+    secondaryContainer = Color(0xFF2D2540),
+    onSecondaryContainer = Color(0xFFE9E3F5),
     tertiary = Teal300,
     onTertiary = Color(0xFF03211A),
     background = Base0,
     onBackground = TextHigh,
     surface = Base1,
     onSurface = TextHigh,
-    surfaceVariant = Color(0xFF1A151E),
+    surfaceVariant = Color(0xFF1A1A20),
     onSurfaceVariant = TextMid,
     surfaceContainerLowest = Base0,
-    surfaceContainerLow = Color(0xFF0B080E),
-    surfaceContainer = Color(0xFF120D16),
-    surfaceContainerHigh = Color(0xFF1A121F),
-    surfaceContainerHighest = Color(0xFF25182A),
-    outline = Color(0xFF514457),
-    outlineVariant = Color(0xFF352B39),
+    surfaceContainerLow = Color(0xFF0D0D11),
+    surfaceContainer = Color(0xFF141418),
+    surfaceContainerHigh = Color(0xFF1B1B21),
+    surfaceContainerHighest = Color(0xFF23232A),
+    outline = Color(0xFF45434C),
+    outlineVariant = Color(0xFF302F36),
     error = Red400,
     onError = Color(0xFF2B040C),
     errorContainer = Color(0xFF43101E),
@@ -73,9 +74,9 @@ fun PinkCollabTheme(content: @Composable () -> Unit) {
 }
 
 // ── Status semantics ─────────────────────────────────────────────────────────
-/** Neon accent color for a task status, per Chinese-market dark-UI conventions. */
+/** Semantic task-status colors, kept separate from decorative brand accents. */
 fun statusColor(status: String): Color = when (status) {
-    "needs_input" -> Purple400 // the one state that must shout for attention
+    "needs_input" -> Amber300
     "starting", "running" -> Violet400
     "completed" -> Teal300
     "failed" -> Red400
