@@ -74,6 +74,11 @@ internal fun SessionPage(
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val composerClearance = with(density) { composerHeightPx.toDp() } + 12.dp
+    // The scaffold already reserves the navigation bar below the composer, so the keyboard
+    // overlap has to be measured from that edge rather than the window bottom: padding by the
+    // raw IME inset would lift the composer by a whole navigation bar too much.
+    val imeOverlap = WindowInsets.ime.getBottom(density) - WindowInsets.navigationBars.getBottom(density)
+    val composerImePadding = with(density) { imeOverlap.coerceAtLeast(0).toDp() }
     val composerShape = RoundedCornerShape(24.dp)
     val composerBorder = if (inputFocused) {
         Brush.linearGradient(listOf(Purple400.copy(alpha = 0.74f), Violet400.copy(alpha = 0.54f)))
@@ -149,7 +154,7 @@ internal fun SessionPage(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .imePadding()
+                .padding(bottom = composerImePadding)
                 .padding(horizontal = 12.dp, vertical = 10.dp)
                 .onSizeChanged { composerHeightPx = it.height }
                 .shadow(
