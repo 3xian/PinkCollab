@@ -1,15 +1,11 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,15 +21,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
@@ -76,11 +69,38 @@ internal fun SessionPage(
     var showStopConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val attached = session.runtimeAttached && host?.connected == true
     val displayTimeline = remember(detail.timeline) { projectSessionTimeline(detail.timeline) }
+    val timelineState = rememberLazyListState()
+    var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
     val inputEnabled = attached && !busy && session.attention == null
     val canSend = prompt.isNotBlank() && inputEnabled
     var inputFocused by remember { mutableStateOf(false) }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
+    LaunchedEffect(timelineState) {
+        snapshotFlow {
+            (if (timelineState.isScrollInProgress) 1 else 0) or
+                (if (timelineState.lastScrolledBackward) 2 else 0) or
+                (if (timelineState.canScrollForward) 4 else 0)
+        }.collect { scrollFlags ->
+            if (scrollFlags and 3 == 3) {
+                followTimeline = false
+            } else if (scrollFlags and 4 == 0) {
+                followTimeline = true
+            }
+        }
+    }
+    LaunchedEffect(
+        displayTimeline,
+        detail.streaming,
+        session.attention,
+        composerHeightPx,
+        followTimeline,
+    ) {
+        if (!followTimeline) return@LaunchedEffect
+        withFrameNanos { }
+        val lastItemIndex = timelineState.layoutInfo.totalItemsCount - 1
+        if (lastItemIndex >= 0) timelineState.scrollToItem(lastItemIndex)
+    }
     val density = LocalDensity.current
     val composerClearance = with(density) { composerHeightPx.toDp() } + 12.dp
     // The scaffold already reserves the navigation bar below the composer, so the keyboard
@@ -103,6 +123,7 @@ internal fun SessionPage(
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize(),
+            state = timelineState,
             contentPadding = PaddingValues(
                 top = 8.dp,
                 bottom = 0.dp,
@@ -327,52 +348,6 @@ private fun Modifier.userMessageBand(
         )
     }
 
-@Composable
-private fun Modifier.runningActivityBackground(
-    active: Boolean,
-    tint: Color,
-): Modifier {
-    if (!active) return this
-    val transition = rememberInfiniteTransition(label = "runningActivityBackground")
-    val progress = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_200, easing = LinearEasing),
-        ),
-        label = "runningActivityBackgroundSweep",
-    )
-    return drawWithCache {
-        val beamWidth = size.width * 0.28f
-        val beamSpacing = size.width * 0.48f
-        val beam = Brush.horizontalGradient(
-            colors = listOf(
-                Color.Transparent,
-                tint.copy(alpha = 0.04f),
-                tint.copy(alpha = 0.14f),
-                tint.copy(alpha = 0.20f),
-                tint.copy(alpha = 0.10f),
-                Color.Transparent,
-            ),
-            startX = 0f,
-            endX = beamWidth,
-        )
-        onDrawBehind {
-            val shift = progress.value * beamSpacing
-            for (index in -2..3) {
-                val left = index * beamSpacing + shift
-                rotate(
-                    degrees = -12f,
-                    pivot = Offset(left + beamWidth / 2f, size.height / 2f),
-                ) {
-                    translate(left = left, top = -size.height / 2f) {
-                        drawRect(brush = beam, size = Size(beamWidth, size.height * 2f))
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun DisplayItem(item: SessionDisplayItem) {
@@ -445,7 +420,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
                 tint = activityTint,
                 tintAlpha = if (group.status == ActivityStatus.Running) 0.05f else 0.035f,
             )
-            .runningActivityBackground(
+            .animatedNoiseGradient(
                 active = group.status == ActivityStatus.Running,
                 tint = activityTint,
             )
