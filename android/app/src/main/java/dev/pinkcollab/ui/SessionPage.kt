@@ -1,6 +1,6 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -327,35 +327,36 @@ private fun Modifier.userMessageBand(
     }
 
 @Composable
-private fun Modifier.runningActivityBackground(active: Boolean): Modifier {
+private fun Modifier.runningActivityBackground(
+    active: Boolean,
+    tint: Color,
+): Modifier {
     if (!active) return this
     val transition = rememberInfiniteTransition(label = "runningActivityBackground")
     val progress = transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_350, easing = LinearEasing),
+            animation = tween(durationMillis = 1_800, easing = FastOutSlowInEasing),
         ),
         label = "runningActivityBackgroundSweep",
     )
     return drawWithCache {
-        val shimmerWidth = size.width * 0.46f
-        val shimmer = Brush.horizontalGradient(
-            listOf(
-                Color.Transparent,
-                Purple400.copy(alpha = 0.10f),
-                Purple200.copy(alpha = 0.26f),
-                Color.White.copy(alpha = 0.15f),
-                Purple400.copy(alpha = 0.10f),
+        val glowWidth = size.width * 0.72f
+        val glowRadius = glowWidth * 0.56f
+        val glow = Brush.radialGradient(
+            colors = listOf(
+                tint.copy(alpha = 0.22f),
+                tint.copy(alpha = 0.11f),
                 Color.Transparent,
             ),
-            startX = 0f,
-            endX = shimmerWidth,
+            center = Offset(glowWidth * 0.52f, size.height * 0.38f),
+            radius = glowRadius,
         )
         onDrawBehind {
-            val left = -shimmerWidth + progress.value * (size.width + shimmerWidth)
+            val left = -glowWidth + progress.value * (size.width + glowWidth)
             translate(left = left) {
-                drawRect(brush = shimmer, size = Size(shimmerWidth, size.height))
+                drawRect(brush = glow, size = Size(glowWidth, size.height))
             }
         }
     }
@@ -417,6 +418,11 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
             ActivityStatus.Failed -> "Verification failed"
         }
     }
+    val activityTint = when (group.status) {
+        ActivityStatus.Failed -> Red400
+        ActivityStatus.Succeeded -> Teal300
+        ActivityStatus.Running -> Violet400
+    }
     // The projection decides expandability: a group carries a detail kind exactly when it has
     // details, so the view does not re-derive the rule from the stage and status.
     val detailKind = group.detailKind
@@ -424,25 +430,20 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
         Modifier
             .fillMaxWidth()
             .timelineBand(
-                tint = when (group.status) {
-                    ActivityStatus.Failed -> Red400
-                    ActivityStatus.Succeeded -> Teal300
-                    else -> Purple400
-                },
-                tintAlpha = 0.035f,
+                tint = activityTint,
+                tintAlpha = if (group.status == ActivityStatus.Running) 0.05f else 0.035f,
             )
-            .runningActivityBackground(group.status == ActivityStatus.Running)
+            .runningActivityBackground(
+                active = group.status == ActivityStatus.Running,
+                tint = activityTint,
+            )
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
             title,
             style = MaterialTheme.typography.titleSmall,
-            color = when (group.status) {
-                ActivityStatus.Failed -> Red400
-                ActivityStatus.Succeeded -> Teal300
-                else -> TextHigh
-            },
+            color = activityTint,
         )
         if (group.summary.isNotBlank()) Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid)
         if (detailKind != null) {
