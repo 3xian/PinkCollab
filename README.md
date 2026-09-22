@@ -151,7 +151,7 @@ Install on a connected device:
 adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-To start a task: **Workspaces → choose a directory → create a task → enter the first prompt in the task composer**. The directory browser shows each project's Git branch and working-tree status when `git` is available.
+To start a task: **Workspaces → choose a directory → create a task → enter the first prompt in the task composer**. The directory browser lists allowed subdirectories without running project-level inspection commands.
 
 Actions on a task:
 

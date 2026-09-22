@@ -1,19 +1,10 @@
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
-use std::{
-    path::{Path, PathBuf},
-    time::Duration,
-};
-use tokio::process::Command;
+use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, Serialize)]
 pub struct Directory {
     pub name: String,
     pub path: String,
-}
-#[derive(Clone, Debug, Serialize)]
-pub struct Git {
-    pub branch: String,
-    pub status: String,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Listing {
@@ -21,8 +12,6 @@ pub struct Listing {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     pub directories: Vec<Directory>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub git: Option<Git>,
 }
 pub struct Browser {
     roots: Vec<PathBuf>,
@@ -78,12 +67,21 @@ impl Browser {
             if e.file_name().to_string_lossy().starts_with('.') {
                 continue;
             }
-            if self.validate(&e.path()).is_ok() {
-                directories.push(Directory {
-                    name: e.file_name().to_string_lossy().into(),
-                    path: display(&e.path()),
-                });
+            let file_type = e.file_type().await?;
+            if !file_type.is_dir() && !file_type.is_symlink() {
+                continue;
             }
+            // A normal child directory is already contained by the canonical, allowlisted
+            // parent. Only links need another canonicalization to prove that their target does
+            // not escape the workspace. This keeps large folders from doing one blocking path
+            // resolution per child on every tap.
+            if file_type.is_symlink() && self.validate(&e.path()).is_err() {
+                continue;
+            }
+            directories.push(Directory {
+                name: e.file_name().to_string_lossy().into(),
+                path: display(&e.path()),
+            });
         }
         directories.sort_by_key(|d| d.name.to_lowercase());
         let parent = p
@@ -91,38 +89,10 @@ impl Browser {
             .and_then(|v| self.validate(v).ok())
             .filter(|v| v != &p)
             .map(|v| display(&v));
-        let git = tokio::time::timeout(Duration::from_secs(2), async {
-            let b = Command::new("git")
-                .kill_on_drop(true)
-                .arg("-C")
-                .arg(&p)
-                .args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .output()
-                .await
-                .ok()?;
-            if !b.status.success() {
-                return None;
-            }
-            let s = Command::new("git")
-                .kill_on_drop(true)
-                .arg("-C")
-                .arg(&p)
-                .args(["status", "--short", "--untracked-files=no"])
-                .output()
-                .await
-                .ok()?;
-            Some(Git {
-                branch: String::from_utf8_lossy(&b.stdout).trim().into(),
-                status: String::from_utf8_lossy(&s.stdout).trim().into(),
-            })
-        })
-        .await
-        .unwrap_or(None);
         Ok(Listing {
             path: display(&p),
             parent,
             directories,
-            git,
         })
     }
 }

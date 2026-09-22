@@ -51,9 +51,7 @@ internal fun SessionPage(
 ) {
     when (state) {
         LoadState.Loading -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Purple400)
-            }
+            TimelineLoadingState()
             return
         }
         is LoadState.Failed -> {
@@ -263,14 +261,14 @@ internal fun SessionPage(
     }
 }
 
-private val TimelineBandBase = Color(0xFF0D0A10)
+internal val TimelineBandBase = Color(0xFF0D0A10)
 
 /**
  * Timeline entries form full-width editorial bands. Their flat geometry keeps
  * the conversation continuous while the subtle tint distinguishes speakers
  * and status without competing with the floating composer.
  */
-private fun Modifier.timelineBand(
+internal fun Modifier.timelineBand(
     tint: Color = Purple400,
     tintAlpha: Float = 0.025f,
 ): Modifier = background(TimelineBandBase)

@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,13 +27,31 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.pinkcollab.R
+import dev.pinkcollab.data.AppState
+import dev.pinkcollab.data.InitialSyncTimeoutMillis
+import dev.pinkcollab.data.TaskListLoadState
 import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.BrandPink
 import dev.pinkcollab.ui.theme.BrandPurple
 import dev.pinkcollab.ui.theme.TextMid
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
+
+internal suspend fun awaitStartupReadiness(
+    appStates: StateFlow<AppState>,
+    maximumDurationMillis: Long = InitialSyncTimeoutMillis,
+) {
+    if (appStates.value.taskListLoadState != TaskListLoadState.Loading) return
+    withTimeoutOrNull(maximumDurationMillis) {
+        appStates.first { it.taskListLoadState != TaskListLoadState.Loading }
+    }
+}
 
 @Composable
 internal fun StartupLoadingScreen() {
@@ -67,6 +86,15 @@ internal fun StartupLoadingScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
+            Image(
+                painter = painterResource(R.drawable.pinkcollab_logo),
+                contentDescription = null,
+                modifier = Modifier
+                    .width(88.dp)
+                    .height(88.dp)
+                    .clip(RoundedCornerShape(20.dp)),
+            )
+            Spacer(Modifier.height(20.dp))
             Text(
                 "PinkCollab",
                 style = MaterialTheme.typography.headlineMedium,

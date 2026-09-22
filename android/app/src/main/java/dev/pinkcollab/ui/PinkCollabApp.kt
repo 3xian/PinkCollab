@@ -22,7 +22,6 @@ import dev.pinkcollab.ui.theme.GlowBackground
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,7 +38,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     }
     var pairAttemptSequence by rememberSaveable { mutableLongStateOf(0L) }
     var selectedSessionId by rememberSaveable { mutableStateOf("") }
-    var minimumStartupElapsed by remember { mutableStateOf(false) }
+    var startupReady by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -55,9 +54,9 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(Unit) {
-        delay(900)
-        minimumStartupElapsed = true
+    LaunchedEffect(repo) {
+        awaitStartupReadiness(repo.state)
+        startupReady = true
     }
 
     LaunchedEffect(app.error) {
@@ -83,7 +82,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
 
     PinkCollabTheme {
         Crossfade(
-            targetState = minimumStartupElapsed,
+            targetState = startupReady,
             animationSpec = tween(420),
             label = "startupContent",
         ) { ready ->
@@ -180,7 +179,10 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             route = current,
                             hostName = app.hosts[current.hostId]?.paired?.host?.name.orEmpty(),
                             creating = OperationKey.CreateTask(current.hostId, current.path) in operations,
-                            load = { repo.listing(current.hostId, current.path) },
+                            load = { forceRefresh -> repo.listing(current.hostId, current.path, forceRefresh) },
+                            prefetch = { listing ->
+                                repo.prefetchListings(current.hostId, listing.directories.map { it.path })
+                            },
                             browse = { path -> route = current.copy(path = path) },
                             select = { path ->
                                 val operation = OperationKey.CreateTask(current.hostId, path)
@@ -232,28 +234,31 @@ private fun BrowserRoute(
     route: AppRoute.Browser,
     hostName: String,
     creating: Boolean,
-    load: suspend () -> Listing,
+    load: suspend (forceRefresh: Boolean) -> Listing,
+    prefetch: (Listing) -> Unit,
     browse: (String) -> Unit,
     select: (String) -> Unit,
 ) {
     var retry by rememberSaveable(route.hostId, route.path) { mutableIntStateOf(0) }
-    val listing by produceState<LoadState<Listing>>(
-        initialValue = LoadState.Loading,
+    val browserState by produceState<DirectoryBrowserState>(
+        initialValue = DirectoryBrowserState.Loading,
         route.hostId,
         route.path,
         retry,
     ) {
-        value = LoadState.Loading
+        value = DirectoryBrowserState.Loading
         value = try {
-            LoadState.Ready(load())
+            val loaded = load(retry > 0)
+            prefetch(loaded)
+            DirectoryBrowserState.Ready(loaded)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            LoadState.Failed(error.message ?: "Unable to read this directory")
+            DirectoryBrowserState.Failed(error.message ?: "Unable to read this directory")
         }
     }
     DirectoryBrowserScreen(
-        listing = listing,
+        state = browserState,
         hostName = hostName,
         creating = creating,
         browse = browse,

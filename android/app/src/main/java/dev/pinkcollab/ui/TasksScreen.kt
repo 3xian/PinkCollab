@@ -79,16 +79,26 @@ internal fun TasksScreen(
             selectPage = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
         )
         if (sessions.isEmpty()) {
-            if (app.hosts.isEmpty()) {
-                BringOmpEmptyState(Modifier.weight(1f), connectHost)
-            } else {
-                Box(Modifier.weight(1f)) {
-                    EmptyState(
-                        title = "No tasks yet",
-                        description = "Choose a workspace to create your first task.",
-                        action = "Open workspaces",
+            Box(Modifier.weight(1f)) {
+                when (app.taskListLoadState) {
+                    TaskListLoadState.Loading -> TaskListLoadingState()
+                    TaskListLoadState.Unavailable -> EmptyState(
+                        title = "Tasks unavailable",
+                        description = "PinkCollab could not load tasks from the paired hosts.",
+                        action = "Manage hosts",
                         onAction = openResources,
                     )
+
+                    TaskListLoadState.Ready -> if (app.hosts.isEmpty()) {
+                        BringOmpEmptyState(connectHost = connectHost)
+                    } else {
+                        EmptyState(
+                            title = "No tasks yet",
+                            description = "Choose a workspace to create your first task.",
+                            action = "Open workspaces",
+                            onAction = openResources,
+                        )
+                    }
                 }
             }
         } else {
@@ -124,6 +134,30 @@ internal fun TasksScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun TaskListLoadingState() {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        CircularProgressIndicator(color = Purple400)
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "Syncing tasks…",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Waiting for the paired hosts to send their task lists.",
+            color = TextMid,
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

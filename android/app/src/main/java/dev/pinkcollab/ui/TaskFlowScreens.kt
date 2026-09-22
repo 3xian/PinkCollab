@@ -1,32 +1,57 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.Listing
 import dev.pinkcollab.ui.theme.*
 
+internal sealed interface DirectoryBrowserState {
+    data object Loading : DirectoryBrowserState
+    data class Ready(val listing: Listing) : DirectoryBrowserState
+    data class Failed(val message: String) : DirectoryBrowserState
+}
+
 @Composable
 internal fun DirectoryBrowserScreen(
-    listing: LoadState<Listing>,
+    state: DirectoryBrowserState,
     hostName: String,
     creating: Boolean,
     browse: (String) -> Unit,
     select: (String) -> Unit,
     retry: () -> Unit,
 ) {
-    when (listing) {
-        LoadState.Loading -> EmptyState("Reading directory", "Loading this workspace from $hostName…")
-        is LoadState.Failed -> EmptyState("Directory unavailable", listing.message, "Retry", retry)
-        is LoadState.Ready -> DirectoryListing(listing.value, hostName, creating, browse, select)
+    when (state) {
+        DirectoryBrowserState.Loading -> DirectoryLoadingState(hostName)
+        is DirectoryBrowserState.Failed -> EmptyState("Directory unavailable", state.message, "Retry", retry)
+        is DirectoryBrowserState.Ready -> DirectoryListing(
+            listing = state.listing,
+            hostName = hostName,
+            creating = creating,
+            browse = browse,
+            select = select,
+        )
     }
 }
+
 @Composable
 private fun DirectoryListing(
     listing: Listing,
@@ -41,16 +66,6 @@ private fun DirectoryListing(
             Text(hostName, style = MaterialTheme.typography.labelLarge, color = Purple400)
             Spacer(Modifier.height(6.dp))
             Text(listing.path, style = MaterialTheme.typography.titleMedium)
-            listing.branch?.let {
-                Spacer(Modifier.height(8.dp))
-                Text("Git · $it", style = MaterialTheme.typography.labelLarge, color = Violet400)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    listing.gitStatus?.ifEmpty { "Working tree clean" }.orEmpty(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMid,
-                )
-            }
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 PrimaryButton(onClick = { select(listing.path) }, enabled = !creating) {
@@ -100,4 +115,69 @@ private fun DirectoryListing(
             }
         }
     }
+}
+
+@Composable
+private fun DirectoryLoadingState(hostName: String) {
+    val transition = rememberInfiniteTransition(label = "directoryLoading")
+    val pulse by transition.animateFloat(
+        initialValue = 0.42f,
+        targetValue = 0.82f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "directoryLoadingPulse",
+    )
+    Column(Modifier.fillMaxSize().semantics(mergeDescendants = true) {}) {
+        Column(Modifier.fillMaxWidth().padding(16.dp).glassPanel(CardShape).padding(16.dp)) {
+            Text(hostName, style = MaterialTheme.typography.labelLarge, color = Purple400)
+            Spacer(Modifier.height(10.dp))
+            DirectoryPlaceholder(0.72f, 18.dp, pulse)
+            Spacer(Modifier.height(22.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                DirectoryPlaceholder(0.38f, 42.dp, pulse)
+            }
+        }
+        LinearProgressIndicator(
+            Modifier.fillMaxWidth(),
+            color = Purple400,
+            trackColor = Color.White.copy(alpha = 0.05f),
+        )
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            repeat(6) { index ->
+                Row(
+                    Modifier.fillMaxWidth().height(52.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.Folder,
+                        contentDescription = null,
+                        tint = Purple400.copy(alpha = 0.34f + pulse * 0.16f),
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    DirectoryPlaceholder(if (index % 3 == 0) 0.62f else 0.46f, 12.dp, pulse)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RowScope.DirectoryPlaceholder(width: Float, height: Dp, pulse: Float) {
+    Box(
+        Modifier
+            .fillMaxWidth(width)
+            .height(height)
+            .alpha(pulse)
+            .background(Color.White.copy(alpha = 0.11f), RoundedCornerShape(999.dp)),
+    )
+}
+
+@Composable
+private fun DirectoryPlaceholder(width: Float, height: Dp, pulse: Float) {
+    Box(
+        Modifier
+            .fillMaxWidth(width)
+            .height(height)
+            .alpha(pulse)
+            .background(Color.White.copy(alpha = 0.11f), RoundedCornerShape(999.dp)),
+    )
 }

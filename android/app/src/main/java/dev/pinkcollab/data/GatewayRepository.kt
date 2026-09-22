@@ -1,18 +1,24 @@
 package dev.pinkcollab.data
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 
 class GatewayRepository(private val scope: CoroutineScope, private val credentials: CredentialStore) {
     private val api = GatewayApi()
     private val mutable = MutableStateFlow(AppState())
     val state = mutable.asStateFlow()
     private val connections = HostConnectionSupervisor(scope, api, ::connectionState, ::event)
+    private val listings = DirectoryListingCache(scope)
+    private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()
 
     init {
         runCatching { credentials.read() }.onSuccess { saved ->
@@ -46,17 +52,63 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         val hosts = state.value.hosts - id
         credentials.save(hosts.values.map { it.paired })
         connections.forget(id)
+        initialSyncTimeouts.remove(id)?.cancel()
+        listings.removeHost(id)
         mutable.update { it.copy(hosts = it.hosts - id, details = it.details.filterValues { d -> d.session.hostId != id }) }
     }
 
     private fun connect(paired: PairedHost) {
         connections.connect(paired)
+        scheduleInitialSyncTimeout(paired.host.id)
+    }
+
+    private fun scheduleInitialSyncTimeout(hostId: String) {
+        if (state.value.hosts[hostId]?.initialSync != InitialSyncState.Pending) return
+        while (true) {
+            val existing = initialSyncTimeouts[hostId]
+            if (existing != null) {
+                if (!existing.isCompleted) return
+                initialSyncTimeouts.remove(hostId, existing)
+                continue
+            }
+
+            val timeout = scope.launch(start = CoroutineStart.LAZY) {
+                delay(InitialSyncTimeoutMillis)
+                mutable.update { app ->
+                    val host = app.hosts[hostId] ?: return@update app
+                    if (host.initialSync != InitialSyncState.Pending) return@update app
+                    app.copy(
+                        hosts = app.hosts + (hostId to host.copy(initialSync = InitialSyncState.Unavailable)),
+                    )
+                }
+            }
+            if (initialSyncTimeouts.putIfAbsent(hostId, timeout) == null) {
+                timeout.invokeOnCompletion { initialSyncTimeouts.remove(hostId, timeout) }
+                timeout.start()
+                return
+            }
+            timeout.cancel()
+        }
+    }
+
+    private fun completeInitialSync(hostId: String) {
+        initialSyncTimeouts.remove(hostId)?.cancel()
     }
 
     private fun connectionState(hostId: String, connection: ConnectionState) {
         mutable.update { app ->
             val host = app.hosts[hostId] ?: return@update app
-            app.copy(hosts = app.hosts + (hostId to host.copy(connection = connection)))
+            val initialSync = when (connection) {
+                is ConnectionState.Offline,
+                ConnectionState.AuthenticationRequired,
+                -> if (host.initialSync == InitialSyncState.Pending) InitialSyncState.Unavailable else host.initialSync
+
+                else -> host.initialSync
+            }
+            app.copy(hosts = app.hosts + (hostId to host.copy(connection = connection, initialSync = initialSync)))
+        }
+        if (connection is ConnectionState.Offline || connection == ConnectionState.AuthenticationRequired) {
+            completeInitialSync(hostId)
         }
     }
 
@@ -80,11 +132,14 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                             workspaces = workspaces ?: h.workspaces,
                             revision = h.revision + 1,
                             lastSyncedAtEpochMillis = System.currentTimeMillis(),
+                            initialSync = InitialSyncState.Ready,
                         )),
                         details = details,
                     )
                 }
+                completeInitialSync(hostId)
                 if (workspaces == null) scope.launch { runCatching { refreshHost(hostId) } }
+                workspaces?.let { prefetchListings(hostId, it.map(Workspace::path)) }
                 scope.launch { state.value.details.values.filter { it.session.hostId == hostId }.forEach { runCatching { detail(hostId, it.session.id) } } }
             }
             "session.updated" -> {
@@ -146,12 +201,23 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                 sessions = if (h.revision == revision) sessions else h.sessions,
                 workspaces = roots,
                 lastSyncedAtEpochMillis = System.currentTimeMillis(),
+                initialSync = InitialSyncState.Ready,
             )))
+        }
+        val refreshed = state.value.hosts[id]
+        if (refreshed?.paired?.credential == p.credential && refreshed.initialSync == InitialSyncState.Ready) {
+            completeInitialSync(id)
         }
     }
 
     fun requestReconnect(id: String) {
-        state.value.hosts[id]?.paired?.let(::connect)
+        val paired = state.value.hosts[id]?.paired ?: return
+        mutable.update { app ->
+            val host = app.hosts[id] ?: return@update app
+            if (host.initialSync != InitialSyncState.Unavailable) return@update app
+            app.copy(hosts = app.hosts + (id to host.copy(initialSync = InitialSyncState.Pending)))
+        }
+        connect(paired)
     }
 
     fun reconnectUnavailableHosts() {
@@ -166,7 +232,21 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             .keys
         connections.networkUnavailable(affected)
     }
-    suspend fun listing(hostId: String, path: String): Listing { val p = paired(hostId); return JSONObject(api.request(p.url, p.credential, "/api/v1/fs/list", query = "path" to path)).listing() }
+    suspend fun listing(hostId: String, path: String, forceRefresh: Boolean = false): Listing {
+        val key = DirectoryListingKey(hostId, path)
+        return listings.getOrLoad(key, forceRefresh) {
+            val p = paired(hostId)
+            JSONObject(
+                api.request(p.url, p.credential, "/api/v1/fs/list", query = "path" to path),
+            ).listing()
+        }
+    }
+
+    fun prefetchListings(hostId: String, paths: List<String>) {
+        paths.distinct().take(12).forEach { path ->
+            scope.launch { runCatching { listing(hostId, path) } }
+        }
+    }
     suspend fun create(hostId: String, cwd: String): Session {
         val p = paired(hostId)
         val body = JSONObject()

@@ -53,7 +53,7 @@ data class ToolTrace(val callId: String, val name: String, val arguments: ToolAr
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
 data class SessionDetail(val session: Session, val timeline: List<TimelineItem>, val streaming: String = "", val model: ModelInfo? = null)
 data class Workspace(val name: String, val path: String)
-data class Listing(val path: String, val parent: String?, val directories: List<Workspace>, val branch: String?, val gitStatus: String?)
+data class Listing(val path: String, val parent: String?, val directories: List<Workspace>)
 sealed interface ConnectionState {
     data object Connecting : ConnectionState
     data object Synchronizing : ConnectionState
@@ -69,6 +69,7 @@ data class HostState(
     val workspaces: List<Workspace> = emptyList(),
     val revision: Long = 0,
     val lastSyncedAtEpochMillis: Long? = null,
+    val initialSync: InitialSyncState = InitialSyncState.Pending,
 ) {
     val connected: Boolean get() = connection is ConnectionState.Online
 }
@@ -76,7 +77,28 @@ data class AppState(
     val hosts: Map<String, HostState> = emptyMap(),
     val details: Map<String, SessionDetail> = emptyMap(),
     val error: String? = null,
-)
+) {
+    val taskListLoadState: TaskListLoadState
+        get() {
+            val states = hosts.values
+            if (states.isEmpty() || states.any { it.sessions.isNotEmpty() }) {
+                return TaskListLoadState.Ready
+            }
+            if (states.all { it.initialSync == InitialSyncState.Ready }) {
+                return TaskListLoadState.Ready
+            }
+            return if (states.any { it.initialSync == InitialSyncState.Pending }) {
+                TaskListLoadState.Loading
+            } else {
+                TaskListLoadState.Unavailable
+            }
+        }
+}
+
+internal const val InitialSyncTimeoutMillis = 8_000L
+
+enum class InitialSyncState { Pending, Ready, Unavailable }
+enum class TaskListLoadState { Loading, Ready, Unavailable }
 
 fun JSONObject.host() = Host(getString("id"), getString("name"), getString("os"), optString("ompVersion"), optString("gatewayVersion"))
 fun Host.json() = JSONObject().put("id", id).put("name", name).put("os", os).put("ompVersion", ompVersion).put("gatewayVersion", gatewayVersion)
@@ -113,4 +135,8 @@ fun JSONObject.modelInfo() = ModelInfo(
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }
 fun JSONArray.strings(): List<String> = (0 until length()).map { getString(it) }
 fun JSONObject.workspace() = Workspace(getString("name"), getString("path"))
-fun JSONObject.listing() = Listing(getString("path"), optString("parent").takeIf { it.isNotBlank() }, getJSONArray("directories").objects().map { it.workspace() }, optJSONObject("git")?.optString("branch"), optJSONObject("git")?.optString("status"))
+fun JSONObject.listing() = Listing(
+    path = getString("path"),
+    parent = optString("parent").takeIf { it.isNotBlank() },
+    directories = getJSONArray("directories").objects().map { it.workspace() },
+)
