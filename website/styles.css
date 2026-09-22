@@ -25,3 +25,16 @@
 @media(max-width:1100px){.features,.architecture{padding-left:26px;padding-right:26px}.workflow{padding-left:26px;padding-right:26px}}
 @media(max-width:820px){.features{margin:18px 0 32px;padding:56px 24px}.feature p{font-size:16px}.ownership-note p{font-size:15px}.powered-lead,.powered-list li{font-size:16px}.architecture{margin:28px 0;padding:56px 24px}.workflow{margin-bottom:32px;padding:58px 24px}.workflow .steps h3{font-size:20px}.workflow .steps p{font-size:16px}.start-copy>p:not(.eyebrow){font-size:16px}}
 @media(max-width:480px){.eyebrow{font-size:10px}.hero-description{font-size:18px}.hero-detail{font-size:15px;color:#c7bbcD}.hero-platforms{font-size:10px}.principles-strip p{font-size:13px}.principles-strip>span{font-size:11px}.features{margin:10px 0 28px;padding:44px 16px;border-radius:20px}.feature p{font-size:15px}.ownership-note p{font-size:14px}.powered-lead,.powered-list li{font-size:15px}.architecture{margin:22px 0;padding:44px 14px;border-radius:20px}.arch-node p{font-size:13px}.arch-local-state>div>span{font-size:12px}.architecture-summary>span{font-size:14px}.workflow{margin-bottom:28px;padding:48px 20px;border-radius:20px}.workflow .section-heading h2{font-size:31px}.workflow .steps h3{font-size:20px}.workflow .steps p{font-size:15px}.start-copy>p:not(.eyebrow){font-size:15px}.closing>a,footer>div{font-size:12px}}
+
+/* Keep the architecture readable without stacking panels inside panels. */
+.architecture-panel{padding:0;background:transparent;border:0;border-radius:0;box-shadow:none}
+.arch-host{padding:29px 0 0;background:transparent;border:0;border-top:1px solid #51405d;border-radius:0}
+.arch-boundary-label{left:0;background:#1e1827}
+.arch-local-state{margin-top:18px;padding:16px 0 0;background:transparent;border:0;border-top:1px solid #46394f;border-radius:0}
+.architecture-summary{gap:0;margin-top:30px;overflow:visible;background:transparent;border:0;border-top:1px solid #40344a;border-radius:0}
+.architecture-summary>span{padding:20px 20px 0;background:transparent}
+.architecture-summary>span:first-child{padding-left:0}
+.architecture-summary>span+span{border-left:1px solid #40344a}
+.architecture-summary>span:last-child{padding-right:0}
+.architecture-detail-link{margin-top:24px}
+@media(max-width:820px){.architecture-summary>span{padding:18px 0}.architecture-summary>span+span{border-top:1px solid #40344a;border-left:0}}
