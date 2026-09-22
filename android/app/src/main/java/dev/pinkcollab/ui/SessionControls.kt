@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,23 +83,36 @@ internal fun ComposerSendButton(
     onClick: () -> Unit,
     enabled: Boolean,
 ) {
-    val shape = RoundedCornerShape(14.dp)
-    TextButton(
+    // Keep the visual pill compact without shrinking or overlapping its 48dp touch target.
+    val shape = RoundedCornerShape(percent = 50)
+    val fill = if (enabled) BrandGradient else SolidColor(Gray400.copy(alpha = 0.16f))
+    val contentColor = if (enabled) MaterialTheme.colorScheme.onPrimary else Gray400.copy(alpha = 0.58f)
+    Surface(
         onClick = rememberHapticOnClick(onClick),
         enabled = enabled,
-        modifier = Modifier
-            .height(40.dp)
-            .then(if (enabled) Modifier.background(BrandGradient, shape) else Modifier),
+        modifier = Modifier.height(48.dp),
         shape = shape,
-        contentPadding = PaddingValues(horizontal = 8.dp),
-        colors = ButtonDefaults.textButtonColors(
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            disabledContentColor = Gray400.copy(alpha = 0.34f),
-        ),
+        color = Color.Transparent,
+        contentColor = contentColor,
     ) {
-        Icon(Icons.AutoMirrored.Outlined.Send, null, Modifier.size(17.dp))
-        Spacer(Modifier.width(5.dp))
-        Text("Send", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+        Box(
+            Modifier
+                .padding(vertical = 9.dp)
+                .height(30.dp)
+                .background(fill, shape)
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.AutoMirrored.Outlined.Send, null, Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "Send",
+                    maxLines = 1,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
     }
 }
 

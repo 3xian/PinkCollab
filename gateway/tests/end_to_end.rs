@@ -153,6 +153,17 @@ async fn task_can_start_without_an_initial_prompt() {
     assert_eq!(session["title"], "empty-task");
 
     let command = format!("{}/api/v1/sessions/{id}", h.url);
+    let compressed = client
+        .get(&command)
+        .bearer_auth(&credential)
+        .header(reqwest::header::ACCEPT_ENCODING, "gzip")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        compressed.headers().get(reqwest::header::CONTENT_ENCODING),
+        Some(&reqwest::header::HeaderValue::from_static("gzip")),
+    );
     let detail: Value = client
         .get(&command)
         .bearer_auth(&credential)

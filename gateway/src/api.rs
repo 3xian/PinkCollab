@@ -20,6 +20,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{path::Path as FsPath, sync::Arc, time::Duration};
+use tower_http::compression::CompressionLayer;
 
 #[derive(Clone)]
 pub struct App {
@@ -65,6 +66,7 @@ pub fn router(app: App) -> Router {
         .merge(protected)
         .layer(DefaultBodyLimit::max(512 * 1024))
         .layer(middleware::from_fn(security_headers))
+        .layer(CompressionLayer::new())
         .with_state(app)
 }
 fn credential(headers: &HeaderMap) -> Option<&str> {

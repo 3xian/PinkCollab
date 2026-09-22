@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Request
+import okhttp3.Protocol
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import org.json.JSONObject
@@ -17,9 +18,17 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class GatewayApi {
-    val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(45, TimeUnit.SECONDS)
+    // Tailscale Serve and similar reverse tunnels can reset large HTTP/2 timeline responses with
+    // PROTOCOL_ERROR. PinkCollab makes few independent requests, so HTTP/1.1 is the reliable path.
+    val client = OkHttpClient.Builder()
+        .protocols(listOf(Protocol.HTTP_1_1))
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
         .pingInterval(20, TimeUnit.SECONDS)
-        .callTimeout(50, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build()
+        .callTimeout(50, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .build()
     fun validateURL(value: String): String {
         val url = value.trim().trimEnd('/').toHttpUrl()
         require(url.username.isEmpty() && url.password.isEmpty() && url.encodedPath == "/" && url.query == null && url.fragment == null) { "Enter the Gateway root URL" }
@@ -39,13 +48,19 @@ class GatewayApi {
             }
 
             override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    val text = it.body?.string().orEmpty()
-                    if (!continuation.isActive) return
-                    if (it.isSuccessful) continuation.resume(text)
-                    else continuation.resumeWithException(
-                        IOException(runCatching { JSONObject(text).getString("error") }.getOrDefault("Gateway HTTP ${it.code}")),
-                    )
+                try {
+                    response.use {
+                        val text = it.body?.string().orEmpty()
+                        if (!continuation.isActive) return
+                        if (it.isSuccessful) continuation.resume(text)
+                        else continuation.resumeWithException(
+                            IOException(runCatching { JSONObject(text).getString("error") }.getOrDefault("Gateway HTTP ${it.code}")),
+                        )
+                    }
+                } catch (error: Exception) {
+                    // OkHttp does not route exceptions thrown while consuming a response body to
+                    // onFailure. Resume the suspended caller instead of leaving its UI loading.
+                    if (continuation.isActive) continuation.resumeWithException(error)
                 }
             }
         })
