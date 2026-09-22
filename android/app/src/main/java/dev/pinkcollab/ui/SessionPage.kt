@@ -1,6 +1,6 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -32,6 +32,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.onFocusChanged
@@ -337,26 +338,37 @@ private fun Modifier.runningActivityBackground(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_800, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = 1_200, easing = LinearEasing),
         ),
         label = "runningActivityBackgroundSweep",
     )
     return drawWithCache {
-        val glowWidth = size.width * 0.72f
-        val glowRadius = glowWidth * 0.56f
-        val glow = Brush.radialGradient(
+        val beamWidth = size.width * 0.28f
+        val beamSpacing = size.width * 0.48f
+        val beam = Brush.horizontalGradient(
             colors = listOf(
-                tint.copy(alpha = 0.22f),
-                tint.copy(alpha = 0.11f),
+                Color.Transparent,
+                tint.copy(alpha = 0.04f),
+                tint.copy(alpha = 0.14f),
+                tint.copy(alpha = 0.20f),
+                tint.copy(alpha = 0.10f),
                 Color.Transparent,
             ),
-            center = Offset(glowWidth * 0.52f, size.height * 0.38f),
-            radius = glowRadius,
+            startX = 0f,
+            endX = beamWidth,
         )
         onDrawBehind {
-            val left = -glowWidth + progress.value * (size.width + glowWidth)
-            translate(left = left) {
-                drawRect(brush = glow, size = Size(glowWidth, size.height))
+            val shift = progress.value * beamSpacing
+            for (index in -2..3) {
+                val left = index * beamSpacing + shift
+                rotate(
+                    degrees = -12f,
+                    pivot = Offset(left + beamWidth / 2f, size.height / 2f),
+                ) {
+                    translate(left = left, top = -size.height / 2f) {
+                        drawRect(brush = beam, size = Size(beamWidth, size.height * 2f))
+                    }
+                }
             }
         }
     }
