@@ -221,7 +221,7 @@ cd ../android
 npm ci --prefix tools/website                 # once, for the browser checks
 node tools/website/check-site.mjs             # links, metadata, README agreement, asset budgets
 node tools/website/check-behavior.mjs         # responsive layout, tabs, copy, contrast, 404 page
-node tools/website/check-lighthouse.mjs       # Lighthouse scores plus byte and layout-shift budgets
+node tools/website/check-lighthouse.mjs       # stable Lighthouse audits and budgets; diagnostic performance score
 node tools/website/build-social-card.mjs      # regenerate website/assets/social-card.png
 ```
 
