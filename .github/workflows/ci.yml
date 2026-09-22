@@ -13,6 +13,11 @@ jobs:
       - run: node npm/scripts/check-release.mjs
       - run: npm test --prefix npm/pinkcollab
       - run: npm pack ./npm/pinkcollab --dry-run
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/check-website
   gateway:
     strategy:
       matrix:

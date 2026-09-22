@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      - 'tools/website/**'
+      - 'README.md'
+      - '.github/actions/check-website/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -16,7 +19,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Nothing is published until the site passes its checks, so a broken page or a
+  # README that drifted away from the site stops the deploy instead of shipping.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/check-website
+
   deploy:
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       contents: read

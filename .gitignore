@@ -43,6 +43,9 @@ pairing*.png
 # Local developer shortcuts
 /install-android-debug.local.bat
 
+# Node dependencies for repository tooling
+node_modules/
+
 
 # Scratch review dumps
 .tmp-review/
