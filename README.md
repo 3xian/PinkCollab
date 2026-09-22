@@ -2,7 +2,7 @@
   <img src="docs/assets/pinkcollab-logo.png" width="96" alt="PinkCollab logo" />
 </p>
 
-# PinkCollab - Oh My Pi (OMP) Android Controller
+# PinkCollab — Spawn and Control Oh My Pi (OMP) Tasks from Android
 
 [![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)](#build-android)
 [![Min SDK: API 26+](https://img.shields.io/badge/Min_SDK-API_26%2B-3DDC84?logo=android&logoColor=white)](android/app/build.gradle.kts)
@@ -11,9 +11,9 @@
 
 [Website](https://3xian.github.io/PinkCollab/) · [Setup guide](#quick-start) · [API documentation](docs/protocol.md)
 
-A remote control plane for **Oh My Pi (OMP)**: start and follow agent tasks on your computers from an Android phone.
+**Spawn new OMP tasks remotely — not just control existing ones.** PinkCollab lets you start and manage **Oh My Pi (OMP)** tasks on your own computers from an Android phone.
 
-- Browse an allowed project directory and create a task in it.
+- Pick an allowed project directory, send the first prompt, and spawn a real OMP task there.
 - Watch streaming replies, tool activity, and questions the agent asks.
 - Send **Prompt / Steer**, answer those questions, **Interrupt**, or **Stop**.
 - See tasks from every paired host in one list, newest first, each with its live status.
@@ -32,11 +32,11 @@ Model provider credentials stay on the host — the phone talks to your Gateway,
 
 ```mermaid
 flowchart LR
-    A[Android] -->|HTTPS / WSS| B[Gateway] -->|NDJSON| C[OMP]
+    A[Android] -->|Spawn and control over HTTPS / WSS| B[Gateway] -->|Spawns OMP subprocesses via NDJSON| C[OMP]
 ```
 
-- **Android** sends REST requests and keeps one WebSocket open for live updates.
-- **Gateway** authenticates the caller, enforces the workspace allowlist, and owns the task lifecycle.
+- **Android** selects a workspace, sends the first prompt to spawn a task, and keeps one WebSocket open for live updates and control.
+- **Gateway** authenticates the caller, enforces the workspace allowlist, spawns OMP, and owns the task lifecycle.
 - **OMP** runs as one subprocess per task (`omp --mode rpc-ui`); the Gateway speaks NDJSON to it over stdin/stdout.
 
 *Why one subprocess per task: a crashed task cannot take down the others.*
