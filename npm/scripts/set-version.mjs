@@ -10,13 +10,20 @@ const npmRoot = path.resolve(
 const repositoryRoot = path.resolve(npmRoot, "..");
 const gatewayRoot = path.join(repositoryRoot, "gateway");
 const version = process.argv[2];
-
-if (
-  !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(
+const versionMatch =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
     version ?? "",
-  )
-) {
+  );
+if (!versionMatch) {
   throw new Error("Usage: node set-version.mjs <semver>");
+}
+const [, major, minor, patch] = versionMatch.map(Number);
+if (minor > 999 || patch > 999) {
+  throw new Error("Android version codes require semver minor and patch values below 1000");
+}
+const androidVersionCode = major * 1_000_000 + minor * 1_000 + patch;
+if (androidVersionCode > 2_100_000_000) {
+  throw new Error("Android version code exceeds the Play Store limit");
 }
 
 const platformConfigPath = path.join(npmRoot, "pinkcollab", "platforms.json");
@@ -24,6 +31,7 @@ const platforms = JSON.parse(fs.readFileSync(platformConfigPath, "utf8"));
 const files = [
   path.join(gatewayRoot, "Cargo.toml"),
   path.join(gatewayRoot, "Cargo.lock"),
+  path.join(repositoryRoot, "android", "app", "build.gradle.kts"),
   path.join(npmRoot, "pinkcollab", "package.json"),
   ...platforms.map((platform) =>
     path.join(npmRoot, "platforms", platform.id, "package.json"),
@@ -51,6 +59,23 @@ try {
   );
   fs.writeFileSync(cargoTomlPath, updatedCargoToml);
 
+  const androidBuildPath = path.join(
+    repositoryRoot,
+    "android",
+    "app",
+    "build.gradle.kts",
+  );
+  const androidBuild = fs.readFileSync(androidBuildPath, "utf8");
+  if (!/versionCode = \d+/.test(androidBuild) || !/versionName = "[^"]+"/.test(androidBuild)) {
+    throw new Error("Could not update Android version metadata");
+  }
+  fs.writeFileSync(
+    androidBuildPath,
+    androidBuild
+      .replace(/versionCode = \d+/, `versionCode = ${androidVersionCode}`)
+      .replace(/versionName = "[^"]+"/, `versionName = "${version}"`),
+  );
+
   const mainManifestPath = path.join(npmRoot, "pinkcollab", "package.json");
   const mainManifest = JSON.parse(fs.readFileSync(mainManifestPath, "utf8"));
   mainManifest.version = version;
@@ -71,7 +96,7 @@ try {
     writeJson(manifestPath, manifest);
   }
 
-  execFileSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], {
+  execFileSync("cargo", ["update", "--offline", "-p", "pinkcollab-gateway"], {
     cwd: gatewayRoot,
     stdio: "ignore",
   });

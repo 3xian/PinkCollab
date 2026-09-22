@@ -101,8 +101,64 @@ jobs:
           path: dist/${{ matrix.id }}/${{ matrix.binary }}
           if-no-files-found: error
 
+  android:
+    needs: verify
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdkmanager" ] || sdkmanager="$(command -v sdkmanager)"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" 'platforms;android-36' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -n "${!name}" ] || { echo "::error::$name is not configured"; exit 1; }
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/pinkcollab-release.jks"
+          echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/pinkcollab-release.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+      - run: chmod +x gradlew
+      - name: Build and test signed release APK
+        run: ./gradlew :app:assembleRelease :app:testDebugUnitTest :app:lintRelease --console=plain
+      - name: Verify APK signature
+        run: >-
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose
+          app/build/outputs/apk/release/app-release.apk
+      - name: Stage APK
+        run: |
+          mkdir -p ../dist/android
+          cp app/build/outputs/apk/release/app-release.apk ../dist/android/pinkcollab-android.apk
+      - uses: actions/upload-artifact@v5
+        with:
+          name: android-release
+          path: dist/android/pinkcollab-android.apk
+          if-no-files-found: error
+
+
   npm-publish:
-    needs: build
+    needs: [build, android]
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
@@ -145,8 +201,8 @@ jobs:
         run: npm publish ./npm/pinkcollab --access public --provenance
 
   github-release:
-    needs: [build, npm-publish]
-    if: ${{ always() && needs.build.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.npm-publish.result == 'success') }}
+    needs: [build, android, npm-publish]
+    if: ${{ always() && needs.build.result == 'success' && needs.android.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.npm-publish.result == 'success') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -162,11 +218,15 @@ jobs:
         with:
           pattern: gateway-*
           path: artifacts
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-release
+          path: release-assets
       - name: Prepare release assets
         run: |
           node npm/scripts/stage-artifacts.mjs release artifacts release-assets
           cd release-assets
-          sha256sum pinkcollab-gateway-* > SHA256SUMS
+          sha256sum pinkcollab-* > SHA256SUMS
       - name: Create immutable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

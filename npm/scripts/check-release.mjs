@@ -48,12 +48,32 @@ if (JSON.stringify(actualDirectories) !== JSON.stringify(expectedDirectories)) {
 const mainManifest = readJson(path.join(npmRoot, "pinkcollab", "package.json"));
 const version = mainManifest.version;
 
-if (
-  !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(
+const versionMatch =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
     version,
-  )
-) {
+  );
+if (!versionMatch) {
   fail(`Invalid npm version: ${version}`);
+}
+const [, major, minor, patch] = versionMatch.map(Number);
+if (minor > 999 || patch > 999) {
+  fail("Android version codes require semver minor and patch values below 1000");
+}
+const expectedAndroidVersionCode = major * 1_000_000 + minor * 1_000 + patch;
+if (expectedAndroidVersionCode > 2_100_000_000) {
+  fail("Android version code exceeds the Play Store limit");
+}
+
+const androidBuild = fs.readFileSync(
+  path.join(repositoryRoot, "android", "app", "build.gradle.kts"),
+  "utf8",
+);
+const androidVersionName = /versionName = "([^"]+)"/.exec(androidBuild)?.[1];
+const androidVersionCode = Number(/versionCode = (\d+)/.exec(androidBuild)?.[1]);
+if (androidVersionName !== version || androidVersionCode !== expectedAndroidVersionCode) {
+  fail(
+    `Android version mismatch: versionName=${androidVersionName}, versionCode=${androidVersionCode}; expected ${version} (${expectedAndroidVersionCode})`,
+  );
 }
 
 const metadata = JSON.parse(
