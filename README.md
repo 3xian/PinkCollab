@@ -4,7 +4,7 @@
 
 <p align="center"><strong>Spawn and steer OMP sessions from Android.</strong></p>
 
-The phone follows the session and steps in. [Oh My Pi (OMP)](https://omp.sh/), the project, and the provider credentials stay on your host.
+[Oh My Pi (OMP)](https://omp.sh/) runs on a host you own. Your phone launches the work, follows it live, and answers when OMP needs you.
 
 [Get started](docs/getting-started.md) · [Download Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) · [Documentation](#docs)
 
@@ -24,11 +24,17 @@ The Gateway listens on loopback and does not terminate TLS. The phone uses an HT
 
 OMP must already reach its provider. You also need Android 8.0 / API 26 or newer, and an HTTPS address that phone can reach. There is no iOS or browser client.
 
+**Gateway, on the host:**
+
 ```sh
 npm install -g pinkcollab@latest
 ```
 
-That installs the launcher. Node.js 18 or newer is required for the npm install, not for a [standalone binary](docs/getting-started.md#install-without-nodejs). The path to a first session is [Get started](docs/getting-started.md).
+That installs the launcher. Node.js 18 or newer is required for the npm install, not for a [standalone binary](docs/getting-started.md#install-without-nodejs).
+
+**Android app, on the phone:** install the [signed release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk). No JDK, Android SDK, or Android Studio is needed for it.
+
+Pairing the two, and a first session, are [Get started](docs/getting-started.md).
 
 This checkout matches release v0.1.1. An APK and a Gateway from different releases must both speak protocol version 1.
 
