@@ -49,7 +49,7 @@ Leave that terminal open. In another terminal:
 pinkcollab pair
 ```
 
-`funnel` writes `public_url`, so `serve` and `pair` take no flags. Scan the QR in the app. Open **Workspaces**, choose the directory, create a session, and send a prompt.
+Scan the QR in the app. Open **Workspaces**, choose the directory, create a session, and send a prompt.
 
 The pairing code lasts five minutes and works once. If it expires, run `pair` again.
 
