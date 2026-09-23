@@ -94,20 +94,20 @@ npm pack ./npm/pinkcollab --dry-run
 Website:
 
 ```sh
-node tools/website/check-site.mjs
+node .github/actions/check-website/check-site.mjs
 ```
 
-That check has no dependencies. CI runs it in the `website` job, and a failure blocks the Pages deploy. Regenerate the social card with `node tools/website/build-social-card.mjs` when the phone mockup changes. That command needs Chrome: `CHROME_PATH`, a Playwright install, or `google-chrome` / `chromium` on `PATH`.
+That check has no dependencies. CI runs it in the `website` job, and a failure blocks the Pages deploy. Regenerate the social card with `node .github/actions/check-website/build-social-card.mjs` when the phone mockup changes. That command needs Chrome: `CHROME_PATH`, a Playwright install, or `google-chrome` / `chromium` on `PATH`.
 
 ## Project layout
 
 ```text
-gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace · windows
+gateway/src/                     api · config · events · funnel · model · omp · session · storage · workspace · windows
 android/app/src/main/java/dev/pinkcollab/   data · ui · ui/theme
-npm/           npm launcher · platform package manifests · release validation
-website/       GitHub Pages site: index.html · styles.css · app.js · assets
-tools/website/ static site check and the social-card builder
-docs/          further reading; install and first use are in the repository README
+npm/                             npm launcher · platform package manifests · release validation
+website/                         GitHub Pages site: index.html · styles.css · app.js · assets
+.github/actions/check-website/   static site check and the social-card builder
+docs/                            further reading; install and first use are in the repository README
 ```
 
 Next: [protocol](protocol.md) if the change crosses the HTTP boundary, or [npm-release.md](npm-release.md) if you are the person cutting a tag.

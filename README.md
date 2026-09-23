@@ -35,13 +35,15 @@ npm install -g pinkcollab@latest
 
 ## Use
 
-On the host, allow a project directory that already exists. On Windows, a path looks like `C:\code`.
+On the host, allow directories that already exist. On Windows, a path looks like `C:\code`. Repeat `--workspace` for each root you want to expose; every path must be an existing directory:
 
 ```sh
-pinkcollab init --workspace /absolute/path/to/projects
+pinkcollab init --workspace /absolute/path/to/projects --workspace /another/root
 pinkcollab funnel
 pinkcollab serve
 ```
+
+A later `init` fails once `config.yaml` exists. Add or remove roots by editing `workspaces` in `config.yaml` instead.
 
 Leave that terminal open. In another terminal:
 
@@ -49,11 +51,21 @@ Leave that terminal open. In another terminal:
 pinkcollab pair
 ```
 
-Scan the QR in the app. Open **Workspaces**, choose the directory, create a session, and send a prompt.
+Scan the QR in the app. Open **Workspaces**, choose one of the directories you allowed, create a session, and send a prompt.
 
 The pairing code lasts five minutes and works once. If it expires, run `pair` again.
 
 If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attribute in the Tailscale admin console, then run it again.
+
+## Docs
+
+- [CLI and configuration](docs/reference.md)
+- [Daily use](docs/usage.md)
+- [Architecture](docs/architecture.md)
+- [Protocol v1](docs/protocol.md)
+- [Deployment and networking](docs/deployment.md)
+- [Development](docs/development.md)
+- [Releases](docs/npm-release.md)
 
 ## License
 

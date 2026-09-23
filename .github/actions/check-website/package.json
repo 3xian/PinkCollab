@@ -1,5 +1,5 @@
 {
-  "name": "pinkcollab-website-tools",
+  "name": "check-website-action",
   "private": true,
   "type": "module",
   "description": "Static check and social-card builder for the GitHub Pages site in website/.",

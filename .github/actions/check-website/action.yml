@@ -10,4 +10,4 @@ runs:
         package-manager-cache: false
     - name: Static integrity, links and doc agreement
       shell: bash
-      run: node tools/website/check-site.mjs
+      run: node .github/actions/check-website/check-site.mjs

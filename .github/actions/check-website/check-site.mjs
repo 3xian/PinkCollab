@@ -2,13 +2,13 @@
 // asset exists, metadata agrees with the repository, and install and build
 // text still matches the authoritative docs. No dependencies.
 //
-//   node tools/website/check-site.mjs
+//   node .github/actions/check-website/check-site.mjs
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HERE, '../..');
+const ROOT = resolve(HERE, '../../..');
 const SITE = join(ROOT, 'website');
 // GitHub Pages serves this project site under a path prefix.
 const BASE = '/PinkCollab';

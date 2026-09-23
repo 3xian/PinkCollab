@@ -4,7 +4,7 @@
 // out of website/index.html, so it can never drift from the brand. Run it with a
 // Chromium/Chrome binary available (CHROME_PATH, a Playwright install, or PATH):
 //
-//   node tools/website/build-social-card.mjs
+//   node .github/actions/check-website/build-social-card.mjs
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { requireBrowser } from './browsers.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SITE = resolve(HERE, '../../website');
+const SITE = resolve(HERE, '../../../website');
 const OUT = join(SITE, 'assets', 'social-card.png');
 const WIDTH = 1200;
 const HEIGHT = 630;
