@@ -26,7 +26,7 @@ The tutorial uses Tailscale Serve. Use the same choice unless you already have a
 
 | Front end | Who can connect | You need | Tradeoff |
 | --- | --- | --- | --- |
-| **Tailscale Serve** (default) | Devices on your tailnet | Tailscale on the host and the phone, same tailnet | Private. No certificate to install on the Gateway. Not reachable from a phone that is off the tailnet. |
+| **Tailscale Serve** (default) | The phone, at the host's Tailscale HTTPS name | Tailscale on the host | Private. No certificate to install on the Gateway. The phone does not install Tailscale. |
 | **Tailscale Funnel** | The public internet | Funnel allowed for this node | No certificate to install on the Gateway. The endpoint is public; the hostname is not a secret. |
 | **Your own reverse proxy** | Whatever that proxy exposes | A certificate the phone trusts, plus WebSocket and `Authorization` forwarding | Fits an existing HTTPS name. You operate the proxy. |
 
@@ -38,7 +38,7 @@ Android release builds require HTTPS. Plain HTTP is accepted only by debug build
 
 ## Tailscale Serve — private
 
-Both devices run Tailscale in the same tailnet. Nothing is published to the public internet. Tailscale terminates TLS for the tailnet; you do not install or renew a certificate file on the Gateway. The phone still speaks HTTPS.
+Tailscale runs on the host. Nothing is published to the public internet. Tailscale terminates TLS; you do not install or renew a certificate file on the Gateway. The phone opens the HTTPS URL. It does not install Tailscale.
 
 ```sh
 tailscale serve --bg http://127.0.0.1:8787
@@ -50,7 +50,7 @@ listen: 127.0.0.1:8787
 public_url: https://<hostname>.ts.net
 ```
 
-Use that `https://<hostname>.ts.net` root with `pinkcollab pair --url`. A phone that is not on the tailnet cannot open it. That is the point of this choice.
+Use that `https://<hostname>.ts.net` root with `pinkcollab pair --url`.
 
 ## Tailscale Funnel
 
@@ -244,7 +244,7 @@ There is no separate diagnostic subcommand. Use `status` only while the Gateway 
 | `status` says the listen port is unavailable | The Gateway is already running, or another process holds the port. This check is not a liveness probe. |
 | `status` says OMP is unavailable | `omp` is missing for this user, or the absolute path in `config.yaml` no longer exists. |
 | `pair` stops before printing a code | Pass `--url https://…`, or set `public_url`. The command will not invent an address. |
-| The phone cannot open the URL | You pasted `127.0.0.1`, the phone is off the tailnet for Serve, Funnel is not published, or the proxy certificate is not trusted. |
+| The phone cannot open the URL | You pasted `127.0.0.1`, Serve or Funnel is not running, or the proxy certificate is not trusted. |
 | Pairing returns invalid or expired | The code is older than five minutes, or a previous attempt already consumed it. Run `pair` again. |
 | The app says the protocol version is unsupported | The APK and Gateway are not both speaking protocol 1. Use a matching pair. |
 | Live updates die behind a proxy | The proxy is not forwarding `Upgrade` and `Authorization`. |

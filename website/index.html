@@ -111,7 +111,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
             <ol class="next-steps">
               <li>Allow the projects your phone may browse (replace the path), then check the host setup: <code>pinkcollab init --workspace /absolute/path/to/projects</code> and <code>pinkcollab status</code>.</li>
               <li>Start the Gateway with <code>pinkcollab serve</code>; it keeps running in this terminal.</li>
-              <li>Put an HTTPS front end in front of the loopback Gateway: Tailscale Serve is private to your tailnet (the phone joins that tailnet); Tailscale Funnel is public on the internet; or use your own HTTPS reverse proxy. See the deployment guide below.</li>
+              <li>Put an HTTPS front end in front of the loopback Gateway. Run Tailscale on the host — Serve for a private name, Funnel for a public one — or use your own HTTPS reverse proxy. The phone does not install Tailscale. See the deployment guide below.</li>
               <li>In a second terminal, print a pairing code with <code>pinkcollab pair --url https://gateway.example.com</code>, using your actual HTTPS Gateway URL.</li>
               <li>Open PinkCollab on Android, scan the code within 5 minutes, choose a workspace, create a session, and send your first prompt.</li>
             </ol>
@@ -166,7 +166,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
           <ul class="powered-list">
             <li><b>Real OMP processes.</b> Starting a session from Android spawns <code>omp --mode rpc-ui</code> on the host that owns the code.</li>
             <li><b>Host-side credentials.</b> Configure model provider credentials on the host, not the phone; OMP may transmit them to your provider for model requests.</li>
-            <li><b>Choose your reachability.</b> Tailscale Serve stays private to your tailnet, Funnel exposes a public HTTPS endpoint, or you can use your own HTTPS reverse proxy.</li>
+            <li><b>Choose your reachability.</b> Run Tailscale on the host and use Serve or Funnel, or use your own HTTPS reverse proxy. The phone does not install Tailscale.</li>
           </ul>
         </div>
       </section>

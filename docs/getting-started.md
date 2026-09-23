@@ -6,7 +6,7 @@ You need:
 
 - A host where `omp --version` succeeds and the model provider is already configured. PinkCollab does not install OMP or copy its upstream setup guide.
 - An Android phone on 8.0 / API 26 or newer. There is no iOS or browser client.
-- An HTTPS address the phone can reach. The default below is Tailscale Serve, which requires the host and the phone on the same tailnet.
+- An HTTPS address the phone can reach. The default below is Tailscale Serve on the host. The phone does not install Tailscale.
 
 Run host commands on the computer that owns the projects, as the user who will own `~/.pinkcollab`. The phone never connects to `127.0.0.1`.
 
@@ -69,7 +69,7 @@ Leave this terminal open. `serve` runs in the foreground and listens on `127.0.0
 
 The listen address is not the pairing URL. `pair` does not configure HTTPS.
 
-**Default: Tailscale Serve, private to your tailnet.** Install Tailscale on the host and the phone, join the same tailnet, then in another host terminal:
+**Default: Tailscale Serve on the host.** Install Tailscale on the host, then in another host terminal:
 
 ```sh
 tailscale serve --bg http://127.0.0.1:8787
@@ -104,7 +104,7 @@ Replace the example with the HTTPS root from step 6, such as `https://<hostname>
 
 In the Android app, scan the QR, or enter the HTTPS root and the one-time token manually. The sheet accepts a Gateway root URL only: `https`, no path, query, or userinfo. A debug build also allows `http` to `localhost`, `127.0.0.1`, or the emulator host `10.0.2.2`. A release build does not.
 
-If the phone cannot connect, check that it can open the HTTPS origin, that Serve and the phone share a tailnet, and that you did not paste the loopback address. More cases: [pairing](deployment.md#pairing-and-security).
+If the phone cannot connect, check that it can open the HTTPS origin, and that you did not paste the loopback address. More cases: [pairing](deployment.md#pairing-and-security).
 
 <a id="9-create-a-task-and-read-the-reply"></a>
 ## 9. Create a session and read the reply
