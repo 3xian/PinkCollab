@@ -41,11 +41,8 @@ publication, and creates the GitHub Release with checksums. Use it only after
 confirming that the tag has no release and none of its package versions exist
 on npm.
 
-If a first publication succeeds but the new scoped packages are not publicly
-visible, repair and verify their access without rebuilding or republishing:
-
-```sh
-gh workflow run release.yml --ref main -f tag=v0.1.0 -f repair_npm_access=true
-```
+If a first publication leaves new scoped packages private, use the npm website
+to change each package's access to public, then verify it from an unauthenticated
+registry client. Granular access tokens cannot change package visibility.
 
 Linux packages use musl targets to avoid tying the binaries to the glibc version on the build runner. The macOS and Windows packages are built on native GitHub-hosted runners.

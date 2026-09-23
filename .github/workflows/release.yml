@@ -7,14 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to recover or repair
+        description: Existing release tag whose assets must be recovered
         required: true
         type: string
-      repair_npm_access:
-        description: Make published platform packages public and verify all npm packages
-        required: false
-        default: false
-        type: boolean
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -24,7 +19,6 @@ permissions:
 
 jobs:
   verify:
-    if: github.event_name != 'workflow_dispatch' || inputs.repair_npm_access != true
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.matrix.outputs.value }}
@@ -206,45 +200,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish ./npm/pinkcollab --access public --provenance
 
-  npm-access-repair:
-    if: github.event_name == 'workflow_dispatch' && inputs.repair_npm_access
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/setup-node@v5
-        with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-          package-manager-cache: false
-      - name: Make platform packages public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          packages=(
-            @pinkcollab/gateway-darwin-arm64
-            @pinkcollab/gateway-darwin-x64
-            @pinkcollab/gateway-linux-arm64
-            @pinkcollab/gateway-linux-x64
-            @pinkcollab/gateway-win32-x64
-          )
-          for package in "${packages[@]}"; do
-            npm access set status=public "$package"
-          done
-      - name: Verify public npm packages
-        env:
-          NPM_CONFIG_USERCONFIG: /dev/null
-        run: |
-          version="${RELEASE_TAG#v}"
-          packages=(
-            pinkcollab
-            @pinkcollab/gateway-darwin-arm64
-            @pinkcollab/gateway-darwin-x64
-            @pinkcollab/gateway-linux-arm64
-            @pinkcollab/gateway-linux-x64
-            @pinkcollab/gateway-win32-x64
-          )
-          for package in "${packages[@]}"; do
-            npm view "$package@$version" version
-          done
 
   github-release:
     needs: [build, android, npm-publish]
