@@ -35,7 +35,7 @@ npm install -g pinkcollab@latest
 
 ## Use
 
-On the host, allow directories that already exist. On Windows, a path looks like `C:\code`. Repeat `--workspace` for each root you want to expose; every path must be an existing directory:
+On the host, allow directories that already exist. On Windows, a path looks like `C:\code`. Repeat `--workspace` for each root you want to expose:
 
 ```sh
 pinkcollab init --workspace /absolute/path/to/projects --workspace /another/root
