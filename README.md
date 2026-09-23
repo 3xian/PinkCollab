@@ -22,21 +22,21 @@ The Gateway listens on loopback and does not terminate TLS. The phone uses an HT
 
 ## Install
 
-OMP must already reach its provider. You also need Android 8.0 / API 26 or newer, and an HTTPS address that phone can reach. There is no iOS or browser client.
+OMP must already be installed on the host and able to reach its model provider. You also need Android 8.0 / API 26 or newer, and an HTTPS address the phone can reach. There is no iOS or browser client.
 
-**Gateway, on the host:**
+**Gateway, on the host.** Node.js 18 or newer:
 
 ```sh
 npm install -g pinkcollab@latest
 ```
 
-That installs the launcher. Node.js 18 or newer is required for the npm install, not for a [standalone binary](docs/getting-started.md#install-without-nodejs).
+That installs the launcher. It does not compile Rust. Without Node.js, use a [standalone binary](docs/getting-started.md#install-without-nodejs).
 
-**Android app, on the phone:** install the [signed release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk). No JDK, Android SDK, or Android Studio is needed for it.
+**Android app, on the phone.** Install the [signed release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk). You do not need a JDK, the Android SDK, or Android Studio.
 
-Pairing the two, and a first session, are [Get started](docs/getting-started.md).
+To pair the phone and run a first session, see [Get started](docs/getting-started.md).
 
-This checkout matches release v0.1.1. An APK and a Gateway from different releases must both speak protocol version 1.
+The app and the Gateway can come from different releases, but both must speak protocol version 1. These instructions match release v0.1.1.
 
 <a id="current-limits"></a>
 ## Limits
