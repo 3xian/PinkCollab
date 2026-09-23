@@ -59,7 +59,7 @@ Phone operations after install â€” Workspaces, create, steer, Interrupt, Stop â€
 
 On some Windows/JDK setups Gradle fails with `Unable to establish loopback connection`. Create `C:/tmp` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/tmp`.
 
-A release APK needs the signing environment variables documented in [npm-release.md](npm-release.md). A local release build without those variables is unsigned. End users should install the signed APK from GitHub Releases, not a developer build.
+A release APK needs the signing key installed under `~/.pinkcollab-signing/`, or all four `ANDROID_*` environment variables described in [npm-release.md](npm-release.md). A partial environment does not override an installed key. With neither, the release build fails instead of producing an unsigned APK. End users should install the signed APK from GitHub Releases, not a developer build.
 
 The app's `minSdk` is 26. `compileSdk` and `targetSdk` are 36.
 

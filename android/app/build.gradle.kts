@@ -1,17 +1,48 @@
+import java.io.File
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-val releaseSigning = mapOf(
-    "keystore" to providers.environmentVariable("ANDROID_KEYSTORE_FILE").orNull,
-    "storePassword" to providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull,
-    "keyAlias" to providers.environmentVariable("ANDROID_KEY_ALIAS").orNull,
-    "keyPassword" to providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull,
-)
-require(
-    releaseSigning.values.all { it == null } ||
-        releaseSigning.values.all { !it.isNullOrBlank() },
-) {
-    "Set every Android release signing environment variable or none of them"
+// Signing values come from the environment only when all four are set (CI).
+// Otherwise the build uses the machine-local key in ~/.pinkcollab-signing, which
+// is not a Gradle cache and is not tracked. A partial environment does not hide
+// that key: a leftover ANDROID_* variable must not disable a working install.
+val signingDirectory = File(System.getProperty("user.home"), ".pinkcollab-signing")
+val localKeystore = signingDirectory.resolve("pinkcollab-release.p12")
+val localPropertiesFile = signingDirectory.resolve("pinkcollab-release.properties")
+val localSigning: Map<String, String>? =
+    if (localKeystore.isFile && localPropertiesFile.isFile) {
+        val stored = Properties().apply { localPropertiesFile.inputStream().use { load(it) } }
+        mapOf(
+            "keystore" to localKeystore.absolutePath,
+            "storePassword" to stored.getProperty("ANDROID_KEYSTORE_PASSWORD"),
+            "keyAlias" to stored.getProperty("ANDROID_KEY_ALIAS"),
+            "keyPassword" to stored.getProperty("ANDROID_KEY_PASSWORD"),
+        ).takeIf { values -> values.values.none { it.isNullOrBlank() } }?.mapValues { it.value!! }
+    } else {
+        null
+    }
+val environment =
+    mapOf(
+        "keystore" to providers.environmentVariable("ANDROID_KEYSTORE_FILE").orNull,
+        "storePassword" to providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull,
+        "keyAlias" to providers.environmentVariable("ANDROID_KEY_ALIAS").orNull,
+        "keyPassword" to providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull,
+    ).mapValues { (_, value) -> value?.takeIf { it.isNotBlank() } }
+val environmentComplete = environment.values.none { it.isNullOrBlank() }
+val releaseSigning: Map<String, String>? = if (environmentComplete) {
+    environment.mapValues { it.value!! }
+} else {
+    localSigning
 }
+val signingReady = releaseSigning != null
+val signingFailure =
+    if (environment.values.any { it != null } && !environmentComplete) {
+        "Android release signing environment is partial. Set ANDROID_KEYSTORE_FILE, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD together, or unset them and install ~/.pinkcollab-signing (docs/npm-release.md)."
+    } else if (localKeystore.isFile && localSigning == null) {
+        "Found ${localKeystore.absolutePath} but ${localPropertiesFile.name} is missing ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, or ANDROID_KEY_PASSWORD."
+    } else {
+        "Refusing to build an unsigned release. Install ~/.pinkcollab-signing/pinkcollab-release.p12 and pinkcollab-release.properties (docs/npm-release.md)."
+    }
 
 plugins {
     id("com.android.application")
@@ -30,12 +61,12 @@ android {
         versionName = "0.1.1"
     }
     signingConfigs {
-        if (releaseSigning.values.all { !it.isNullOrBlank() }) {
+        releaseSigning?.let { values ->
             create("release") {
-                storeFile = file(releaseSigning.getValue("keystore")!!)
-                storePassword = releaseSigning.getValue("storePassword")
-                keyAlias = releaseSigning.getValue("keyAlias")
-                keyPassword = releaseSigning.getValue("keyPassword")
+                storeFile = file(values.getValue("keystore"))
+                storePassword = values.getValue("storePassword")
+                keyAlias = values.getValue("keyAlias")
+                keyPassword = values.getValue("keyPassword")
             }
         }
     }
@@ -66,4 +97,11 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     // The unit tests exercise the wire parsing, and `android.jar` only ships an org.json stub.
     testImplementation("org.json:json:20250517")
+}
+
+// An unsigned release artifact installs but cannot upgrade an installed one.
+tasks.matching { it.name == "packageRelease" || it.name == "bundleRelease" }.configureEach {
+    doFirst {
+        check(signingReady) { signingFailure }
+    }
 }

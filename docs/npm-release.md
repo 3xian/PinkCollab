@@ -9,6 +9,36 @@ Versions below are placeholders, not the current release.
 1. Ensure the npm publisher can publish the public `pinkcollab` package and packages under the public `@pinkcollab` scope.
 2. Add an npm publishing token as the GitHub Actions repository secret `NPM_TOKEN`. Keep Actions enabled for tag pushes; publishing uses GitHub's OIDC token to attach npm provenance.
 3. Store the Android signing key as the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. Keep an offline backup of the keystore and credentials: losing them prevents upgrades over installed APKs.
+4. Install the same signing key on every machine that builds a release APK locally, as described in [Install the Android signing key on a build machine](#install-the-android-signing-key-on-a-build-machine).
+
+## Install the Android signing key on a build machine
+
+A local release build reads the signing key from the user home, not from the repository and not from the Gradle cache. Cutting a release needs no environment variables:
+
+```text
+~/.pinkcollab-signing/pinkcollab-release.p12
+~/.pinkcollab-signing/pinkcollab-release.properties
+```
+
+On Windows `~` is `C:/Users/<you>`. Do not put the key under `~/.gradle`: deleting that directory to clear a Gradle cache would delete the key. The properties file holds the three remaining values, one per line:
+
+```properties
+ANDROID_KEYSTORE_PASSWORD=<store password>
+ANDROID_KEY_ALIAS=pinkcollab
+ANDROID_KEY_PASSWORD=<key password>
+```
+
+`android/app/build.gradle.kts` uses that directory unless all four `ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` environment variables are set. A partial environment does not override the installed key. A release APK or AAB with no usable key fails instead of being emitted unsigned. An unsigned artifact installs but cannot upgrade an installed one.
+
+To install the key from the offline backup:
+
+```sh
+mkdir -p ~/.pinkcollab-signing
+cp /path/to/pinkcollab-release.p12 ~/.pinkcollab-signing/
+cp /path/to/pinkcollab-release.credentials ~/.pinkcollab-signing/pinkcollab-release.properties
+```
+
+Keep both files out of the repository. `.gitignore` covers `*.p12`, `*.jks`, `*.keystore`, `*.credentials`, and `pinkcollab-release.properties`. Restrict the directory to the account that builds releases.
 
 ## Cut a release
 

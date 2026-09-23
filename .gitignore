@@ -23,9 +23,12 @@ misc.xml
 deploymentTargetDropDown.xml
 render.experimental.xml
 
-# Keystore files
+# Keystore files and signing credentials. Never commit these.
 *.jks
+*.p12
 *.keystore
+*.credentials
+pinkcollab-release.properties
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json
