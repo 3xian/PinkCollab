@@ -73,6 +73,16 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 @media(max-width:560px){pre{white-space:pre-wrap;overflow-wrap:anywhere}}
 @media(max-width:480px){.requirement-list{grid-template-columns:1fr;gap:2px}.requirement-list dt{padding-top:12px}.hero-detail code{font-size:12px}.next-steps li{font-size:14px}}
 
+.architecture-page{padding:80px 0 96px}
+.architecture-page h1{font-size:clamp(36px,5vw,64px);letter-spacing:-2px;line-height:1.15;max-width:780px;margin:20px 0}
+.architecture-lead{max-width:780px;font-size:17px;line-height:1.75;color:var(--text-secondary)}
+.architecture-steps{list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px;margin:48px 0;padding:0}
+.architecture-steps li{border-top:1px solid var(--line);padding-top:20px}
+.architecture-steps h2{font-size:20px;margin-bottom:12px}
+.architecture-steps p{font-size:15px;line-height:1.7;color:var(--text-secondary)}
+.architecture-page>.button{margin-top:28px}
+@media(max-width:820px){.architecture-steps{grid-template-columns:1fr;gap:24px}.architecture-page{padding:60px 0 72px}}
+
 .not-found{padding:120px 0 96px;max-width:760px}
 .not-found h1{font-size:clamp(40px,4.6vw,64px);letter-spacing:-3px;margin:22px 0 20px;max-width:560px}
 .not-found-copy{font-size:17px;line-height:1.75;color:var(--text-secondary);max-width:520px}

@@ -9,13 +9,10 @@ import puppeteer from 'puppeteer-core';
 import { requireBrowser } from './browsers.mjs';
 import { BASE, startServer } from './serve.mjs';
 
-// The landing page carries the strict byte and stability budgets.
-// architecture.html is one self-contained archify document (all markup, styles
-// and the diagram inline), so it gets its own ceiling: it may be large, it may
-// not grow without notice.
+// Keep both shipped pages within the same document, transfer and layout budgets.
 const ROUTES = [
   { name: 'home', path: `${BASE}/`, documentLimit: 60_000, totalLimit: 500_000, maxShift: 0.1 },
-  { name: 'architecture', path: `${BASE}/architecture.html`, documentLimit: 900_000, totalLimit: 900_000, maxShift: 0.2 },
+  { name: 'architecture', path: `${BASE}/architecture.html`, documentLimit: 20_000, totalLimit: 300_000, maxShift: 0.1 },
 ];
 
 const MINIMUM_SCORES = [

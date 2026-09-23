@@ -14,10 +14,6 @@ const SITE = join(ROOT, 'website');
 const BASE = '/PinkCollab';
 const ORIGIN = 'https://3xian.github.io';
 const PAGES = ['index.html', 'architecture.html', '404.html'];
-// architecture.html is archify-generated and self-contained: its markup reuses ids
-// for the interactive diagram and carries no <meta name="description">, so those
-// two checks would only ever complain about the generator's output.
-const GENERATED = new Set(['architecture.html']);
 // Real user-visible pages that belong in the sitemap.
 const INDEXABLE = ['index.html', 'architecture.html'];
 const NAV_MAX_BYTES = 260_000;
@@ -84,10 +80,10 @@ for (const page of PAGES) {
   check(/name="viewport"/.test(source), `${page}: missing viewport meta`);
   check(/<title>[^<]+<\/title>/.test(source), `${page}: missing title`);
   check(
-    GENERATED.has(page) || /name="description" content="[^"]{20,}"/.test(source),
+    /name="description" content="[^"]{20,}"/.test(source),
     `${page}: missing description`,
   );
-  for (const attribute of GENERATED.has(page) ? [] : source.matchAll(/\bid="([^"]+)"/g)) {
+  for (const attribute of source.matchAll(/\bid="([^"]+)"/g)) {
     const marker = `id="${attribute[1]}"`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const duplicates = (source.match(new RegExp(`\\s${marker}`, 'g')) ?? []).length;
     check(duplicates === 1, `${page}: duplicate id "${attribute[1]}"`);
