@@ -7,7 +7,7 @@
 [Oh My Pi (OMP)](https://omp.sh/) runs on a host you own. Your phone launches the work, follows it live, and answers when OMP needs you.
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph phone [Phone]
         App[Android app]
     end
