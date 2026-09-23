@@ -74,7 +74,7 @@ fun PinkCollabTheme(content: @Composable () -> Unit) {
 }
 
 // ── Status semantics ─────────────────────────────────────────────────────────
-/** Semantic task-status colors, kept separate from decorative brand accents. */
+/** Semantic session-status colors, kept separate from decorative brand accents. */
 fun statusColor(status: String): Color = when (status) {
     "needs_input" -> Amber300
     "starting", "running" -> Violet400

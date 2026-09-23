@@ -98,7 +98,7 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                val message = e.message ?: "Unable to load task"
+                val message = e.message ?: "Unable to load session"
                 mutableDetailLoads.update { it + (key to LoadState.Failed(message)) }
                 repository.error(message)
             }

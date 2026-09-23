@@ -9,6 +9,6 @@ pinkcollab status
 pinkcollab serve
 ```
 
-Oh My Pi (OMP) remains a separate dependency; `omp --version` must work before the Gateway can run tasks.
+Oh My Pi (OMP) remains a separate dependency; `omp --version` must work before the Gateway can run sessions.
 
 Supported targets are macOS arm64/x64, Linux arm64/x64, and Windows x64. The platform binary is delivered through an optional `@pinkcollab/gateway-*` dependency selected by npm.

@@ -73,7 +73,7 @@ private fun DirectoryListing(
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
                     }
-                    Text(if (creating) "Creating task…" else "Create task here")
+                    Text(if (creating) "Creating session…" else "Create session here")
                 }
             }
         }

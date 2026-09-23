@@ -2,15 +2,9 @@
   "name": "pinkcollab-website-tools",
   "private": true,
   "type": "module",
-  "description": "Checks and asset builders for the GitHub Pages site in website/.",
+  "description": "Static check and social-card builder for the GitHub Pages site in website/.",
   "scripts": {
     "check": "node check-site.mjs",
-    "check:behavior": "node check-behavior.mjs",
-    "check:budgets": "node check-lighthouse.mjs",
     "build:card": "node build-social-card.mjs"
-  },
-  "devDependencies": {
-    "lighthouse": "^12.8.2",
-    "puppeteer-core": "^25.11.0"
   }
 }

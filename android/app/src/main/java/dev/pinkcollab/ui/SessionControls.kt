@@ -29,7 +29,7 @@ internal fun StopConfirmationDialog(
     AlertDialog(
         onDismissRequest = dismiss,
         icon = { Icon(Icons.Outlined.StopCircle, null, tint = TextMid) },
-        title = { Text("Stop this task?") },
+        title = { Text("Stop this session?") },
         text = {
             Text(
                 "This ends the current OMP process. The conversation will remain visible, but the action cannot be undone.",
@@ -40,7 +40,7 @@ internal fun StopConfirmationDialog(
             TextButton(
                 onClick = rememberHapticOnClick(confirm),
                 colors = ButtonDefaults.textButtonColors(contentColor = TextHigh),
-            ) { Text("Stop task", fontWeight = FontWeight.SemiBold) }
+            ) { Text("Stop session", fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
             TextButton(

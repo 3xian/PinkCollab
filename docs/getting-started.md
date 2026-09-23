@@ -1,6 +1,6 @@
 # Get started
 
-This is the only full first-run tutorial. It takes an OMP install that already works and ends with a task you can see on Android.
+This is the only full first-run tutorial. It takes an OMP install that already works and ends with a session you can see on Android.
 
 You need:
 
@@ -106,30 +106,31 @@ In the Android app, scan the QR, or enter the HTTPS root and the one-time token 
 
 If the phone cannot connect, check that it can open the HTTPS origin, that Serve and the phone share a tailnet, and that you did not paste the loopback address. More cases: [pairing](deployment.md#pairing-and-security).
 
-## 9. Create a task and read the reply
+<a id="9-create-a-task-and-read-the-reply"></a>
+## 9. Create a session and read the reply
 
 On the phone:
 
 1. Open **Workspaces**.
 2. Choose the host, then the project directory you allowed.
-3. Tap **Create task here**. The app creates the task without a prompt. The Gateway starts an attached, idle OMP process in that directory.
-4. In the composer, send a first prompt. An empty task uses the placeholder "What should OMP do?".
+3. Tap **Create session here**. The app creates the session without a prompt. The Gateway starts an attached, idle OMP process in that directory.
+4. In the composer, send a first prompt. An empty session uses the placeholder "What should OMP do?".
 
 Example request, not a guaranteed transcript:
 
 > Explain how this project's tests are organized, and suggest one small improvement. Do not modify any files.
 
-You should see the task leave the empty state and show the agent's reply or tool activity. "Do not modify any files" is an instruction to the agent, not a sandbox.
+You should see the session leave the empty state and show the agent's reply or tool activity. "Do not modify any files" is an instruction to the agent, not a sandbox.
 
 What not to expect on this first run:
 
 - The example does not always make OMP ask a question. Answer a prompt only if an attention card appears.
-- **Steer** applies while the task status is running. The composer placeholder then says "Steer OMP…". The send button stays **Send**. After the turn completes, send another prompt only if the runtime is still attached; otherwise the composer stays disabled. See [after a task finishes](usage.md#after-a-turn-finishes).
+- **Steer** applies while the session status is running. The composer placeholder then says "Steer OMP…". The send button stays **Send**. After the turn completes, send another prompt only if the runtime is still attached; otherwise the composer stays disabled. See [after a session finishes](usage.md#after-a-turn-finishes).
 - Closing the app does not notify you. Reopen it to see whether OMP is waiting.
 
 ## What you have, and what is next
 
-The host is running a Gateway you started, the phone holds a credential for that Gateway, and one OMP task has produced output. Daily operations — extra instructions, questions, model choice, Interrupt, Stop, and more than one host — are in [Daily use](usage.md).
+The host is running a Gateway you started, the phone holds a credential for that Gateway, and one OMP session has produced output. Daily operations — extra instructions, questions, model choice, Interrupt, Stop, and more than one host — are in [Daily use](usage.md).
 
 To keep the Gateway running after you close the terminal, use [Run as a background service](deployment.md#run-as-a-background-service). To list or revoke phones, stay on the same user and data directory and see [pairing and security](deployment.md#pairing-and-security).
 

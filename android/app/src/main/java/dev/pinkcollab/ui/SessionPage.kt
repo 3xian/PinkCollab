@@ -66,7 +66,7 @@ internal fun SessionPage(
             return
         }
         is LoadState.Failed -> {
-            EmptyState("Could not load this task", state.message, "Retry", onRetry)
+            EmptyState("Could not load this session", state.message, "Retry", onRetry)
             return
         }
         is LoadState.Ready -> Unit

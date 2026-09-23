@@ -1,13 +1,13 @@
 # PinkCollab documentation
 
-These pages are for someone who already uses [Oh My Pi (OMP)](https://omp.sh/) and wants Android control of tasks on their own hosts. Start from the question you have, not from the source tree.
+These pages are for someone who already uses [Oh My Pi (OMP)](https://omp.sh/) and wants Android control of sessions on their own hosts. Start from the question you have, not from the source tree.
 
 ## I want to…
 
 | Question | Read |
 | --- | --- |
-| Connect a phone and finish one real task | [Get started](getting-started.md) |
-| Create, watch, steer, answer, interrupt, or stop a task | [Daily use](usage.md) |
+| Connect a phone and finish one real session | [Get started](getting-started.md) |
+| Create, watch, steer, answer, interrupt, or stop a session | [Daily use](usage.md) |
 | Choose Tailscale Serve, Funnel, or my own proxy, then pair and revoke | [Deployment and security](deployment.md) |
 | Look up a command, default, or config rule | [CLI and configuration](reference.md) |
 | Understand what is stored, and what a restart can restore | [Architecture](architecture.md) |
@@ -21,7 +21,7 @@ The repository [README](../README.md) is the product introduction. It is not a s
 
 | Fact | Authoritative page |
 | --- | --- |
-| First successful task | [getting-started.md](getting-started.md) |
+| First successful session | [getting-started.md](getting-started.md) |
 | Day-to-day operation and recovery | [usage.md](usage.md) |
 | Network choice, pairing, revocation, background service | [deployment.md](deployment.md) |
 | CLI flags, defaults, validation | [reference.md](reference.md) |

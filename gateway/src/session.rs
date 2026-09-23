@@ -426,7 +426,7 @@ impl Registry {
                 cwd.file_name()
                     .and_then(|name| name.to_str())
                     .filter(|name| !name.is_empty())
-                    .unwrap_or("New task")
+                    .unwrap_or("New session")
                     .chars()
                     .take(80)
                     .collect()

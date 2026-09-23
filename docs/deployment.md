@@ -1,6 +1,6 @@
 # Deployment and networking
 
-Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. Installation of the first task is [Get started](getting-started.md). Command defaults are in [reference](reference.md).
+Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. Installation of the first session is [Get started](getting-started.md). Command defaults are in [reference](reference.md).
 
 The Gateway always listens on loopback and never terminates TLS. Something in front of it presents HTTPS and forwards to `http://127.0.0.1:8787`.
 
@@ -115,7 +115,7 @@ pinkcollab revoke --client client_xxx
 
 `revoke` fails when the id does not exist. Run `clients` first. Removing a host in Android clears the phone's local copy only. The host keeps accepting that credential until you revoke it here, using the same user and data directory that issued it.
 
-The workspace allowlist limits which directories the Gateway will list and start tasks in. OMP then runs as the OS user that started the Gateway, with that user's permissions. A prompt is not a sandbox.
+The workspace allowlist limits which directories the Gateway will list and start sessions in. OMP then runs as the OS user that started the Gateway, with that user's permissions. A prompt is not a sandbox.
 
 OMP sends model traffic according to its own provider configuration. Keeping provider credentials off the phone does not keep prompts, code, or those credentials off the provider.
 
@@ -231,7 +231,7 @@ launchctl kickstart -k gui/$(id -u)/dev.pinkcollab.gateway
 
 After `npm install -g pinkcollab@latest`, stop the service, repeat the platform-specific copy above, and start it again. For a Gateway built from source, rebuild it ([Development](development.md#build-the-gateway)) and copy the fresh `gateway/target/release/pinkcollab-gateway` over the installed binary.
 
-Identity and credentials survive a binary replacement. They live in SQLite in the data directory, not in the binary. A graceful shutdown stops the OMP runtimes the Gateway started. Starting the new binary does not resume them. Tasks that were live show as offline. See [what a restart restores](architecture.md#what-a-restart-restores).
+Identity and credentials survive a binary replacement. They live in SQLite in the data directory, not in the binary. A graceful shutdown stops the OMP runtimes the Gateway started. Starting the new binary does not resume them. Sessions that were live show as offline. See [what a restart restores](architecture.md#what-a-restart-restores).
 
 Configs written before embedded TLS was removed must drop `tls_cert` and `tls_key`. The Gateway rejects a file that still sets them.
 
@@ -248,7 +248,7 @@ There is no separate diagnostic subcommand. Use `status` only while the Gateway 
 | Pairing returns invalid or expired | The code is older than five minutes, or a previous attempt already consumed it. Run `pair` again. |
 | The app says the protocol version is unsupported | The APK and Gateway are not both speaking protocol 1. Use a matching pair. |
 | Live updates die behind a proxy | The proxy is not forwarding `Upgrade` and `Authorization`. |
-| The service starts, then tasks fail to launch OMP | The service account is wrong, or `PATH` cannot satisfy the OMP launcher even though `omp` is absolute. |
+| The service starts, then sessions fail to launch OMP | The service account is wrong, or `PATH` cannot satisfy the OMP launcher even though `omp` is absolute. |
 | An old config fails on startup | Remove `tls_cert` and `tls_key`, and keep `listen` on loopback. |
 | Removing the host on the phone did not lock it out | Expected. Revoke on the host. |
 

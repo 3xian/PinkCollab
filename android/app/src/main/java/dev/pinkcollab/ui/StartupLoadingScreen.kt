@@ -130,7 +130,7 @@ internal fun StartupLoadingScreen() {
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                "Syncing OMP tasks…",
+                "Syncing OMP sessions…",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMid.copy(alpha = captionAlpha),
             )

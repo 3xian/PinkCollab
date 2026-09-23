@@ -56,7 +56,7 @@ File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/confi
 | `listen` | `127.0.0.1:8787` | Must be a loopback address. This is not the URL the phone dials. The Gateway does not terminate TLS. |
 | `public_url` | empty | Optional until you pair without `--url`. When set, it must be an absolute `http` or `https` root URL: no userinfo, path, query, or fragment. Production phone URLs are `https`. `setup-funnel` rewrites this line and leaves other comments in place. |
 | `name` | `COMPUTERNAME`, else `HOSTNAME`, else `my-host` | Label shown for this host in Android. |
-| `workspaces` | empty until `init` | At least one directory at startup. Gateway browse and task-creation boundary only. Not an OS sandbox. |
+| `workspaces` | empty until `init` | At least one directory at startup. Gateway browse and session-creation boundary only. Not an OS sandbox. |
 | `omp` | `omp` in the template; `init` replaces it | Executable path. `init` stores the absolute path it resolved, which a service needs. A bare `omp` fails when the service `PATH` does not match your terminal. |
 | `omp_args` | `[]` | Extra arguments placed after `--mode rpc-ui`. Must not set `--mode`, `--no-session`, `--session`, or the `--mode=` / `--session=` forms. |
 | `max_sessions` | `8` | Integer from 1 to 100. See below. |
@@ -66,11 +66,11 @@ File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/confi
 
 ### `max_sessions`
 
-The limit counts sessions whose status is `starting`, plus sessions whose OMP process is still alive. It does not count a task merely because its status is `completed`.
+The limit counts sessions whose status is `starting`, plus sessions whose OMP process is still alive. It does not count a session merely because its status is `completed`.
 
-A completed task whose process has not exited still occupies a slot. The slot is released when the process exits: after **Stop**, after a crash or normal exit, or when a start fails and the runtime is detached. A Gateway restart detaches every restored session, so those rows do not keep occupying slots, and it does not resume the processes.
+A completed session whose process has not exited still occupies a slot. The slot is released when the process exits: after **Stop**, after a crash or normal exit, or when a start fails and the runtime is detached. A Gateway restart detaches every restored session, so those rows do not keep occupying slots, and it does not resume the processes.
 
-Creating a task past the limit fails with `OMP runtime limit reached` (HTTP 422).
+Creating a session past the limit fails with `OMP runtime limit reached` (HTTP 422).
 
 ## Validation
 
@@ -98,4 +98,4 @@ Startup and `init` reject:
 | Stop signals | Unix `serve` stops on SIGINT or SIGTERM. Elsewhere it stops on Ctrl+C. The Windows service also stops on Service Control stop or shutdown. |
 | Standalone names | Release assets use `pinkcollab-gateway-<os>-<arch>` plus `.exe` on Windows. npm wraps those binaries behind the `pinkcollab` command. |
 
-OMP itself is not shipped. `omp --version` must succeed for the user who runs the Gateway before tasks can start.
+OMP itself is not shipped. `omp --version` must succeed for the user who runs the Gateway before sessions can start.

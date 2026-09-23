@@ -94,14 +94,10 @@ npm pack ./npm/pinkcollab --dry-run
 Website:
 
 ```sh
-npm ci --prefix tools/website
 node tools/website/check-site.mjs
-node tools/website/check-behavior.mjs
-node tools/website/check-lighthouse.mjs
-node tools/website/build-social-card.mjs
 ```
 
-`check-behavior` and `check-lighthouse` drive a real browser. Set `CHROME_PATH`, or have a Playwright install, or `google-chrome` / `chromium` on `PATH`. CI runs the same checks in the `website` job. A failing check blocks the Pages deploy.
+That check has no dependencies. CI runs it in the `website` job, and a failure blocks the Pages deploy. Regenerate the social card with `node tools/website/build-social-card.mjs` when the phone mockup changes. That command needs Chrome: `CHROME_PATH`, a Playwright install, or `google-chrome` / `chromium` on `PATH`.
 
 ## Project layout
 
@@ -109,8 +105,8 @@ node tools/website/build-social-card.mjs
 gateway/src/   api · config · events · funnel · model · omp · session · storage · workspace · windows
 android/app/src/main/java/dev/pinkcollab/   data · ui · ui/theme
 npm/           npm launcher · platform package manifests · release validation
-website/       GitHub Pages site: index.html · styles.css · app.js · architecture.html · assets
-tools/website/ site checks, the social-card builder, and their dependencies
+website/       GitHub Pages site: index.html · styles.css · app.js · assets
+tools/website/ static site check and the social-card builder
 docs/          this documentation set; start at docs/README.md
 ```
 

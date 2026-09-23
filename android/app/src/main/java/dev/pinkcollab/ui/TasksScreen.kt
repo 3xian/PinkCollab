@@ -83,8 +83,8 @@ internal fun TasksScreen(
                 when (app.taskListLoadState) {
                     TaskListLoadState.Loading -> TaskListLoadingState()
                     TaskListLoadState.Unavailable -> EmptyState(
-                        title = "Tasks unavailable",
-                        description = "PinkCollab could not load tasks from the paired hosts.",
+                        title = "Sessions unavailable",
+                        description = "PinkCollab could not load sessions from the paired hosts.",
                         action = "Manage hosts",
                         onAction = openResources,
                     )
@@ -93,8 +93,8 @@ internal fun TasksScreen(
                         BringOmpEmptyState(connectHost = connectHost)
                     } else {
                         EmptyState(
-                            title = "No tasks yet",
-                            description = "Choose a workspace to create your first task.",
+                            title = "No sessions yet",
+                            description = "Choose a workspace to create your first session.",
                             action = "Open workspaces",
                             onAction = openResources,
                         )
@@ -147,13 +147,13 @@ private fun TaskListLoadingState() {
         CircularProgressIndicator(color = Purple400)
         Spacer(Modifier.height(20.dp))
         Text(
-            "Syncing tasks…",
+            "Syncing sessions…",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            "Waiting for the paired hosts to send their task lists.",
+            "Waiting for the paired hosts to send their session lists.",
             color = TextMid,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
@@ -183,7 +183,7 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
             ),
             PairingStep(
                 Icons.Outlined.EditNote,
-                "Start your first task",
+                "Start your first session",
                 "Pick a workspace, describe the outcome, and follow along.",
             ),
         )
@@ -294,7 +294,7 @@ private fun TasksTopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "Tasks",
+            "Sessions",
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )

@@ -186,7 +186,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             browse = { path -> route = current.copy(path = path) },
                             select = { path ->
                                 val operation = OperationKey.CreateTask(current.hostId, path)
-                                vm.run(operation, "Unable to create task") {
+                                vm.run(operation, "Unable to create session") {
                                     val session = repo.create(current.hostId, path)
                                     selectedSessionId = session.id
                                     route = AppRoute.Tasks

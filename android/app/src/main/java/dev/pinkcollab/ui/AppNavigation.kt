@@ -15,12 +15,13 @@ internal fun AppRoute.back(): AppRoute = when (this) {
 }
 
 internal fun AppRoute.savedState(): List<String> = when (this) {
-    AppRoute.Tasks -> listOf("tasks")
+    AppRoute.Tasks -> listOf("sessions")
     AppRoute.Resources -> listOf("resources")
     is AppRoute.Browser -> listOf("browser", hostId, path)
 }
 
 internal fun restoreRoute(state: List<String>): AppRoute = when (state.firstOrNull()) {
+    "sessions" -> AppRoute.Tasks
     "resources" -> AppRoute.Resources
     "browser" -> state.getOrNull(1)?.let { hostId ->
         state.getOrNull(2)?.let { path -> AppRoute.Browser(hostId, path) }

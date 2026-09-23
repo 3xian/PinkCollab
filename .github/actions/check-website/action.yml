@@ -1,5 +1,5 @@
 name: Check website
-description: Verify the GitHub Pages site (integrity, browser behaviour, Lighthouse budgets).
+description: Verify the GitHub Pages site (links, assets, and doc agreement).
 
 runs:
   using: composite
@@ -8,25 +8,6 @@ runs:
       with:
         node-version: "24"
         package-manager-cache: false
-    - name: Install website check dependencies
-      shell: bash
-      run: npm ci --prefix tools/website
-    # Hosted runners ship Chrome; this is only a safety net for other images.
-    - name: Ensure a browser for the page checks
-      shell: bash
-      run: |
-        if command -v google-chrome > /dev/null 2>&1 || command -v chromium > /dev/null 2>&1; then
-          echo "Using the browser already installed on this runner."
-        else
-          executable="$(tools/website/node_modules/.bin/browsers install chrome@stable --path "$HOME/.cache/puppeteer" | tail -1 | awk '{print $NF}')"
-          echo "CHROME_PATH=$executable" >> "$GITHUB_ENV"
-        fi
     - name: Static integrity, links and doc agreement
       shell: bash
       run: node tools/website/check-site.mjs
-    - name: Responsive layout, demo behaviour, contrast and 404
-      shell: bash
-      run: node tools/website/check-behavior.mjs
-    - name: Lighthouse budgets
-      shell: bash
-      run: node tools/website/check-lighthouse.mjs

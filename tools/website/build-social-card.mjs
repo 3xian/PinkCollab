@@ -64,7 +64,7 @@ body{background:var(--dots),var(--page);color:var(--text-primary);font-family:va
   <div class="card-copy">
     <p class="card-eyebrow">RUNS ON HOSTS YOU OWN · OPEN SOURCE</p>
     <h1>Start and steer <span>Oh My Pi</span> from your phone.</h1>
-    <p class="card-sub">Spawn, prompt, steer, and stop OMP coding tasks over a gateway that only your phone can reach.</p>
+    <p class="card-sub">Spawn, prompt, steer, and stop OMP coding sessions over a gateway that only your phone can reach.</p>
     <p class="card-url">3xian.github.io/PinkCollab</p>
   </div>
   <div class="card-scene">${phone}</div>

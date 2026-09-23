@@ -13,9 +13,8 @@ const SITE = join(ROOT, 'website');
 // GitHub Pages serves this project site under a path prefix.
 const BASE = '/PinkCollab';
 const ORIGIN = 'https://3xian.github.io';
-const PAGES = ['index.html', 'architecture.html', '404.html'];
-// Real user-visible pages that belong in the sitemap.
-const INDEXABLE = ['index.html', 'architecture.html'];
+const PAGES = ['index.html', '404.html'];
+const INDEXABLE = ['index.html'];
 const NAV_MAX_BYTES = 260_000;
 
 const failures = [];

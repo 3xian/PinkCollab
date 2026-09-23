@@ -41,8 +41,8 @@ The pairing token is 48 hex characters. The client name must be non-empty and at
 | GET | `/api/v1/fs/list?path=...` | `{path,parent?,directories:[{name,path}]}`. Dot-directories are omitted. A symlink whose target escapes the allowlist is omitted. There is no `git` field. |
 | GET | `/api/v1/sessions` | Session array, sorted by `updatedAt` descending |
 | GET | `/api/v1/sessions/:id` | `{session,timeline,model?}`. Unknown id: 404. |
-| POST | `/api/v1/sessions` | `{hostId,cwd,prompt?,title?}` → Session, 201. An omitted or blank prompt starts an attached, idle OMP task. The Android app sends only `hostId` and `cwd`. |
-| DELETE | `/api/v1/sessions/:id` | Deletes management metadata only when no runtime remains, 204. Does not delete original OMP data. Rejected while a runtime is attached or the task is still `starting`. Not exposed in the Android app. |
+| POST | `/api/v1/sessions` | `{hostId,cwd,prompt?,title?}` → Session, 201. An omitted or blank prompt starts an attached, idle OMP session. The Android app sends only `hostId` and `cwd`. |
+| DELETE | `/api/v1/sessions/:id` | Deletes management metadata only when no runtime remains, 204. Does not delete original OMP data. Rejected while a runtime is attached or the session is still `starting`. Not exposed in the Android app. |
 | POST | `/api/v1/sessions/:id/prompt` | `{message}`. Sets OMP `streamingBehavior=steer` while status is `running`. |
 | POST | `/api/v1/sessions/:id/interrupt` | No request fields. Sends OMP `abort` and transitions to `idle`. The runtime stays attached. |
 | POST | `/api/v1/sessions/:id/stop` | No request fields. Closes stdin and terminates OMP if it has not exited after 3 seconds. The runtime is detached. |
@@ -92,9 +92,9 @@ Listing models asks OMP for its merged effective settings, applies the running p
 
 `sessionFile` is stored in SQLite and is not part of this object.
 
-Statuses: `starting`, `running`, `needs_input`, `idle`, `completed`, `failed`, `stopped`, `offline`. Only `agent_end` completes the agent execution; `turn_end` does not end the task. A later `completed` does not overwrite an existing `failed`. An `agent_end` that arrives after Interrupt is recorded as `idle` instead.
+Statuses: `starting`, `running`, `needs_input`, `idle`, `completed`, `failed`, `stopped`, `offline`. Only `agent_end` completes the agent execution; `turn_end` does not end the session. A later `completed` does not overwrite an existing `failed`. An `agent_end` that arrives after Interrupt is recorded as `idle` instead.
 
-`runtimeAttached` indicates whether commands can still be sent to the runtime. A completed task may still have a runtime. This value becomes false after the Gateway restarts, and when the process exits. `completed` is not a synonym for "process exited" and does not by itself free `max_sessions`. The quota counts a `starting` session and every session whose process is still alive.
+`runtimeAttached` indicates whether commands can still be sent to the runtime. A completed session may still have a runtime. This value becomes false after the Gateway restarts, and when the process exits. `completed` is not a synonym for "process exited" and does not by itself free `max_sessions`. The quota counts a `starting` session and every session whose process is still alive.
 
 When input is requested, the session includes `attention: {id,type,text,options}`. `type` is `select`, `confirm`, `input`, or `editor`, and `needsAttention` is true. Responses must include the original request id. Expired or mismatched ids are rejected.
 
@@ -116,7 +116,7 @@ For select requests, `value` must be an exact string from `options`. A confirm r
 
 ## WebSocket
 
-Connect to `/api/v1/events` with the same `Authorization` header. Incoming WebSocket messages are limited to 1024 bytes; the server uses the socket for snapshots, events, and ping/pong, not for task commands. Task commands are REST.
+Connect to `/api/v1/events` with the same `Authorization` header. Incoming WebSocket messages are limited to 1024 bytes; the server uses the socket for snapshots, events, and ping/pong, not for session commands. Session commands are REST.
 
 The Gateway registers the subscription before sending a snapshot. This closes the gap between initial state and the incremental stream. Clients do not need a REST waterfall before the snapshot.
 
@@ -142,7 +142,7 @@ Subsequent events use `{sequence,type,timestamp,payload}`. `sequence` increases 
 
 `gateway.shutdown` is published internally during a graceful stop and closes the socket. Clients should treat the close as a disconnect, not as a renderable event.
 
-Clients merge events by session and item id and use `updatedAt` to keep an older state, queued behind the snapshot, from overwriting a newer one. Reconnect to obtain a new snapshot, and reload the detail of any open task. This version does not provide persistent event replay.
+Clients merge events by session and item id and use `updatedAt` to keep an older state, queued behind the snapshot, from overwriting a newer one. Reconnect to obtain a new snapshot, and reload the detail of any open session. This version does not provide persistent event replay.
 
 The Gateway sends a Ping every 25 seconds and disconnects if no heartbeat response is received for 70 seconds. A credential revoked while the socket is open fails the next authentication check on that interval. Slow clients are disconnected when their backlog exceeds 256 events, which is also the broadcast channel capacity. A lagged receiver is dropped rather than resumed from the missed sequence.
 
@@ -160,7 +160,7 @@ SQLite stores the host id, client token hashes, pairing token hashes, session ma
 
 OMP manages provider credentials and the session file. Historical conversations, including paired tool calls and results, are reconstructed for the current branch by walking `parentId`, with the same 500-item retention policy. Reconstruction is not a replay of live events. A missing or unreadable session file yields an empty timeline.
 
-The phone stores the Gateway credential and an in-memory view of tasks. It does not store provider credentials.
+The phone stores the Gateway credential and an in-memory view of sessions. It does not store provider credentials.
 
 ## Adapter limits
 

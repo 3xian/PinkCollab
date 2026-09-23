@@ -5,7 +5,7 @@ Why the pieces are split this way, what each one stores, and which failures they
 ## Contents
 
 - [Components](#components)
-- [A task's lifetime](#a-tasks-lifetime)
+- [A session's lifetime](#a-sessions-lifetime)
 - [Where data lives](#where-data-lives)
 - [What a restart restores](#what-a-restart-restores)
 - [Why OMP keeps the transcript](#why-omp-keeps-the-transcript)
@@ -24,9 +24,9 @@ flowchart LR
 
 | Piece | Role |
 | --- | --- |
-| Android app | Paired-host list, task pager, composer, attention card, model sheet. Holds the Gateway credential. Not a second agent. |
+| Android app | Paired-host list, session pager, composer, attention card, model sheet. Holds the Gateway credential. Not a second agent. |
 | HTTPS front end | Terminates TLS and forwards HTTP and WebSocket, including `Authorization`, to loopback. Not part of the Gateway binary. |
-| Gateway | Authenticates devices, enforces the workspace allowlist, starts one OMP process per task, and fans events out to connected phones. |
+| Gateway | Authenticates devices, enforces the workspace allowlist, starts one OMP process per session, and fans events out to connected phones. |
 | OMP | Plans, calls tools, and talks to the model provider with the host's existing configuration. |
 | Model provider | Receives whatever OMP sends under that configuration. Outside the machine. |
 
@@ -34,16 +34,17 @@ The Gateway is a Rust service using Tokio and Axum. Android is Kotlin and Jetpac
 
 PinkCollab does not replace OMP, attach to a process you started in a terminal, or relay traffic through a PinkCollab-operated cloud.
 
-## A task's lifetime
+<a id="a-tasks-lifetime"></a>
+## A session's lifetime
 
 1. The phone chooses a directory under an allowed root. The Gateway checks the path, then starts `omp --mode rpc-ui` with any configured `omp_args` in that directory. It waits up to 30 seconds for OMP's ready frame.
-2. An omitted prompt leaves the task idle and attached. The first composer send is an ordinary prompt.
+2. An omitted prompt leaves the session idle and attached. The first composer send is an ordinary prompt.
 3. While the status is `running`, a further prompt is sent with `streamingBehavior=steer`. Otherwise it starts a new turn.
-4. `agent_end` marks the task `completed`. `turn_end` does not. Completion does not detach the process.
+4. `agent_end` marks the session `completed`. `turn_end` does not. Completion does not detach the process.
 5. **Interrupt** sends `abort`, sets `idle`, and keeps the process. **Stop** closes stdin, waits up to three seconds, then terminates the process and detaches it.
-6. If the process exits on its own outside `completed` or `failed`, the task becomes `stopped`. A transport failure marks it `failed`.
+6. If the process exits on its own outside `completed` or `failed`, the session becomes `stopped`. A transport failure marks it `failed`.
 
-`max_sessions` counts starting tasks and tasks with a live process. A completed-but-still-running task counts. The slot frees when the process is gone, not when the status word changes. See [reference](reference.md#max_sessions).
+`max_sessions` counts starting sessions and sessions with a live process. A completed-but-still-running session counts. The slot frees when the process is gone, not when the status word changes. See [reference](reference.md#max_sessions).
 
 Commands against a detached runtime fail. The app disables them. The API returns 409.
 
@@ -64,12 +65,12 @@ The in-memory timeline and a reconstructed history share one retention rule: at 
 
 ## What a restart restores
 
-| Event | Running OMP process | Task row | History you can read |
+| Event | Running OMP process | Session row | History you can read |
 | --- | --- | --- | --- |
 | Phone disconnects | Keeps running | Unchanged | Live view resumes from a new snapshot, not from missed deltas |
 | Gateway restarts | Not restored. A graceful shutdown stops processes the Gateway owned | Live statuses become `offline` and detached. `completed`, `failed`, and `stopped` keep their status, also detached | Current branch of the OMP session file, if it is still there, including paired tool calls and results, subject to the 500-item rule |
 | Host sleeps | Suspended with the machine. Not a PinkCollab resume feature | Unchanged until the Gateway process itself restarts | Unchanged |
-| Host shuts down | Gone | On the next Gateway start, previously live tasks are offline | Whatever OMP wrote before shutdown |
+| Host shuts down | Gone | On the next Gateway start, previously live sessions are offline | Whatever OMP wrote before shutdown |
 
 History reconstruction walks `parentId` from the latest entry and keeps that branch. It is not a replay of the WebSocket. Arguments are present when the call itself is in the file; a result-only reconstruction can have `arguments: null`. Lines that cannot be parsed are skipped. A missing file yields an empty timeline rather than an error to the client.
 
