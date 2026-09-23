@@ -6,19 +6,28 @@
 
 [Oh My Pi (OMP)](https://omp.sh/) runs on a host you own. Your phone launches the work, follows it live, and answers when OMP needs you.
 
-## Install
-
-OMP must already work on the host (`omp --version`). You need Android 8.0 / API 26 or newer. There is no iOS or browser client.
-
-**Gateway, on the host.** Node.js 18 or newer:
-
-```sh
-npm install -g pinkcollab@latest
+```mermaid
+flowchart LR
+    subgraph phone [Phone]
+        App[Android app]
+    end
+    subgraph host [Host you own]
+        Funnel[Tailscale Funnel]
+        Gateway
+        OMP[OMP process]
+        Funnel -->|loopback HTTP| Gateway
+        Gateway -->|NDJSON| OMP
+    end
+    Provider[Model provider]
+    App -->|HTTPS / WSS| Funnel
+    OMP -->|provider API| Provider
 ```
 
-Install Tailscale on the host, and allow Funnel for this node. The phone does not install Tailscale.
+## Install
 
-**Android app, on the phone.** Install the [signed release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
+Requires OMP on the host (`omp --version`) and Android 8.0 / API 26 or newer.
+1. **Host:** Node.js 18+ → `npm install -g pinkcollab@latest`. Install Tailscale and allow Funnel for this node.
+2. **Phone:** install the [release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
 
 ## Use
 
