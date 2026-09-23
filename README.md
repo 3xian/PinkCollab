@@ -11,7 +11,8 @@ flowchart TD
     subgraph phone [Phone]
         App[Android app]
     end
-    subgraph host [Host you own]
+    subgraph host [Your computer / Server]
+        direction LR
         Funnel[Tailscale Funnel]
         Gateway
         OMP[OMP process]
@@ -19,15 +20,18 @@ flowchart TD
         Gateway -->|NDJSON| OMP
     end
     Provider[Model provider]
-    App -->|HTTPS / WSS| Funnel
-    OMP -->|provider API| Provider
+    App -->|HTTPS / WSS| host
+    host -->|provider API| Provider
 ```
 
 ## Install
 
-Requires OMP on the host (`omp --version`) and Android 8.0 / API 26 or newer.
-1. **Host:** Node.js 18+ → `npm install -g pinkcollab@latest`. Install Tailscale and allow Funnel for this node.
+1. **Host:** Node.js 18+. Install Tailscale and allow Funnel for this node.
 2. **Phone:** install the [release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
+
+```sh
+npm install -g pinkcollab@latest
+```
 
 ## Use
 
