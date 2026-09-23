@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/assets/pinkcollab-logo.png" width="48" alt="PinkCollab logo" /></p>
+<p align="center"><img src="docs/assets/pinkcollab-logo.png" width="96" alt="PinkCollab logo" /></p>
 
 # PinkCollab — Android control for Oh My Pi
 
