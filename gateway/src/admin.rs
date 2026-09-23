@@ -44,7 +44,7 @@ fn pairing_url(config: &Config, explicit: Option<String>) -> Result<String> {
         Some(url) => Ok(url),
         None if !config.public_url.trim().is_empty() => Ok(config.public_url.clone()),
         None => anyhow::bail!(
-            "no public pairing URL configured; run `setup-funnel --pair` or pass `pair --url <url>`"
+            "no public pairing URL configured; run `funnel` or pass `pair --url <url>`"
         ),
     }
 }

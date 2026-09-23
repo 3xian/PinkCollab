@@ -26,7 +26,7 @@ On the host, allow a project directory that already exists. On Windows, a path l
 
 ```sh
 pinkcollab init --workspace /absolute/path/to/projects
-pinkcollab setup-funnel
+pinkcollab funnel
 pinkcollab serve
 ```
 
@@ -36,10 +36,10 @@ Leave that terminal open. In another terminal:
 pinkcollab pair
 ```
 
-`setup-funnel` writes `public_url`, so `serve` and `pair` take no flags. Scan the QR in the app. Open **Workspaces**, choose the directory, create a session, and send a prompt.
+`funnel` writes `public_url`, so `serve` and `pair` take no flags. Scan the QR in the app. Open **Workspaces**, choose the directory, create a session, and send a prompt.
 
 The pairing code lasts five minutes and works once. If it expires, run `pair` again.
 
-If Funnel is not allowed for this node, `setup-funnel` stops. Enable the `funnel` attribute in the Tailscale admin console, then run it again.
+If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attribute in the Tailscale admin console, then run it again.
 
 License: MIT.

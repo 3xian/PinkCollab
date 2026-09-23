@@ -51,8 +51,8 @@ enum Commands {
     Clients,
     /// Preflight the configuration, roots, OMP, database and listen port.
     Status,
-    /// Publish the loopback Gateway on the internet with Tailscale Funnel.
-    SetupFunnel {
+    /// Publish the loopback Gateway with Tailscale Funnel and exit. Does not start the Gateway.
+    Funnel {
         /// Public HTTPS port offered by Funnel: 443, 8443 or 10000.
         #[arg(long, default_value_t = 443)]
         https: u16,
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
         Commands::Clients => admin::clients(&cli.data_dir),
         Commands::Status => admin::status(&cli.data_dir).await,
         Commands::Revoke { client } => admin::revoke(&cli.data_dir, &client),
-        Commands::SetupFunnel {
+        Commands::Funnel {
             https,
             dry_run,
             tailscale,

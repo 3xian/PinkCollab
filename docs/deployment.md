@@ -64,13 +64,13 @@ public_url: https://my-host.example-tailnet.ts.net
 ```
 
 ```sh
-pinkcollab setup-funnel --pair
+pinkcollab funnel --pair
 # equivalent, without minting a pairing code:
 #   tailscale funnel --bg --https=443 --yes http://127.0.0.1:8787
 tailscale funnel status
 ```
 
-`setup-funnel` flags: `--dry-run` prints the plan and changes nothing, `--https 8443` selects a non-default public port, `--tailscale <path>` points at the CLI when it is not on `PATH`, `--pair` prints a pairing code after publish.
+`funnel` flags: `--dry-run` prints the plan and changes nothing, `--https 8443` selects a non-default public port, `--tailscale <path>` points at the CLI when it is not on `PATH`, `--pair` prints a pairing code after publish.
 
 Constraints:
 
