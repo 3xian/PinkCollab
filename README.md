@@ -52,6 +52,7 @@ This checkout matches release v0.1.1. An APK and a Gateway from different releas
 - [Protocol](docs/protocol.md) — client and adapter authors
 - [Release process](docs/npm-release.md) — maintainers, not installation
 
+<!-- These anchors keep older README section links working. They render nothing. -->
 <a id="quick-start"></a>
 <a id="how-a-task-runs"></a>
 <a id="commands"></a>
@@ -61,7 +62,5 @@ This checkout matches release v0.1.1. An APK and a Gateway from different releas
 <a id="what-survives-a-restart"></a>
 <a id="validation"></a>
 <a id="project-layout"></a>
-
-Older README section links land here. Their contents now live in the pages listed under [Docs](#docs).
 
 License: MIT.
