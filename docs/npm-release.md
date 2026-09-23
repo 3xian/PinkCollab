@@ -1,56 +1,45 @@
 # Release Android, the Gateway, and npm
 
-Maintainer handbook for publishing one Android APK, five native Gateway binaries, and the npm launcher. It is not an install guide. People installing PinkCollab should follow [Get started](getting-started.md).
+Maintainer handbook for publishing one Android APK, five native Gateway binaries, and the npm launcher. It is not an install guide. People installing PinkCollab should follow [Get started](getting-started.md). End users never compile Rust during installation.
 
-PinkCollab is distributed as one JavaScript launcher package plus five packages containing native Gateway binaries. End users never compile Rust during installation.
-
-The version and tag in the examples are examples. They are not a claim about the latest published release. Replace them with the version you are actually cutting. The workflow rejects a tag that does not match the Cargo, Android, and npm manifests.
+Versions below are placeholders, not the current release.
 
 ## One-time repository setup
 
 1. Ensure the npm publisher can publish the public `pinkcollab` package and packages under the public `@pinkcollab` scope.
-2. Add an npm publishing token as the GitHub Actions repository secret `NPM_TOKEN`.
-3. Keep GitHub Actions enabled for tag pushes. The publish job uses GitHub's OIDC token to attach npm provenance to every package.
-4. Store the Android signing key as the repository secrets
-   `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
-   `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. Keep an offline backup of
-   the keystore and credentials: losing them prevents upgrades over installed
-   APKs.
+2. Add an npm publishing token as the GitHub Actions repository secret `NPM_TOKEN`. Keep Actions enabled for tag pushes; publishing uses GitHub's OIDC token to attach npm provenance.
+3. Store the Android signing key as the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. Keep an offline backup of the keystore and credentials: losing them prevents upgrades over installed APKs.
 
 ## Cut a release
 
-Update every Cargo, Android, and npm manifest in one validated operation, then push the matching tag:
+Update the Cargo, Android, and npm manifests together. From the user-visible changes since the previous release, write `docs/releases/vX.Y.Z.md` and commit it with that version bump. The same file becomes the annotated tag on GitHub's Tags page and the GitHub Release body.
+
+The first line must say what changed, not only the version (`PinkCollab vX.Y.Z — faster reconnects on Android`). Follow it with highlights, fixes, and any compatibility or upgrade steps. Omit empty sections and unverified claims. Review the notes with the release requester before publishing.
 
 ```sh
-node npm/scripts/set-version.mjs 0.1.0
+node npm/scripts/set-version.mjs X.Y.Z
 node npm/scripts/check-release.mjs
-git tag v0.1.0
-git push origin v0.1.0
+# Commit docs/releases/vX.Y.Z.md with the version changes.
+git tag -a --cleanup=verbatim -F docs/releases/vX.Y.Z.md vX.Y.Z
+node npm/scripts/check-tag-notes.mjs vX.Y.Z
+git push origin main
+git push origin vX.Y.Z
 ```
 
-`0.1.0` above is an example tag, not the current version.
+Do not use a lightweight tag or `git tag -m`. A new tag without committed notes, or whose annotation does not match that file, fails before the build. The workflow does not generate a commit list.
 
-The release workflow rejects a tag that differs from the Cargo, Android, or npm package version. It runs the Gateway, Android, and launcher tests; builds a signed Android APK and five native Gateway binaries; installs the generated npm tarballs and launches each binary on its own runner; publishes the platform packages; publishes `pinkcollab` last; and only then creates an immutable GitHub Release containing the APK, binaries, and SHA-256 checksums.
+npm versions and GitHub Release assets are never overwritten. If publishing stops after only some platform packages, cut a new version. If every npm package was published but Release creation failed, create the Release from that run's artifacts and checksums instead of rebuilding binaries.
 
-Published package versions and GitHub Release assets are never overwritten or silently skipped. If npm publishing stops after only some platform packages were published, bump to a new version rather than rerunning the same tag. If all npm packages were published but GitHub Release creation failed, create the release from that run's artifacts and checksums instead of rebuilding or replacing binaries.
-
-If no npm package or GitHub Release was published and the failed run's artifacts
-are no longer available, recover the APK and five binaries from the immutable tag:
+If nothing was published and those artifacts are gone:
 
 ```sh
-gh workflow run release.yml --ref main -f tag=v0.1.0
+gh workflow run release.yml --ref main -f tag=vX.Y.Z
 ```
 
-A manual dispatch checks out and validates the requested tag, rebuilds and smoke
-tests every platform binary, builds and verifies the signed APK, skips npm
-publication, and creates the GitHub Release with checksums. Use it only after
-confirming that the tag has no release and none of its package versions exist
-on npm. The tag in that example is an example.
+That rebuilds from the tag, skips npm, and creates the Release. Use it only after confirming the tag has no Release and none of its package versions exist on npm. Tags from before versioned notes still get generated Release notes; a tag that has a notes file must match its annotation.
 
-If a first publication leaves new scoped packages private, use the npm website
-to change each package's access to public, then verify it from an unauthenticated
-registry client. Granular access tokens cannot change package visibility.
+If a first publication leaves new scoped packages private, change each package to public on the npm website, then verify from an unauthenticated registry client. Granular access tokens cannot change visibility.
 
-Linux packages use musl targets to avoid tying the binaries to the glibc version on the build runner. The macOS and Windows packages are built on native GitHub-hosted runners.
+Linux packages use musl so they are not tied to the runner's glibc. macOS and Windows packages are built on native runners.
 
-Build and test commands for local development stay in [development](development.md). Do not treat this workflow as a way to install a working Gateway on your own machine.
+Build and test commands for local development stay in [development](development.md). Do not treat this workflow as a way to install a Gateway.
