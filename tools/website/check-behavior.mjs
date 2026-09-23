@@ -171,19 +171,20 @@ try {
   // Copy button: the clipboard path, then the documented fallback.
   const copy = await page.evaluate(async () => {
     const status = document.querySelector('#copy-status');
-    const button = document.querySelectorAll('.copy-button')[0];
+    const button = document.querySelector('.copy-button[data-copy="command-source"]');
     button.click();
     await new Promise((r) => setTimeout(r, 150));
     const withClipboard = status.textContent;
     const selected = String(window.getSelection());
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-    document.querySelectorAll('.copy-button')[1].click();
+    document.querySelector('.copy-button[data-copy="command-npm"]').click();
     await new Promise((r) => setTimeout(r, 150));
-    return { withClipboard, selected, withoutClipboard: status.textContent };
+    return { withClipboard, selected, fallbackSelection: String(window.getSelection()), withoutClipboard: status.textContent };
   });
   check(copy.withClipboard.includes('Build from source'), `copy reported "${copy.withClipboard}"`);
   check(copy.selected.includes('cargo build'), 'copy did not select the commands as a fallback');
-  check(copy.withoutClipboard.length > 0, 'copy fallback said nothing');
+  check(copy.fallbackSelection.includes('npm install -g pinkcollab@latest'), 'copy fallback did not select the npm command');
+  check(copy.withoutClipboard.includes('Install with npm'), `copy fallback reported "${copy.withoutClipboard}"`);
 
   // Contrast, at desktop and phone widths.
   for (const width of [1440, 390]) {

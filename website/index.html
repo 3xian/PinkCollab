@@ -83,39 +83,39 @@
         <div class="start-copy">
           <p class="eyebrow">LET’S GET YOU CONNECTED</p>
           <h2 id="start-title">Built for your setup.<br>Open from the start.</h2>
-          <p>Install <a class="text-link" href="https://omp.sh/">Oh My Pi</a> on the host that will run the tasks, install the gateway beside it, then pair the Android app. One host and one phone at a time.</p>
+          <p>Download the Android release APK, install the Gateway on the computer that will run tasks, and install and configure <a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> separately on that host. Then pair the phone and create your first task.</p>
           <dl class="requirement-list">
-            <dt>On your host</dt><dd>Oh My Pi, with <code>omp --version</code> working in your terminal.</dd>
-            <dt>For the gateway</dt><dd>Rust 1.89+ to build from source, or Node.js 18+ to install the prebuilt package. Never both.</dd>
-            <dt>Contributors only</dt><dd>JDK 17+ and Android SDK 36, needed only if you build the Android app yourself.</dd>
+            <dt>On your host</dt><dd>Oh My Pi installed and configured separately, with <code>omp --version</code> working in your terminal.</dd>
+            <dt>Gateway install</dt><dd>Node.js 18+ for the npm package; Rust 1.89+ only if building from source. No Rust toolchain is needed for the prebuilt downloads.</dd>
+            <dt>Android app</dt><dd>The release APK needs no Android build toolchain. JDK 17+ and Android SDK 36 are only for building the app yourself.</dd>
           </dl>
           <a class="button button-primary" href="https://github.com/3xian/PinkCollab#quick-start">Read the setup guide <span aria-hidden="true">↗</span></a>
-          <a class="build-link" href="https://github.com/3xian/PinkCollab/actions/workflows/ci.yml">Get a development APK <span aria-hidden="true">↗</span></a>
-          <span class="build-note">A debug build from the latest successful CI run; GitHub sign-in is required. Release builds will be attached to tagged releases.</span>
+          <a class="build-link" href="https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk">Download the release Android APK <span aria-hidden="true">↗</span></a>
+          <span class="build-note">Install the signed APK from the latest GitHub release; <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">Gateway binaries and checksums</a> are available there too. The current Android app requires Gateway protocol version 1; check protocol compatibility when mixing releases. A debug APK may require uninstalling the release app before installation because it uses a different signing key.</span>
         </div>
         <div class="install-panel">
           <div class="install-top"><span class="terminal-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Install the gateway</span></div>
           <div class="install-route">
-            <div class="route-head"><h3>Build from source</h3><span class="route-badge">Needs Rust 1.89+</span><button class="copy-button" type="button" data-copy="command-source" aria-label="Copy the gateway build commands">Copy <span aria-hidden="true">⧉</span></button></div>
-            <pre><code id="command-source">git clone https://github.com/3xian/PinkCollab.git
-cd PinkCollab/gateway
-cargo build --release --locked \
-  --bin pinkcollab-gateway</code></pre>
+            <div class="route-head"><h3>Install with npm</h3><span class="route-badge">Easiest · Node.js 18+</span><button class="copy-button" type="button" data-copy="command-npm" aria-label="Copy the prebuilt gateway command">Copy <span aria-hidden="true">⧉</span></button></div>
+            <pre><code id="command-npm">npm install -g pinkcollab@latest</code></pre>
+            <p class="route-note">Installs the released native Gateway binary without Rust. Prefer a direct download? Choose your platform’s Gateway binary and verify it against SHA256SUMS on the <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">latest release</a>.</p>
           </div>
           <div class="install-route">
-            <div class="route-head"><h3>Prebuilt gateway</h3><span class="route-badge">npm · tagged releases</span><button class="copy-button" type="button" data-copy="command-npm" aria-label="Copy the prebuilt gateway command">Copy <span aria-hidden="true">⧉</span></button></div>
-            <pre><code id="command-npm">npm install -g pinkcollab</code></pre>
-            <p class="route-note">Installs a native binary — no Rust toolchain on this route. The packages ship with every tagged release. Until the first release is published, build from source.</p>
+            <div class="route-head"><h3>Build from source (optional)</h3><span class="route-badge">Needs Rust 1.89+</span><button class="copy-button" type="button" data-copy="command-source" aria-label="Copy the gateway build commands">Copy <span aria-hidden="true">⧉</span></button></div>
+            <pre><code id="command-source">git clone https://github.com/3xian/PinkCollab.git
+cd PinkCollab/gateway
+cargo build --release --locked --bin pinkcollab-gateway</code></pre>
           </div>
           <div class="install-next">
             <span>Next steps</span>
             <ol class="next-steps">
-              <li>Allow the projects your phone may browse — replace the path with your own: <code>init --workspace /absolute/path/to/projects</code></li>
-              <li>Start the gateway and leave the terminal open: <code>serve</code></li>
-              <li>Expose it over HTTPS and print a pairing code: <code>pair --url https://gateway.example.com</code></li>
-              <li>Open PinkCollab on Android and scan that code within 5 minutes.</li>
+              <li>Allow the projects your phone may browse (replace the path), then check the host setup: <code>pinkcollab init --workspace /absolute/path/to/projects</code> and <code>pinkcollab status</code>.</li>
+              <li>Start the Gateway with <code>pinkcollab serve</code>; it keeps running in this terminal.</li>
+              <li>Put an HTTPS front end in front of the loopback Gateway: Tailscale Serve is private to your tailnet (the phone joins that tailnet); Tailscale Funnel is public on the internet; or use your own HTTPS reverse proxy. See the deployment guide below.</li>
+              <li>In a second terminal, print a pairing code with <code>pinkcollab pair --url https://gateway.example.com</code>, using your actual HTTPS Gateway URL.</li>
+              <li>Open PinkCollab on Android, scan the code within 5 minutes, choose a workspace, create a task, and send your first prompt.</li>
             </ol>
-            <p class="next-note">Commands are the same either way: <code>pinkcollab &lt;command&gt;</code> after an npm install, <code>./target/release/pinkcollab-gateway &lt;command&gt;</code> after a source build.</p>
+            <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>. For a direct download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory. The setup guide covers these paths.</p>
             <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
             <a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment and networking guide <span aria-hidden="true">→</span></a>
           </div>
@@ -140,9 +140,9 @@ cargo build --release --locked \
             <div class="arch-connection arch-connection-outer"><span>provider API</span><i aria-hidden="true"></i><small>model requests</small></div>
             <article class="arch-node arch-external arch-provider-node"><span class="arch-icon" aria-hidden="true">✦</span><span class="arch-kicker">YOUR ACCOUNT</span><h3>Model provider</h3><p>Your chosen models</p></article>
           </div>
-          <figcaption class="architecture-summary"><span><b>01 · Spawn</b>The Gateway launches a real <code>omp --mode rpc-ui</code> process.</span><span><b>02 · Control</b>Commands go in; structured events stream back to Android.</span><span><b>03 · Own</b>Code, sessions, and provider credentials remain on your host.</span></figcaption>
+          <figcaption class="architecture-summary"><span><b>01 · Spawn</b>The Gateway launches a real <code>omp --mode rpc-ui</code> process.</span><span><b>02 · Control</b>Commands go in; structured events stream back to Android.</span><span><b>03 · Own</b>Workspace files and session records live on your host; OMP sends model requests to your provider.</span></figcaption>
           <a class="architecture-detail-link" href="architecture.html">Explore the detailed architecture <span aria-hidden="true">↗</span></a>
-                  <div class="ownership-note"><span aria-hidden="true">⌁</span><p><strong>Your machines stay yours.</strong> OMP runs on your hosts. Model provider credentials stay there, too. Pair devices with a single-use QR code and revoke access when you need to.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment guide <span aria-hidden="true">↗</span></a></div>
+                  <div class="ownership-note"><span aria-hidden="true">⌁</span><p><strong>Your machines stay yours.</strong> OMP runs on your hosts. Model provider credentials are configured there, not on the phone; OMP may send them to your provider when making model requests. Pair devices with a single-use QR code and revoke access when you need to.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment guide <span aria-hidden="true">↗</span></a></div>
         </figure>
       </section>
       <section class="limits section" id="limits" aria-labelledby="limits-title">
@@ -165,8 +165,8 @@ cargo build --release --locked \
           </div>
           <ul class="powered-list">
             <li><b>Real OMP processes.</b> Starting a task from Android spawns <code>omp --mode rpc-ui</code> on the host that owns the code.</li>
-            <li><b>Your credentials stay put.</b> Model provider keys never leave the machine — the phone talks to your gateway, not to a model.</li>
-            <li><b>No relay in the middle.</b> HTTPS straight to your own host, via Funnel, Serve, or your own reverse proxy.</li>
+            <li><b>Host-side credentials.</b> Configure model provider credentials on the host, not the phone; OMP may transmit them to your provider for model requests.</li>
+            <li><b>Choose your reachability.</b> Tailscale Serve stays private to your tailnet, Funnel exposes a public HTTPS endpoint, or you can use your own HTTPS reverse proxy.</li>
           </ul>
         </div>
       </section>

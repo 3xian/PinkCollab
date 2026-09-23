@@ -1,126 +1,111 @@
-<p align="center">
-  <img src="docs/assets/pinkcollab-logo.png" width="96" alt="PinkCollab logo" />
-</p>
+<p align="center"><img src="docs/assets/pinkcollab-logo.png" width="48" alt="PinkCollab logo" /></p>
 
-<h1 align="center">PinkCollab</h1>
+# PinkCollab — Android control for Oh My Pi
 
-<p align="center"><strong>Spawn and Control Oh My Pi (OMP) Tasks from Android</strong></p>
+**Your coding agent stays on your machine. You don't have to stay at your desk.**
 
-[![Android](https://img.shields.io/badge/Android-3DDC84?logo=android&logoColor=white)](#build-android)
-[![Min SDK: API 26+](https://img.shields.io/badge/Min_SDK-API_26%2B-3DDC84?logo=android&logoColor=white)](android/app/build.gradle.kts)
-[![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white)](android/)
-[![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-4285F4?logo=jetpackcompose&logoColor=white)](android/app/src/main/java/dev/pinkcollab/ui/)
+PinkCollab is a self-hosted Android controller for [Oh My Pi (OMP)](https://omp.sh/). Start an OMP task in a project on your own host, follow its live progress, and step in from your phone when it needs you.
 
-[Website](https://3xian.github.io/PinkCollab/) · [Setup guide](#quick-start) · [Deployment guide](docs/deployment.md) · [npm releases](docs/npm-release.md) · [API documentation](docs/protocol.md)
+- **Start** — choose a directory under a host's allowed workspace roots and send the first prompt to launch a new OMP task.
+- **Watch** — see streaming replies, tool activity, task status, and questions that need an answer.
+- **Steer** — add instructions or answer questions; **Interrupt** aborts the current OMP turn but keeps the session, while **Stop** ends its process and accepts no further commands.
 
-**Spawn new OMP tasks remotely — not just control existing ones.** PinkCollab lets you start and manage **Oh My Pi (OMP)** tasks on your own computers from an Android phone.
+Pair more than one host to see their tasks together on your phone.
 
-- Pick an allowed project directory, send the first prompt, and spawn a real OMP task there.
-- Watch streaming replies, tool activity, and questions the agent asks.
-- Send **Prompt / Steer**, answer those questions, **Interrupt**, or **Stop**.
-- See tasks from every paired host in one list, newest first, each with its live status.
+[Get started](#quick-start) · [Download Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) · [Gateway downloads](https://github.com/3xian/PinkCollab/releases/latest)
 
-Gateway: **Rust / Tokio / Axum / SQLite**, shipped as one standalone executable.
-Android: **Kotlin / Jetpack Compose / Material 3**.
-Model provider credentials stay on the host — the phone talks to your Gateway, never to a model provider.
+[![CI](https://github.com/3xian/PinkCollab/actions/workflows/ci.yml/badge.svg)](https://github.com/3xian/PinkCollab/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/3xian/PinkCollab)](https://github.com/3xian/PinkCollab/releases/latest)
 
-<p align="center">
-  <img src="docs/assets/pinkcollab-better-life.webp" width="480" alt="Before PinkCollab: late-night work at a desk. With PinkCollab: relaxing while managing agent tasks from a phone." />
-  <br />
-  <em>Same code. Brighter tomorrow. Keep your agents close, and enjoy life beyond the desk.</em>
-</p>
+**First task:** choose a workspace on Android → enter a prompt → follow the live reply → steer or answer a question.
 
 ## How a task runs
 
 ```mermaid
 flowchart LR
-    A[Android] -->|Spawn and control over HTTPS / WSS| B[Gateway] -->|Spawns OMP subprocesses via NDJSON| C[OMP]
+    A[Android] -->|HTTPS / WSS| T[HTTPS front end]
+    T -->|loopback HTTP| B[Gateway on your host]
+    B -->|NDJSON| C[OMP subprocess]
+    C -->|model requests| P[Your model provider]
 ```
 
-- **Android** selects a workspace, sends the first prompt to spawn a task, and keeps one WebSocket open for live updates and control.
-- **Gateway** authenticates the caller, enforces the workspace allowlist, spawns OMP, and owns the task lifecycle.
-- **OMP** runs as one subprocess per task (`omp --mode rpc-ui`); the Gateway speaks NDJSON to it over stdin/stdout.
+The Gateway runs on your computer or server, authenticates paired phones, checks workspace roots, and starts one `omp --mode rpc-ui` process per task. Its loopback listener needs an HTTPS front end such as Tailscale Serve, Tailscale Funnel, or your own reverse proxy. OMP and its provider configuration live on the host: **you do not configure model-provider credentials on the phone**. OMP may still send prompts, code, or credentials to its configured model provider according to that provider's setup. The workspace allowlist restricts what the Gateway offers and accepts; it is **not an OS sandbox**.
 
-*Why one subprocess per task: a crashed task cannot take down the others.*
+Pairing uses a five-minute, single-use code. On the host, `pinkcollab clients` lists paired devices and `pinkcollab revoke --client <clientId>` removes one device's host-side access; removing a host in Android alone does not revoke it. See [deployment and networking](docs/deployment.md) for the HTTPS options and [API documentation](docs/protocol.md) for protocol details.
+
+The Gateway is written in Rust/Tokio/Axum with SQLite; Android uses Kotlin/Jetpack Compose. Live events travel over a WebSocket, while the Gateway exchanges NDJSON with OMP. See [Current limits](#current-limits) before relying on background notifications or session recovery.
 
 ## Quick start
 
-This path gets a Gateway running, builds the Android app, then pairs one computer with one phone. The phone can use any supported HTTPS front end; Tailscale Funnel is optional.
+Run host commands on the computer **that owns the projects**. The Android phone connects to its HTTPS front end, not to the Gateway's loopback socket. The [latest Release](https://github.com/3xian/PinkCollab/releases/latest) carries the signed APK and standalone Gateway binaries; npm distributes the Gateway launcher separately. OMP is a separate install. **Compatibility:** the current Android app requires Gateway protocol version 1; when mixing APK and Gateway downloads from different releases, check that both still speak the same protocol.
 
-**No release is published yet, so start from source.** The npm packages described below ship with tagged releases; until the first one exists, build the Gateway with [Build the Gateway from source](#build-the-gateway-from-source) and run `./target/release/pinkcollab-gateway` wherever a command below says `pinkcollab`. Subcommands and flags are identical on either route.
+### 1. Prepare OMP on the host
 
-### 1. Install the prerequisites
-
-On the computer that will run tasks, install:
-
-- **OMP**, with `omp --version` working in your terminal — required either way
-- **Rust 1.89+** to build the Gateway from source, or **Node.js 18+ and npm** to install the prebuilt package — never both
-
-To build the Android app yourself you additionally need **JDK 17+ and Android SDK 36**. Using the app never needs the Android toolchain; see [Build Android](#build-android) and the debug APKs attached to CI runs.
-
-OMP remains an external dependency and is not installed by the `pinkcollab` package.
-
-### 2. Install and initialize the Gateway
-
-Build it from a checkout of this repository:
+Install and configure [Oh My Pi](https://omp.sh/) on the host, including the model provider it will use. In a **host terminal, in any directory**, confirm:
 
 ```sh
-git clone https://github.com/3xian/PinkCollab.git
-cd PinkCollab/gateway
-cargo build --release --locked --bin pinkcollab-gateway
-./target/release/pinkcollab-gateway init --workspace /absolute/path/to/projects
-./target/release/pinkcollab-gateway status
+omp --version
 ```
 
-Once a tagged release is published, the prebuilt package replaces the build step with `npm install -g pinkcollab`, after which the first two subcommands are plain `pinkcollab init --workspace /absolute/path/to/projects` and `pinkcollab status`:
+PinkCollab does not install OMP or configure its provider. Keep `omp` on the host's `PATH` when you initialize the Gateway; `init` records its absolute executable path.
+
+### 2. Get and initialize the Gateway on the host
+
+**Recommended: npm, Node.js 18+ and npm required.** In a **host terminal, in any directory**, install the public launcher and its native package for your OS, then allow an existing absolute workspace root:
 
 ```sh
-npm install -g pinkcollab
+npm install -g pinkcollab@latest
+pinkcollab --version
 pinkcollab init --workspace /absolute/path/to/projects
 pinkcollab status
 ```
 
-Replace `/absolute/path/to/projects` with a directory that contains the projects the phone may access, and repeat `--workspace` to allow more than one directory. On Windows, use a workspace such as `C:\code`, and run the built binary as `.\target\release\pinkcollab-gateway.exe`. For a one-off invocation without a global install, `npx pinkcollab status` is also supported.
+Replace the example with the real projects directory on the host (on Windows, for example, `C:\code`). Repeat `--workspace` for additional roots. Continue when `status` reports `status: ready`; run it before starting `serve`, because it checks whether the port is available. `init` is one-time and writes `~/.pinkcollab/config.yaml`; to change allowed roots later, edit `workspaces` there.
 
-Run `init` only once. It creates `~/.pinkcollab/config.yaml`; edit its `workspaces` list later if you need to change the allowed directories. Continue only when `status` ends with `status: ready`.
+**Without Node.js:** download the standalone executable for your host from [Gateway downloads](https://github.com/3xian/PinkCollab/releases/latest). Assets: `pinkcollab-gateway-darwin-arm64`, `pinkcollab-gateway-darwin-x64`, `pinkcollab-gateway-linux-arm64`, `pinkcollab-gateway-linux-x64`, and `pinkcollab-gateway-win32-x64.exe`. Compare your download's SHA-256 hash with the Release's [`SHA256SUMS`](https://github.com/3xian/PinkCollab/releases/latest/download/SHA256SUMS).
 
-### 3. Build and install the Android app
+On **macOS or Linux**, in a **host terminal in the downloaded binary's directory**, grant execute permission. For example, on Apple Silicon:
 
 ```sh
-cd android
-./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+chmod +x ./pinkcollab-gateway-darwin-arm64
+./pinkcollab-gateway-darwin-arm64 --version
 ```
 
-On Windows, run the build with `cmd.exe /c gradlew.bat :app:assembleDebug`. You can also open `android/` in Android Studio and install the app from there. See [Build Android](#build-android) if the SDK or `adb` is not configured yet.
+Use the filename you actually downloaded on Intel macOS or Linux. On **Windows PowerShell**, in the **download directory**, run `.\pinkcollab-gateway-win32-x64.exe --version`; Windows needs no `chmod`. On either OS, use that same executable path in place of `pinkcollab` for `init --workspace <absolute-path>`, `status`, `serve`, and `pair` below, staying in the download directory for each command. To build instead, see [Build the Gateway from source](#build-the-gateway-from-source) (Rust 1.89+).
 
-### 4. Start the Gateway
+### 3. Get the Android app
 
-Keep this terminal open:
+On the **Android phone**, download and install the [signed release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) (Android 8.0 / API 26+). Android may ask you to permit installation from the browser or file manager. The Release APK is different from CI's debug APK or a local [source build](#build-android); Android will not install an update over an app signed with a different key. If switching between those builds, first back up what you need and uninstall the old app (including its locally stored pairings), then install and pair again. You do **not** need JDK, the Android SDK, or Android Studio to install the release APK.
+
+### 4. Start the Gateway on the host
+
+In a **host terminal, in any directory for npm** (or the binary's directory for a download), run:
 
 ```sh
-pinkcollab serve   # source build: ./target/release/pinkcollab-gateway serve
+pinkcollab serve
 ```
 
-### 5. Connect and pair
+Leave this terminal open: `serve` runs in the foreground and listens on `127.0.0.1:8787` by default. If you chose a downloaded binary, replace `pinkcollab` with the platform-specific relative path from step 2. Keep using the same host user and data directory for all commands (default `~/.pinkcollab`; if you use `--data-dir`, use that value consistently).
 
-The phone needs an HTTPS address that forwards to the Gateway. In a second terminal, choose one option:
+### 5. Give the phone an HTTPS address
+
+In **another host terminal, in any directory**, configure *one* HTTPS front end to forward to `http://127.0.0.1:8787`. For a **private tailnet**, connect the host and phone to Tailscale on the same tailnet and run on the host:
 
 ```sh
-# Use an HTTPS front end you already run:
+tailscale serve --bg http://127.0.0.1:8787
+tailscale serve status
+```
+
+Use the resulting `https://<hostname>.ts.net` address in the next step. **Tailscale Funnel** is different: it exposes the endpoint publicly and requires Funnel policy access; see [Funnel setup](docs/deployment.md#tailscale-funnel-public-simplest). Or use [your own HTTPS reverse proxy](docs/deployment.md#your-own-reverse-proxy), forwarding WebSocket upgrades and the `Authorization` header. The Gateway's loopback **listen address is not the pairing URL**. The phone needs a trusted HTTPS front-end address reachable from its network; neither Serve nor Funnel is automatic.
+
+### 6. Pair and start a task
+
+With `serve` still running, in **the other host terminal** run (from any directory for npm, or the binary's directory for a download):
+
+```sh
 pinkcollab pair --url https://gateway.example.com
-
-# Or set up Tailscale Funnel and pair in one command:
-pinkcollab setup-funnel --pair
 ```
 
-With a source build, replace `pinkcollab` with `./target/release/pinkcollab-gateway` in every command above.
-
-If `public_url` is already set in `config.yaml`, run `pinkcollab pair` without `--url`. You do not need to recreate an existing Funnel, Serve, or reverse-proxy setup each time.
-
-Each command prints a single-use QR code. Open PinkCollab on the phone and scan it within **5 minutes**. Then choose a workspace, create a task, and enter your first prompt. See [Deployment and networking](docs/deployment.md) for all networking options, security details, and background-service setup.
-
-> All commands use `~/.pinkcollab` by default. If you pass `--data-dir`, use the same value for every command and for the background service.
+Substitute the actual HTTPS front-end root URL from step 5 (`https://<hostname>.ts.net` for Tailscale Serve, or your proxy's URL). `pair` prints pairing JSON on stdout and a QR in an interactive terminal; it does **not** start or configure HTTPS. In the Android app, scan the QR or enter the URL and one-time token manually within five minutes. Then open **Workspaces**, choose an allowed project directory, create a task, and send the first prompt. If pairing fails, check the HTTPS address and reachability; see [deployment](docs/deployment.md#pairing-and-security). Later, use `pinkcollab clients` and `pinkcollab revoke --client <clientId>` on the host to revoke a device.
 
 ## Commands
 
@@ -144,7 +129,7 @@ Lives at `~/.pinkcollab/config.yaml`; see [`gateway/config.example.yaml`](gatewa
 | `listen` | `127.0.0.1:8787` | The socket to bind — **must be a loopback address**. |
 | `public_url` | empty | The root URL the phone dials, baked into the QR code. Must be `https://…` in production. |
 | `name` | hostname | The host label shown in Android. |
-| `workspaces` | `[]` | Allowed root directories — the Gateway refuses to touch anything outside them. *This is the sandbox for all file access.* |
+| `workspaces` | `[]` | Allowed root directories for Gateway browsing and task creation; **not** an OS sandbox for OMP or the host user. |
 | `omp` | absolute path `init` resolved | The OMP executable. `init` stores the absolute path it found, which is what a service needs: their `PATH` differs from your terminal's, so a bare `omp` fails there. |
 | `omp_args` | `[]` | Extra OMP flags; may not override `--mode` or session storage. |
 | `max_sessions` | `8` | Concurrent **live** OMP processes (1–100). A session frees its slot as soon as its process exits — on completion, failure, or **Stop** — so finished tasks do not count against it. |
@@ -153,17 +138,19 @@ Startup validation rejects: empty `workspaces`, `max_sessions` outside 1–100, 
 
 ## Build Android
 
+From the **repository root on a development computer** with JDK 17+ and Android SDK 36 installed:
+
 ```sh
 cd android
 ./gradlew :app:assembleDebug     # Windows: gradlew.bat
 ```
 
-Set `sdk.dir` in `local.properties`, or set `ANDROID_HOME`. The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
+Set `sdk.dir` in `android/local.properties`, or set `ANDROID_HOME`. The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk` relative to the repository root.
 
-Install on a connected device:
+Still in the **`android/` directory**, install the debug APK on a connected phone (this is not signed with the Release key):
 
 ```sh
-adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 To start a task: **Workspaces → choose a directory → create a task → enter the first prompt in the task composer**. The directory browser lists allowed subdirectories without running project-level inspection commands.
@@ -181,6 +168,8 @@ On some Windows/JDK setups Gradle fails with `Unable to establish loopback conne
 ## Build the Gateway from source
 
 The npm packages contain prebuilt binaries and never compile Rust during installation. Gateway contributors can build the same CLI from source with Rust 1.89+:
+
+From the **repository root on the host**:
 
 ```sh
 cd gateway

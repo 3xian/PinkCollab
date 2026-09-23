@@ -1,6 +1,6 @@
 # Deployment and networking
 
-This guide covers exposing the Gateway to Android, pairing devices securely, and running the Gateway as a background service. Complete the repository [Quick start](../README.md#quick-start) first.
+This guide covers HTTPS access to the Gateway, pairing, and running it as a background service. For installation and the first task, follow the repository [Quick start](../README.md#quick-start); use the front-end options below for its HTTPS step.
 
 ## Connect Android
 
@@ -210,6 +210,6 @@ launchctl kickstart -k gui/$(id -u)/dev.pinkcollab.gateway
 
 ### Updates
 
-After `npm install -g pinkcollab@latest`, stop the service, repeat the platform-specific copy above, and start it again. Until the first tagged release is published, rebuild from source instead ([README: Build the Gateway from source](../README.md#build-the-gateway-from-source)) and copy the fresh `target/release/pinkcollab-gateway` over the installed binary. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started.
+After `npm install -g pinkcollab@latest`, stop the service, repeat the platform-specific copy above, and start it again. For a Gateway built from source, rebuild it ([README: Build the Gateway from source](../README.md#build-the-gateway-from-source)) and copy the fresh `gateway/target/release/pinkcollab-gateway` from the repository root over the installed binary. Identity and credentials survive — they live in SQLite (WAL), not in the binary. A graceful shutdown also stops the OMP runtimes the Gateway started.
 
 Configs written before embedded TLS was removed must drop `tls_cert` and `tls_key` entirely — the Gateway rejects any config that still sets them — and move TLS termination to Funnel, Serve, or a reverse proxy.
