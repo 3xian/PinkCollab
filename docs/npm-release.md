@@ -1,6 +1,10 @@
-# npm release process
+# Release Android, the Gateway, and npm
+
+Maintainer handbook for publishing one Android APK, five native Gateway binaries, and the npm launcher. It is not an install guide. People installing PinkCollab should follow [Get started](getting-started.md).
 
 PinkCollab is distributed as one JavaScript launcher package plus five packages containing native Gateway binaries. End users never compile Rust during installation.
+
+The version and tag in the examples are examples. They are not a claim about the latest published release. Replace them with the version you are actually cutting. The workflow rejects a tag that does not match the Cargo, Android, and npm manifests.
 
 ## One-time repository setup
 
@@ -24,6 +28,8 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+`0.1.0` above is an example tag, not the current version.
+
 The release workflow rejects a tag that differs from the Cargo, Android, or npm package version. It runs the Gateway, Android, and launcher tests; builds a signed Android APK and five native Gateway binaries; installs the generated npm tarballs and launches each binary on its own runner; publishes the platform packages; publishes `pinkcollab` last; and only then creates an immutable GitHub Release containing the APK, binaries, and SHA-256 checksums.
 
 Published package versions and GitHub Release assets are never overwritten or silently skipped. If npm publishing stops after only some platform packages were published, bump to a new version rather than rerunning the same tag. If all npm packages were published but GitHub Release creation failed, create the release from that run's artifacts and checksums instead of rebuilding or replacing binaries.
@@ -39,10 +45,12 @@ A manual dispatch checks out and validates the requested tag, rebuilds and smoke
 tests every platform binary, builds and verifies the signed APK, skips npm
 publication, and creates the GitHub Release with checksums. Use it only after
 confirming that the tag has no release and none of its package versions exist
-on npm.
+on npm. The tag in that example is an example.
 
 If a first publication leaves new scoped packages private, use the npm website
 to change each package's access to public, then verify it from an unauthenticated
 registry client. Granular access tokens cannot change package visibility.
 
 Linux packages use musl targets to avoid tying the binaries to the glibc version on the build runner. The macOS and Windows packages are built on native GitHub-hosted runners.
+
+Build and test commands for local development stay in [development](development.md). Do not treat this workflow as a way to install a working Gateway on your own machine.

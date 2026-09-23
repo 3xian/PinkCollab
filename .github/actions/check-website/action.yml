@@ -21,7 +21,7 @@ runs:
           executable="$(tools/website/node_modules/.bin/browsers install chrome@stable --path "$HOME/.cache/puppeteer" | tail -1 | awk '{print $NF}')"
           echo "CHROME_PATH=$executable" >> "$GITHUB_ENV"
         fi
-    - name: Static integrity, links and README agreement
+    - name: Static integrity, links and doc agreement
       shell: bash
       run: node tools/website/check-site.mjs
     - name: Responsive layout, demo behaviour, contrast and 404

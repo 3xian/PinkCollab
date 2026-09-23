@@ -1,6 +1,6 @@
 // Static integrity checks for the GitHub Pages site: every link resolves, every
-// asset exists, metadata agrees with the repository, and the install text on the
-// site still matches what the README tells people to run. No dependencies.
+// asset exists, metadata agrees with the repository, and install and build
+// text still matches the authoritative docs. No dependencies.
 //
 //   node tools/website/check-site.mjs
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -222,15 +222,58 @@ for (const page of PAGES.filter((page) => html[page].includes('styles.css'))) {
   );
 }
 
-// --- README consistency --------------------------------------------------
+// --- Docs and install consistency ----------------------------------------
+
+function anchorsOf(markdown) {
+  const anchors = headingsOf(markdown);
+  for (const match of markdown.matchAll(/\sid="([^"]+)"/g)) anchors.add(match[1]);
+  return anchors;
+}
+
+function markdownTarget(fromFile, target) {
+  const [pathPart, hash] = target.split('#');
+  if (!pathPart) return { file: fromFile, hash };
+  return { file: resolve(ROOT, dirname(fromFile), pathPart), hash };
+}
+
+function checkMarkdownFile(file) {
+  const text = read(file);
+  const anchors = anchorsOf(text);
+  for (const match of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+    const target = match[1];
+    if (/^(?:https?:|mailto:)/.test(target)) continue;
+    const { file: linked, hash } = markdownTarget(file, target);
+    if (linked === file) {
+      if (hash) check(anchors.has(hash), `${file}: "#${hash}" does not match any heading or id`);
+      continue;
+    }
+    check(existsSync(linked), `${file}: missing link target ${target}`);
+    if (hash && existsSync(linked) && linked.endsWith('.md')) {
+      check(
+        anchorsOf(readFileSync(linked, 'utf8')).has(hash),
+        `${file}: ${target} has no matching heading or id`,
+      );
+    }
+  }
+}
 
 const readme = read('README.md');
-const readmeHeadings = headingsOf(readme);
-for (const match of readme.matchAll(/\]\(#([^)]+)\)/g)) {
-  check(readmeHeadings.has(match[1]), `README.md: "#${match[1]}" does not match any heading`);
+checkMarkdownFile('README.md');
+for (const name of readdirSync(join(ROOT, 'docs'))) {
+  if (name.endsWith('.md')) checkMarkdownFile(join('docs', name));
 }
-for (const match of html['index.html'].matchAll(/blob\/main\/README\.md#([^"]+)"/g)) {
-  check(readmeHeadings.has(match[1]), `index.html: README anchor "#${match[1]}" does not exist`);
+
+for (const page of PAGES) {
+  for (const match of html[page].matchAll(/blob\/main\/(README\.md|docs\/[^"#]+)#([^"]+)"/g)) {
+    const file = match[1];
+    check(existsSync(join(ROOT, file)), `${page}: missing ${file}`);
+    if (existsSync(join(ROOT, file))) {
+      check(
+        anchorsOf(read(file)).has(match[2]),
+        `${page}: ${file}#${match[2]} does not match any heading or id`,
+      );
+    }
+  }
 }
 
 const cliSource = read('gateway/src/main.rs');
@@ -251,12 +294,19 @@ function usedSubcommands(text, label) {
 }
 usedSubcommands(html['index.html'], 'index.html');
 usedSubcommands(readme, 'README.md');
+for (const name of readdirSync(join(ROOT, 'docs'))) {
+  if (name.endsWith('.md')) usedSubcommands(read(join('docs', name)), `docs/${name}`);
+}
 
-const readmeCommands = readme
-  .split('\n')
-  .map(normalizeCommand)
-  .filter((line) => /^(?:pinkcollab|npm|cargo|npx|\.\/target)/.test(line))
-  .join('\n');
+function commandLines(text) {
+  return text
+    .split('\n')
+    .map(normalizeCommand)
+    .filter((line) => /^(?:pinkcollab|npm|cargo|npx|\.\/target)/.test(line));
+}
+
+const installDoc = read('docs/getting-started.md');
+const buildDoc = read('docs/development.md');
 for (const block of html['index.html'].matchAll(/<code id="command-[^"]+">([\s\S]*?)<\/code>/g)) {
   const lines = block[1]
     .replace(/&lt;/g, '<')
@@ -266,9 +316,11 @@ for (const block of html['index.html'].matchAll(/<code id="command-[^"]+">([\s\S
     .map(normalizeCommand)
     .filter((line) => /^(?:pinkcollab|npm|cargo|npx)/.test(line));
   for (const line of lines) {
+    const authority = /^cargo\b/.test(line) ? buildDoc : installDoc;
+    const label = /^cargo\b/.test(line) ? 'docs/development.md' : 'docs/getting-started.md';
     check(
-      readmeCommands.includes(line),
-      `index.html install text "${line}" is not documented in README.md`,
+      commandLines(authority).includes(line),
+      `index.html command "${line}" is not documented in ${label}`,
     );
   }
 }
@@ -276,11 +328,22 @@ for (const block of html['index.html'].matchAll(/<code id="command-[^"]+">([\s\S
 const rustVersion = /rust-version\s*=\s*"([\d.]+)"/.exec(read('gateway/Cargo.toml'))?.[1];
 check(Boolean(rustVersion), 'gateway/Cargo.toml: no rust-version to compare against');
 if (rustVersion) {
-  for (const [label, source] of [['index.html', html['index.html']], ['README.md', readme]]) {
+  for (const [label, source, required] of [
+    ['index.html', html['index.html'], true],
+    ['docs/development.md', buildDoc, true],
+    ['README.md', readme, false],
+  ]) {
     const claimed = [...source.matchAll(/Rust (\d+\.\d+)\+/g)].map((m) => m[1]);
-    check(claimed.length > 0, `${label}: does not state the required Rust version`);
+    if (required) check(claimed.length > 0, `${label}: does not state the required Rust version`);
     for (const version of claimed) {
       check(version === rustVersion, `${label}: claims Rust ${version}+ but Cargo.toml requires ${rustVersion}`);
+    }
+  }
+  for (const name of readdirSync(join(ROOT, 'docs'))) {
+    if (!name.endsWith('.md') || name === 'development.md') continue;
+    const source = read(join('docs', name));
+    for (const version of [...source.matchAll(/Rust (\d+\.\d+)\+/g)].map((m) => m[1])) {
+      check(version === rustVersion, `docs/${name}: claims Rust ${version}+ but Cargo.toml requires ${rustVersion}`);
     }
   }
 }

@@ -76,8 +76,8 @@
       <div class="principles-strip"><p>One phone.<br><strong>Every workspace.</strong></p><span>Start the work</span><span>Make the call</span><span>Keep it moving <b aria-hidden="true">↗</b></span></div>
       <section class="workflow section" id="how-it-works" aria-labelledby="workflow-title">
         <div class="section-heading"><p class="eyebrow">FROM YOUR DESK TO YOUR POCKET</p><h2 id="workflow-title">Three steps to a running task.</h2><p>Named exactly as they appear in the Android app.</p></div>
-        <div class="steps"><article><span class="step-number">01</span><h3>Choose a workspace.</h3><p>Open <strong>Workspaces</strong>, browse the roots a paired host allows, and pick the project directory you want to work in.</p></article><article><span class="step-number">02</span><h3>Send the first prompt.</h3><p>Your prompt spawns <code>omp --mode rpc-ui</code> inside that directory. The task joins the list right away with its live status.</p></article><article><span class="step-number">03</span><h3>Follow and steer.</h3><p>Watch streaming replies and tool activity, then use <strong>Prompt / Steer</strong>, <strong>Interrupt</strong>, or <strong>Stop</strong> — from wherever you are.</p></article></div>
-        <p class="steps-note">No terminal emulator, no editor: PinkCollab is the bridge to the OMP process already running on your host.</p>
+        <div class="steps"><article><span class="step-number">01</span><h3>Choose a workspace.</h3><p>Open <strong>Workspaces</strong>, browse the roots a paired host allows, and pick the project directory you want to work in.</p></article><article><span class="step-number">02</span><h3>Send the first prompt.</h3><p>Your prompt spawns <code>omp --mode rpc-ui</code> inside that directory. The task joins the list right away with its live status.</p></article><article><span class="step-number">03</span><h3>Follow and steer.</h3><p>Watch streaming replies and tool activity, then use <strong>Send</strong>, <strong>Interrupt</strong>, or <strong>Stop</strong> while the app is connected.</p></article></div>
+        <p class="steps-note">No terminal emulator, no editor: PinkCollab starts and controls OMP tasks on your host. It does not attach to a session already running in a terminal.</p>
       </section>
       <section class="getting-started section" id="get-started" aria-labelledby="start-title">
         <div class="start-copy">
@@ -89,7 +89,7 @@
             <dt>Gateway install</dt><dd>Node.js 18+ for the npm package; Rust 1.89+ only if building from source. No Rust toolchain is needed for the prebuilt downloads.</dd>
             <dt>Android app</dt><dd>The release APK needs no Android build toolchain. JDK 17+ and Android SDK 36 are only for building the app yourself.</dd>
           </dl>
-          <a class="button button-primary" href="https://github.com/3xian/PinkCollab#quick-start">Read the setup guide <span aria-hidden="true">↗</span></a>
+          <a class="button button-primary" href="https://github.com/3xian/PinkCollab/blob/main/docs/getting-started.md">Read the setup guide <span aria-hidden="true">↗</span></a>
           <a class="build-link" href="https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk">Download the release Android APK <span aria-hidden="true">↗</span></a>
           <span class="build-note">Install the signed APK from the latest GitHub release; <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">Gateway binaries and checksums</a> are available there too. The current Android app requires Gateway protocol version 1; check protocol compatibility when mixing releases. A debug APK may require uninstalling the release app before installation because it uses a different signing key.</span>
         </div>
@@ -149,11 +149,11 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
         <div class="section-heading"><p class="eyebrow">BEFORE YOU START</p><h2 id="limits-title">What PinkCollab does not do yet.</h2><p>So the first surprise isn’t a surprise.</p></div>
         <ul class="limits-list">
           <li><b>Managed, not adopted.</b> A session you started by hand in a terminal cannot be attached; PinkCollab manages the tasks it spawns itself.</li>
-          <li><b>Restarts are not resurrections.</b> Running OMP processes are not restored when the gateway restarts — those tasks show as offline, though their history stays readable.</li>
-          <li><b>Notifications are planned.</b> Android background notifications are not implemented; a task waiting on your input only shows it while the app is open.</li>
+          <li><b>Restarts are not resurrections.</b> Running OMP processes are not restored when the gateway restarts — those tasks show as offline. History can still be read from OMP's session file; the live event stream is not replayed.</li>
+          <li><b>Notifications are not implemented.</b> A task waiting on your input only shows it while the app is open.</li>
           <li><b>No terminal, Git client, code editor, or cloud relay.</b> PinkCollab is a bridge to OMP on your own hosts, not an IDE and not a middleman.</li>
         </ul>
-        <p class="limits-more">Full list in <a class="text-link" href="https://github.com/3xian/PinkCollab#current-limits">Current limits <span aria-hidden="true">↗</span></a></p>
+        <p class="limits-more">Full list in <a class="text-link" href="https://github.com/3xian/PinkCollab/blob/main/README.md#current-limits">Current limits <span aria-hidden="true">↗</span></a></p>
       </section>
       <section class="powered-by section" id="oh-my-pi" aria-labelledby="omp-title">
         <div class="powered-card">
