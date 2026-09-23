@@ -55,4 +55,6 @@ The pairing code lasts five minutes and works once. If it expires, run `pair` ag
 
 If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attribute in the Tailscale admin console, then run it again.
 
-License: MIT.
+## License
+
+[MIT](LICENSE)
