@@ -1,12 +1,12 @@
 <p align="center"><img src="docs/assets/pinkcollab-logo.png" width="96" alt="PinkCollab logo" /></p>
 
-# PinkCollab
+<h1 align="center">PinkCollab</h1>
 
-**Spawn and steer OMP sessions from Android.**
+<p align="center"><strong>Spawn and steer OMP sessions from Android.</strong></p>
 
 The phone follows the session and steps in. [Oh My Pi (OMP)](https://omp.sh/), the project, and the provider credentials stay on your host.
 
-[Get started](docs/getting-started.md) · [Download Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) · [Documentation](docs/README.md)
+[Get started](docs/getting-started.md) · [Download Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) · [Documentation](#docs)
 
 ## Between the phone and OMP
 
@@ -62,6 +62,6 @@ This checkout matches release v0.1.1. An APK and a Gateway from different releas
 <a id="validation"></a>
 <a id="project-layout"></a>
 
-Older README section links land here. Their contents now live in the [documentation index](docs/README.md).
+Older README section links land here. Their contents now live in the pages listed under [Docs](#docs).
 
 License: MIT.

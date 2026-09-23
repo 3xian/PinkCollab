@@ -107,7 +107,7 @@ android/app/src/main/java/dev/pinkcollab/   data · ui · ui/theme
 npm/           npm launcher · platform package manifests · release validation
 website/       GitHub Pages site: index.html · styles.css · app.js · assets
 tools/website/ static site check and the social-card builder
-docs/          this documentation set; start at docs/README.md
+docs/          this documentation set; start at getting-started.md
 ```
 
 Next: [protocol](protocol.md) if the change crosses the HTTP boundary, or [npm-release.md](npm-release.md) if you are the person cutting a tag.
