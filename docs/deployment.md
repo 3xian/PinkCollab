@@ -1,6 +1,6 @@
 # Deployment and networking
 
-Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. Installation of the first session is [Get started](getting-started.md). Command defaults are in [reference](reference.md).
+Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. Installation of the first session is the [README](../README.md). Command defaults are in [reference](reference.md).
 
 The Gateway always listens on loopback and never terminates TLS. Something in front of it presents HTTPS and forwards to `http://127.0.0.1:8787`.
 
@@ -22,12 +22,12 @@ flowchart LR
 
 ## Choose a front end
 
-The tutorial uses Tailscale Serve. Use the same choice unless you already have a reason not to.
+The [README](../README.md) uses Tailscale Funnel. Serve and your own proxy are the other choices.
 
 | Front end | Who can connect | You need | Tradeoff |
 | --- | --- | --- | --- |
-| **Tailscale Serve** (default) | The phone, at the host's Tailscale HTTPS name | Tailscale on the host | Private. No certificate to install on the Gateway. The phone does not install Tailscale. |
-| **Tailscale Funnel** | The public internet | Funnel allowed for this node | No certificate to install on the Gateway. The endpoint is public; the hostname is not a secret. |
+| **Tailscale Serve** | The phone, at the host's Tailscale HTTPS name | Tailscale on the host | Private. No certificate to install on the Gateway. The phone does not install Tailscale. |
+| **Tailscale Funnel** (default) | The public internet | Funnel allowed for this node | No certificate to install on the Gateway. The endpoint is public; the hostname is not a secret. |
 | **Your own reverse proxy** | Whatever that proxy exposes | A certificate the phone trusts, plus WebSocket and `Authorization` forwarding | Fits an existing HTTPS name. You operate the proxy. |
 
 Only two Gateway keys matter here: `listen` (loopback) and `public_url` (the root the phone dials). Neither Serve nor Funnel is implied by `pinkcollab serve`.
@@ -50,13 +50,13 @@ listen: 127.0.0.1:8787
 public_url: https://<hostname>.ts.net
 ```
 
-Use that `https://<hostname>.ts.net` root with `pinkcollab pair --url`.
+Use that `https://<hostname>.ts.net` root with `pinkcollab pair`.
 
 ## Tailscale Funnel
 
 <a id="tailscale-funnel-public-simplest"></a>
 
-Funnel is the public option, not the default. Tailscale terminates TLS and forwards to the loopback Gateway, so you still do not manage a certificate file yourself. The connection has a certificate. Reachability is not access control.
+Funnel is the public option, and the one the README uses. Tailscale terminates TLS and forwards to the loopback Gateway, so you still do not manage a certificate file yourself. The connection has a certificate. Reachability is not access control.
 
 ```yaml
 listen: 127.0.0.1:8787

@@ -1,6 +1,6 @@
 # Release Android, the Gateway, and npm
 
-Maintainer handbook for publishing one Android APK, five native Gateway binaries, and the npm launcher. It is not an install guide. People installing PinkCollab should follow [Get started](getting-started.md). End users never compile Rust during installation.
+Maintainer handbook for publishing one Android APK, five native Gateway binaries, and the npm launcher. It is not an install guide. People installing PinkCollab should follow the [README](../README.md). End users never compile Rust during installation.
 
 Versions below are placeholders, not the current release.
 

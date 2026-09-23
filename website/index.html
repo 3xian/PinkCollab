@@ -89,7 +89,7 @@
             <dt>Gateway install</dt><dd>Node.js 18+ for the npm package; Rust 1.89+ only if building from source. No Rust toolchain is needed for the prebuilt downloads.</dd>
             <dt>Android app</dt><dd>The release APK needs no Android build toolchain. JDK 17+ and Android SDK 36 are only for building the app yourself.</dd>
           </dl>
-          <a class="button button-primary" href="https://github.com/3xian/PinkCollab/blob/main/docs/getting-started.md">Read the setup guide <span aria-hidden="true">↗</span></a>
+          <a class="button button-primary" href="https://github.com/3xian/PinkCollab/blob/main/README.md">Read the setup guide <span aria-hidden="true">↗</span></a>
           <a class="build-link" href="https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk">Download the release Android APK <span aria-hidden="true">↗</span></a>
           <span class="build-note">Install the signed APK from the latest GitHub release; <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">Gateway binaries and checksums</a> are available there too. The current Android app requires Gateway protocol version 1; check protocol compatibility when mixing releases. A debug APK may require uninstalling the release app before installation because it uses a different signing key.</span>
         </div>
@@ -109,13 +109,13 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
           <div class="install-next">
             <span>Next steps</span>
             <ol class="next-steps">
-              <li>Allow the projects your phone may browse (replace the path), then check the host setup: <code>pinkcollab init --workspace /absolute/path/to/projects</code> and <code>pinkcollab status</code>.</li>
-              <li>Start the Gateway with <code>pinkcollab serve</code>; it keeps running in this terminal.</li>
-              <li>Put an HTTPS front end in front of the loopback Gateway. Run Tailscale on the host — Serve for a private name, Funnel for a public one — or use your own HTTPS reverse proxy. The phone does not install Tailscale. See the deployment guide below.</li>
-              <li>In a second terminal, print a pairing code with <code>pinkcollab pair --url https://gateway.example.com</code>, using your actual HTTPS Gateway URL.</li>
+              <li>Allow a project directory that already exists: <code>pinkcollab init --workspace /absolute/path/to/projects</code>.</li>
+              <li>Publish it with Tailscale Funnel: <code>pinkcollab setup-funnel</code>. Tailscale runs on the host. The phone does not install Tailscale.</li>
+              <li>Start the Gateway with <code>pinkcollab serve</code> and leave that terminal open.</li>
+              <li>In another terminal, print a pairing code with <code>pinkcollab pair</code>.</li>
               <li>Open PinkCollab on Android, scan the code within 5 minutes, choose a workspace, create a session, and send your first prompt.</li>
             </ol>
-            <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>. For a direct download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory. The setup guide covers these paths.</p>
+            <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>. For a direct download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory.</p>
             <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
             <a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment and networking guide <span aria-hidden="true">→</span></a>
           </div>
@@ -153,7 +153,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
           <li><b>Notifications are not implemented.</b> A session waiting on your input only shows it while the app is open.</li>
           <li><b>No terminal, Git client, code editor, or cloud relay.</b> PinkCollab is a bridge to OMP on your own hosts, not an IDE and not a middleman.</li>
         </ul>
-        <p class="limits-more">Full list in <a class="text-link" href="https://github.com/3xian/PinkCollab/blob/main/README.md#current-limits">Current limits <span aria-hidden="true">↗</span></a></p>
+
       </section>
       <section class="powered-by section" id="oh-my-pi" aria-labelledby="omp-title">
         <div class="powered-card">

@@ -2,7 +2,7 @@
 
 This page is for operating sessions after the Gateway is paired. It describes what the Android app actually does. API calls that have no button are named as API-only.
 
-For the first install, use [Get started](getting-started.md). For HTTPS, revocation, and a background service, use [Deployment](deployment.md).
+For the first install, use the [README](../README.md). For HTTPS, revocation, and a background service, use [Deployment](deployment.md).
 
 ## Contents
 

@@ -304,7 +304,7 @@ function commandLines(text) {
     .filter((line) => /^(?:pinkcollab|npm|cargo|npx|\.\/target)/.test(line));
 }
 
-const installDoc = read('docs/getting-started.md');
+const installDoc = read('README.md');
 const buildDoc = read('docs/development.md');
 for (const block of html['index.html'].matchAll(/<code id="command-[^"]+">([\s\S]*?)<\/code>/g)) {
   const lines = block[1]
@@ -316,7 +316,7 @@ for (const block of html['index.html'].matchAll(/<code id="command-[^"]+">([\s\S
     .filter((line) => /^(?:pinkcollab|npm|cargo|npx)/.test(line));
   for (const line of lines) {
     const authority = /^cargo\b/.test(line) ? buildDoc : installDoc;
-    const label = /^cargo\b/.test(line) ? 'docs/development.md' : 'docs/getting-started.md';
+    const label = /^cargo\b/.test(line) ? 'docs/development.md' : 'README.md';
     check(
       commandLines(authority).includes(line),
       `index.html command "${line}" is not documented in ${label}`,

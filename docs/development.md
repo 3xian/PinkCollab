@@ -14,7 +14,7 @@ Build and test PinkCollab from this repository. Installing a release APK or the 
 
 | You are… | You need | You do not need |
 | --- | --- | --- |
-| Installing the release app and Gateway | The steps in [Get started](getting-started.md) | Rust, a JDK, or the Android SDK |
+| Installing the release app and Gateway | The steps in the [README](../README.md) | Rust, a JDK, or the Android SDK |
 | Changing the Android client | JDK 17 or newer, Android SDK 36, and a Gateway that speaks protocol 1 | To publish npm packages |
 | Changing the Gateway | Rust 1.89+ | The Android SDK, unless you are also changing the app |
 | Checking the website | Node.js 18 or newer, and Chrome or Chromium for the browser checks | A Rust compile, unless you are also changing the Gateway |
@@ -107,7 +107,7 @@ android/app/src/main/java/dev/pinkcollab/   data · ui · ui/theme
 npm/           npm launcher · platform package manifests · release validation
 website/       GitHub Pages site: index.html · styles.css · app.js · assets
 tools/website/ static site check and the social-card builder
-docs/          this documentation set; start at getting-started.md
+docs/          further reading; install and first use are in the repository README
 ```
 
 Next: [protocol](protocol.md) if the change crosses the HTTP boundary, or [npm-release.md](npm-release.md) if you are the person cutting a tag.

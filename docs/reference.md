@@ -2,7 +2,7 @@
 
 Authoritative reference for the `pinkcollab` command and `config.yaml`. Defaults and rejections below match `gateway/src/main.rs`, `gateway/src/admin.rs`, and `gateway/src/config.rs` in this checkout, which is the same Gateway source as release v0.1.1.
 
-This page is not an install guide. First-run steps are in [Get started](getting-started.md). Network setup is in [Deployment](deployment.md).
+This page is not an install guide. First-run steps are in the [README](../README.md). Network setup is in [Deployment](deployment.md).
 
 ## Contents
 
