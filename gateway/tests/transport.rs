@@ -190,10 +190,9 @@ fn unix_child_running(pid: i32) -> bool {
         let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
             return false;
         };
-        return stat
-            .rsplit_once(") ")
+        stat.rsplit_once(") ")
             .and_then(|(_, fields)| fields.split_whitespace().next())
-            .is_some_and(|state| state != "Z" && state != "X");
+            .is_some_and(|state| state != "Z" && state != "X")
     }
     #[cfg(not(target_os = "linux"))]
     {
