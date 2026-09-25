@@ -6,6 +6,7 @@ pub mod history;
 pub mod model;
 pub mod omp;
 pub mod storage;
+pub mod uploads;
 pub mod v2_model;
 pub mod v2_runtime;
 #[cfg(windows)]

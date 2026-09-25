@@ -3,10 +3,14 @@ package dev.pinkcollab.ui
 import android.graphics.Typeface
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -16,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.PauseCircleOutline
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Tune
@@ -53,7 +59,7 @@ internal fun SessionPage(
     host: HostState?,
     busy: Boolean,
     onRetry: () -> Unit,
-    onPrompt: (String, () -> Unit) -> Unit,
+    onPrompt: (String, List<SelectedFile>, () -> Unit) -> Unit,
     onCommand: (String) -> Unit,
     onRespond: (JSONObject) -> Unit,
     modelState: LoadState<ModelCatalog>?,
@@ -79,6 +85,19 @@ internal fun SessionPage(
     val markwon = remember(context) { Markwon.create(context) }
     val session = detail.session
     var prompt by rememberSaveable(session.id) { mutableStateOf("") }
+    val selectedFiles = remember(session.id) { mutableStateListOf<SelectedFile>() }
+    var fileError by remember(session.id) { mutableStateOf<String?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        fileError = null
+        for (uri in uris) {
+            if (selectedFiles.any { it.uri == uri }) continue
+            if (selectedFiles.size >= 5) {
+                fileError = "Up to 5 files per message"
+                break
+            }
+            selectedFiles += selectedFile(context, uri)
+        }
+    }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
     var showStopConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     var showSavedHistory by rememberSaveable(session.id) { mutableStateOf(false) }
@@ -91,7 +110,7 @@ internal fun SessionPage(
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
     val inputEnabled = host?.connected == true && !busy && session.attention == null && session.status != "starting" && session.status != "stopping" && (!session.runtimeAttached || session.runtimeExecution != "unknown")
-    val canSend = prompt.isNotBlank() && inputEnabled
+    val canSend = (prompt.isNotBlank() || selectedFiles.isNotEmpty()) && inputEnabled
     var inputFocused by remember { mutableStateOf(false) }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
     LaunchedEffect(timelineState) {
@@ -250,32 +269,51 @@ internal fun SessionPage(
                 .border(width = 1.dp, brush = composerBorder, shape = composerShape)
                 .padding(start = 16.dp, end = 8.dp, top = 15.dp, bottom = 8.dp),
         ) {
-            BasicTextField(
-                value = prompt,
-                onValueChange = { prompt = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 58.dp, max = 144.dp)
-                    .onFocusChanged { inputFocused = it.isFocused },
-                enabled = inputEnabled,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
-                ),
-                cursorBrush = SolidColor(Purple400),
-                maxLines = 5,
-                decorationBox = { innerTextField ->
-                    Box(Modifier.fillMaxWidth()) {
-                        if (prompt.isEmpty()) {
-                            Text(
-                                placeholder,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
-                            )
+            Row(verticalAlignment = Alignment.Top) {
+                BasicTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 58.dp, max = 144.dp)
+                        .onFocusChanged { inputFocused = it.isFocused },
+                    enabled = inputEnabled,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
+                    ),
+                    cursorBrush = SolidColor(Purple400),
+                    maxLines = 5,
+                    decorationBox = { innerTextField ->
+                        Box(Modifier.fillMaxWidth()) {
+                            if (prompt.isEmpty()) {
+                                Text(
+                                    placeholder,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
+                                )
+                            }
+                            innerTextField()
                         }
-                        innerTextField()
+                    },
+                )
+                IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = inputEnabled && selectedFiles.size < 5) {
+                    Icon(Icons.Outlined.AttachFile, contentDescription = "Attach files")
+                }
+            }
+            if (selectedFiles.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    selectedFiles.forEach { file ->
+                        InputChip(
+                            selected = true,
+                            enabled = inputEnabled,
+                            onClick = { selectedFiles.remove(file) },
+                            label = { Text(file.name, maxLines = 1) },
+                            trailingIcon = { Icon(Icons.Outlined.Close, contentDescription = "Remove ${file.name}", modifier = Modifier.size(14.dp)) },
+                        )
                     }
-                },
-            )
+                }
+            }
+            fileError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             // The composer keeps the divider's clearance as plain spacing: the text field and the
             // action row read as one surface without a line cutting through the pill and buttons.
             Spacer(Modifier.height(11.dp))
@@ -316,7 +354,7 @@ internal fun SessionPage(
                 )
                 Spacer(Modifier.weight(1f))
                 ComposerSendButton(
-                    onClick = { onPrompt(prompt) { prompt = "" } },
+                    onClick = { onPrompt(prompt, selectedFiles.toList()) { prompt = ""; selectedFiles.clear(); fileError = null } },
                     enabled = canSend,
                 )
             }

@@ -1076,6 +1076,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-server",
+ "base64",
  "chrono",
  "clap",
  "dirs",

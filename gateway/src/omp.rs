@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 /// Framing limit for a single NDJSON frame in either direction. This is PinkCollab's own bound:
 /// an OMP frame that exceeds it ends the session instead of being buffered without limit.
-const MAX_LINE: usize = 1024 * 1024;
+pub const MAX_LINE: usize = 1024 * 1024;
 
 /// Upper bound for one blocking stdin write. Pipe buffers are small (64 KiB on Windows) while a
 /// prompt may be 256 KiB, so a wedged OMP must fail the transport instead of stalling it.

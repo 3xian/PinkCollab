@@ -1,5 +1,9 @@
 package dev.pinkcollab.data
 
+import android.content.Context
+import android.net.Uri
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -33,6 +37,32 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
 
     fun error(message: String?) { mutable.update { it.copy(error = message) } }
     private fun paired(id: String) = state.value.hosts[id]?.paired ?: throw IllegalStateException("Host removed")
+
+    suspend fun uploadFile(context: Context, hostId: String, sessionId: String, fileId: String, name: String, uri: Uri) {
+        val bytes = withContext(Dispatchers.IO) {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > 10 * 1024 * 1024) throw IOException("File exceeds the 10 MiB limit")
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            } ?: throw IOException("Cannot open selected file")
+        }
+        require(bytes.isNotEmpty()) { "Empty files cannot be sent" }
+        val host = paired(hostId)
+        val response = try {
+            api.upload(host.url, host.credential, "/api/v2/sessions/$sessionId/files/$fileId", name, bytes)
+        } catch (error: GatewayHttpException) {
+            if (error.statusCode == 404 && error.errorCode.isNullOrBlank()) throw IOException("Update the Gateway to send files", error)
+            throw error
+        }
+        val result = JSONObject(response)
+        require(result.getString("fileId") == fileId) { "Gateway returned a different file ID" }
+    }
 
     suspend fun pair(url: String, token: String) {
         val base = api.validateURL(url)
@@ -232,6 +262,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                 "prompt" -> {
                     val delivery = if (session?.runtimeExecution == "active") "steer" else "start"
                     JSONObject().put("delivery", delivery).put("message", input.getString("message"))
+                        .also { if (input.has("fileIds")) it.put("fileIds", input.getJSONArray("fileIds")) }
                         .also { if (delivery == "steer") it.put("expectedGeneration", requireNotNull(generation) { "Runtime required" }) }
                 }
                 "start" -> JSONObject()

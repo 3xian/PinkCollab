@@ -5,12 +5,13 @@ use parking_lot::Mutex;
 use rand::RngCore;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 pub struct Store {
     db: Mutex<Connection>,
     blocking_slots: Arc<Semaphore>,
+    data_dir: PathBuf,
 }
 /// A device that completed pairing. `created_at` is a Unix timestamp, absent on rows written
 /// before the column existed.
@@ -96,7 +97,11 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         Ok(Self {
             db: Mutex::new(db),
             blocking_slots: Arc::new(Semaphore::new(4)),
+            data_dir: dir.canonicalize()?,
         })
+    }
+    pub fn uploads_dir(&self) -> PathBuf {
+        self.data_dir.join("uploads")
     }
     /// Run SQLite work on a bounded blocking lane so a busy connection never parks a Tokio
     /// worker. The permit is held until the blocking work actually finishes, even if its caller

@@ -4,7 +4,7 @@
 
 <p align="center"><strong>An awesome Android client for Oh My Pi (OMP).</strong></p>
 
-[OMP](https://omp.sh/) runs on a host you own. Start a session from your phone, follow it live, and answer when it needs you.
+[OMP](https://omp.sh/) runs on your computer or server. Use the PinkCollab mobile app to start sessions and steer their progress.
 
 ```mermaid
 flowchart TD

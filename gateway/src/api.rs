@@ -2,12 +2,14 @@ use crate::{
     events::Bus,
     model::Host,
     storage::Store,
+    uploads,
     v2_model::{GATEWAY_PROTOCOL_VERSION, SessionRecord},
     v2_runtime::{Command as V2Command, SessionDirectory, SubmitError},
     workspace::Browser,
 };
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{
         DefaultBodyLimit, Path, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
@@ -15,7 +17,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{any, get, post},
+    routing::{any, get, post, put},
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -40,6 +42,10 @@ pub fn router(app: App) -> Router {
         .route("/api/v2/sessions", get(v2_sessions).post(v2_create))
         .route("/api/v2/sessions/{id}", get(v2_detail))
         .route("/api/v2/sessions/{id}/commands", post(v2_command))
+        .route(
+            "/api/v2/sessions/{id}/files/{file_id}",
+            put(v2_upload).layer(DefaultBodyLimit::max(uploads::MAX_FILE_BYTES)),
+        )
         .route(
             "/api/v2/sessions/{id}/operations/{command_id}",
             get(v2_operation),
@@ -111,7 +117,7 @@ async fn v2_pair(
 }
 async fn v2_host(State(app): State<App>) -> Json<Value> {
     Json(
-        json!({"host":app.host,"protocolVersion":GATEWAY_PROTOCOL_VERSION,"capabilities":{"ompRpcTransport":1,"modelSelection":true,"thinkingLevels":true,"historyPaging":true,"resume":true}}),
+        json!({"host":app.host,"protocolVersion":GATEWAY_PROTOCOL_VERSION,"capabilities":{"ompRpcTransport":1,"modelSelection":true,"thinkingLevels":true,"historyPaging":true,"resume":true,"fileUploads":true}}),
     )
 }
 #[derive(Deserialize)]
@@ -256,6 +262,68 @@ async fn v2_command(
             StatusCode::ACCEPTED
         },
         Json(json!({"operation":submitted.receipt,"receiptStored":submitted.receipt_stored})),
+    ))
+}
+#[derive(Deserialize)]
+struct UploadQuery {
+    name: String,
+}
+async fn v2_upload(
+    State(app): State<App>,
+    Path((id, file_id)): Path<(String, String)>,
+    Query(query): Query<UploadQuery>,
+    bytes: Bytes,
+) -> Result<(StatusCode, Json<Value>), V2Error> {
+    let read_id = id.clone();
+    let exists = app
+        .store
+        .run(move |store| Ok(store.v2_session(&read_id)?.is_some()))
+        .await
+        .map_err(|_| {
+            V2Error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "persistence_unavailable",
+                "Session record unavailable".into(),
+            )
+        })?;
+    if !exists {
+        return Err(V2Error(
+            StatusCode::NOT_FOUND,
+            "session_not_found",
+            "Session not found".into(),
+        ));
+    }
+    let size = bytes.len();
+    let name = query.name;
+    let store = app.store.clone();
+    let saved_file_id = file_id.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        uploads::save(&store, &id, &saved_file_id, &name, &bytes)
+    })
+    .await
+    .map_err(|_| {
+        V2Error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "upload_failed",
+            "Upload worker stopped".into(),
+        )
+    })?;
+    let path = result.map_err(|err| {
+        if err.downcast_ref::<std::io::Error>().is_some() {
+            V2Error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "upload_failed",
+                "Could not store uploaded file".into(),
+            )
+        } else {
+            V2Error(StatusCode::BAD_REQUEST, "invalid_file", err.to_string())
+        }
+    })?;
+    Ok((
+        StatusCode::CREATED,
+        Json(
+            json!({"fileId":file_id,"name":path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),"size":size}),
+        ),
     ))
 }
 async fn v2_operation(

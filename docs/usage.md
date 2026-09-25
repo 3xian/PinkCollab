@@ -8,6 +8,8 @@ Open **Workspaces**, choose a paired host and an allowed directory, then tap **C
 
 When the runtime is working, sending another prompt steers that execution. When OMP confirms it is settled, sending starts a new turn. **Interrupt** asks OMP to abort current work and keeps the process. **Stop** ends the process after confirmation; it preserves the Session and OMP transcript. Sending another prompt after Stop starts a new generation and loads that transcript. A stale Stop or answer cannot target a newer generation.
 
+Tap the paperclip in a session to choose up to five files, then send them with a message or by themselves. Each file can be up to 10 MiB. Files are copied to the Gateway host under its private data directory. For a new turn, OMP reads the uploaded files through file mentions in the prompt. If a prompt is sent while OMP is working, it receives the host paths and small images directly; it can open other files from those paths. The uploaded copies remain on the host after the session ends.
+
 `max_sessions` counts process slots from startup until confirmed process exit, including an attached process whose latest turn has finished. If the limit is reached, stop an attached runtime that is no longer needed. Creating a Session does not consume a slot.
 
 ## Live page and history

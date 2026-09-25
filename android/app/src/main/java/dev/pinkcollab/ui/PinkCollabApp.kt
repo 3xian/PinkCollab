@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -24,11 +25,13 @@ import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
+import org.json.JSONArray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val repo = vm.repository
+    val context = LocalContext.current.applicationContext
     val app by repo.state.collectAsStateWithLifecycle()
     val operations by vm.operations.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
@@ -137,9 +140,10 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             connectHost = { pairHost = PairHostSheetState(visible = true) },
                             loadSession = vm::loadDetail,
                             loadModels = vm::loadModels,
-                            onPrompt = { session, message, onSent ->
+                            onPrompt = { session, message, files, onSent ->
                                 vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.command(session.hostId, session.id, "prompt", JSONObject().put("message", message))
+                                    files.forEach { repo.uploadFile(context, session.hostId, session.id, it.id, it.name, it.uri) }
+                                    repo.command(session.hostId, session.id, "prompt", JSONObject().put("message", message).put("fileIds", JSONArray(files.map { it.id })))
                                     onSent()
                                 }
                             },

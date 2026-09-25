@@ -184,6 +184,13 @@ fn main() {
                 ack(json!({}));
             }
             "prompt" => {
+                if args.iter().any(|arg| arg == "--record-prompt-frame") {
+                    std::fs::write(
+                        std::env::current_dir().unwrap().join("last-prompt.json"),
+                        frame.to_string(),
+                    )
+                    .unwrap();
+                }
                 let message = frame["message"].as_str().unwrap_or_default();
                 if message == "fail" {
                     emit(

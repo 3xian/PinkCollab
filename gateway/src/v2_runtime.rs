@@ -3,6 +3,7 @@ use crate::{
     model::{Attention, ModelInfo, TimelineItem},
     omp::{self, Output, Runtime},
     storage::{self, Store},
+    uploads,
     v2_model::{OperationRecord, RuntimeSnapshot, SessionRecord, SessionView},
     workspace::Browser,
 };
@@ -56,6 +57,8 @@ pub enum Command {
         delivery: Delivery,
         message: String,
         #[serde(default)]
+        file_ids: Vec<String>,
+        #[serde(default)]
         expected_generation: Option<String>,
     },
     Interrupt {
@@ -102,11 +105,17 @@ impl Command {
             Self::Prompt {
                 delivery,
                 message,
+                file_ids,
                 expected_generation,
             } => {
                 ensure!(
-                    !message.trim().is_empty() && message.len() <= 262144,
-                    "message must be 1..262144 bytes"
+                    (!message.trim().is_empty() || !file_ids.is_empty()) && message.len() <= 262144,
+                    "message or files required; message must be at most 262144 bytes"
+                );
+                ensure!(
+                    file_ids.len() <= uploads::MAX_FILES_PER_PROMPT
+                        && file_ids.iter().all(|id| uploads::valid_file_id(id)),
+                    "Invalid file IDs"
                 );
                 if !matches!(delivery, Delivery::Start) {
                     ensure!(
@@ -354,8 +363,38 @@ impl SessionController {
             Command::Prompt {
                 delivery,
                 message,
+                file_ids,
                 expected_generation,
             } => {
+                let store = self.store.clone();
+                let session_id = receipt.session_id.clone();
+                let file_mode = match delivery {
+                    Delivery::Start => uploads::PromptFileMode::Direct,
+                    Delivery::Steer | Delivery::FollowUp => uploads::PromptFileMode::Queued,
+                };
+                let (file_note, images) = tokio::task::spawn_blocking(move || {
+                    uploads::prompt_files(&store, &session_id, &file_ids, file_mode)
+                })
+                .await
+                .map_err(|err| CommandFailure::failed("invalid_file", err.to_string()))?
+                .map_err(|err| CommandFailure::failed("invalid_file", err.to_string()))?;
+                let rpc_id = rpc_id(receipt);
+                let mut frame =
+                    json!({"type":"prompt","message":format!("{message}{file_note}"),"id":rpc_id});
+                if !images.is_empty() {
+                    frame["images"] = json!(images);
+                }
+                match delivery {
+                    Delivery::Start => {}
+                    Delivery::Steer => frame["streamingBehavior"] = json!("steer"),
+                    Delivery::FollowUp => frame["streamingBehavior"] = json!("followUp"),
+                };
+                if serde_json::to_vec(&frame).map_or(true, |bytes| bytes.len() >= omp::MAX_LINE) {
+                    return Err(CommandFailure::failed(
+                        "invalid_request",
+                        "Prompt and attachments exceed OMP input frame limit",
+                    ));
+                }
                 let (generation, runtime) = match delivery {
                     Delivery::Start => self.ensure_runtime().await.map_err(start_failure)?,
                     _ => {
@@ -390,7 +429,6 @@ impl SessionController {
                         ));
                     }
                 }
-                let rpc_id = rpc_id(receipt);
                 let settled_revision = {
                     let mut state = self.state.lock().await;
                     state.pending_prompt_results.insert(
@@ -398,12 +436,6 @@ impl SessionController {
                         (receipt.client_id.clone(), receipt.command_id.clone()),
                     );
                     state.settled_revision
-                };
-                let mut frame = json!({"type":"prompt","message":message});
-                match delivery {
-                    Delivery::Start => {}
-                    Delivery::Steer => frame["streamingBehavior"] = json!("steer"),
-                    Delivery::FollowUp => frame["streamingBehavior"] = json!("followUp"),
                 };
                 let response = runtime.request_with_id(rpc_id.clone(), frame).await;
                 match response {

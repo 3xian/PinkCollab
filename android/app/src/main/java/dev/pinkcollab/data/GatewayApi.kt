@@ -7,6 +7,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.HttpUrl
 import okhttp3.Request
 import okhttp3.Protocol
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -37,12 +38,28 @@ class GatewayApi {
         require(url.isHttps || (BuildConfig.DEBUG && url.host in listOf("localhost", "127.0.0.1", "10.0.2.2"))) { "The Gateway must use HTTPS" }
         return url.toString().trimEnd('/')
     }
-    suspend fun request(url: String, credential: String?, path: String, method: String = "GET", body: JSONObject? = null, query: Pair<String, String>? = null): String = suspendCancellableCoroutine { continuation ->
-        val endpoint = (url + path).toHttpUrl().newBuilder().apply { query?.let { addQueryParameter(it.first, it.second) } }.build()
-        val builder = Request.Builder().url(endpoint)
+    private fun endpoint(url: String, path: String, query: Pair<String, String>?): HttpUrl =
+        (url + path).toHttpUrl().newBuilder().apply { query?.let { addQueryParameter(it.first, it.second) } }.build()
+
+    suspend fun request(url: String, credential: String?, path: String, method: String = "GET", body: JSONObject? = null, query: Pair<String, String>? = null): String {
+        val builder = Request.Builder().url(endpoint(url, path, query))
         credential?.let { builder.header("Authorization", "Bearer $it") }
-        if (method != "GET") builder.method(method, body?.toString()?.toRequestBody("application/json".toMediaType()) ?: "{}".toRequestBody("application/json".toMediaType()))
-        val call = client.newCall(builder.build())
+        if (method != "GET") builder.method(method, (body?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
+        return send(client.newCall(builder.build()))
+    }
+
+    suspend fun upload(url: String, credential: String, path: String, name: String, bytes: ByteArray): String {
+        val request = Request.Builder()
+            .url(endpoint(url, path, "name" to name))
+            .header("Authorization", "Bearer $credential")
+            .put(bytes.toRequestBody("application/octet-stream".toMediaType()))
+            .build()
+        val call = client.newCall(request)
+        call.timeout().timeout(2, TimeUnit.MINUTES)
+        return send(call)
+    }
+
+    private suspend fun send(call: Call): String = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, error: IOException) {
