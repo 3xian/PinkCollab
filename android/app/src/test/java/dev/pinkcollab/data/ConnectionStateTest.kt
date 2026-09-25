@@ -16,7 +16,7 @@ class ConnectionStateTest {
     @Test fun onlySynchronizedConnectionIsOnline() {
         assertFalse(HostState(paired, ConnectionState.Connecting).connected)
         assertFalse(HostState(paired, ConnectionState.Synchronizing).connected)
-        assertFalse(HostState(paired, ConnectionState.Reconnecting(1, 0)).connected)
+        assertFalse(HostState(paired, ConnectionState.Reconnecting).connected)
         assertTrue(HostState(paired, ConnectionState.Online(0)).connected)
     }
 

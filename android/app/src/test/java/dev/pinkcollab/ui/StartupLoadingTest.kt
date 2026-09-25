@@ -62,7 +62,7 @@ class StartupLoadingTest {
 
     @Test
     fun `startup timeout releases the global loading screen`() = runTest {
-        val states = MutableStateFlow(appWithHost(ConnectionState.Reconnecting(4, 1)))
+        val states = MutableStateFlow(appWithHost(ConnectionState.Reconnecting))
         var ready = false
         launch {
             awaitStartupReadiness(states, maximumDurationMillis = 8_000)

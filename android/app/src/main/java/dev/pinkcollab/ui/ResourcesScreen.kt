@@ -1,5 +1,11 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +20,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,11 +53,14 @@ internal fun ResourcesScreen(
             val hostId = host.paired.host.id
             val busy = hostBusy(hostId)
             val activeTasks = host.sessions.count { it.isActive }
+            val connectionPending = host.connection == ConnectionState.Connecting ||
+                host.connection == ConnectionState.Synchronizing ||
+                host.connection == ConnectionState.Reconnecting
             val (connectionLabel, connectionColor) = when (host.connection) {
                 ConnectionState.Connecting -> "Connecting…" to Amber300
                 ConnectionState.Synchronizing -> "Syncing…" to Amber300
                 is ConnectionState.Online -> "Online" to Teal300
-                is ConnectionState.Reconnecting -> "Reconnecting…" to Amber300
+                ConnectionState.Reconnecting -> "Retrying connection…" to Amber300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
                 ConnectionState.UpgradeRequired -> "App update required" to Red400
@@ -114,14 +125,15 @@ internal fun ResourcesScreen(
                         )
                     }
                     Spacer(Modifier.height(12.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                    if (connectionPending) ConnectionFlowLine(connectionColor)
+                    else HorizontalDivider(thickness = 2.dp, color = Color.White.copy(alpha = 0.08f))
                     Spacer(Modifier.height(12.dp))
                     if (host.workspaces.isEmpty()) {
                         Text(
                             when (host.connection) {
                                 ConnectionState.Connecting, ConnectionState.Synchronizing -> "Loading allowed directories"
                                 is ConnectionState.Online -> "No allowed directories"
-                                is ConnectionState.Reconnecting -> "Reconnecting to load allowed directories"
+                                ConnectionState.Reconnecting -> "Can't reach this host. Retrying automatically."
                                 is ConnectionState.Offline -> "Reconnect this host to load its directories"
                                 ConnectionState.AuthenticationRequired -> "Pair this host again to load its directories"
                                 ConnectionState.UpgradeRequired -> "Update PinkCollab to load directories"
@@ -167,6 +179,35 @@ internal fun ResourcesScreen(
                 }
             },
             dismissButton = { TextButton(onClick = rememberHapticOnClick { hostPendingRemoval = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun ConnectionFlowLine(color: Color) {
+    val transition = rememberInfiniteTransition(label = "hostConnection")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1_800, easing = LinearEasing)),
+        label = "connectionFlow",
+    )
+    Canvas(Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(999.dp))) {
+        val streakWidth = size.width * 0.38f
+        val streakStart = -streakWidth + progress * (size.width + streakWidth)
+        drawRect(color.copy(alpha = 0.14f))
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    color.copy(alpha = 0.55f),
+                    Color.White.copy(alpha = 0.95f),
+                    color.copy(alpha = 0.55f),
+                    Color.Transparent,
+                ),
+                start = Offset(streakStart, 0f),
+                end = Offset(streakStart + streakWidth, 0f),
+            ),
         )
     }
 }

@@ -171,7 +171,7 @@ private fun AnimatedStartupLogo() {
             val breath = wave * wave
             val center = Offset(size.width * 0.51f, size.height * 0.5f)
             val radius = size.width * 0.43f * (0.88f + 0.12f * breath)
-            val opacity = 0.34f * (0.58f + 0.42f * breath)
+            val opacity = 0.42f * (0.58f + 0.42f * breath)
             drawCircle(
                 brush = Brush.radialGradient(
                     0f to BrandPink.copy(alpha = opacity),

@@ -52,7 +52,7 @@ class TaskListLoadStateTest {
         assertEquals(
             TaskListLoadState.Unavailable,
             appWithHost(
-                connection = ConnectionState.Reconnecting(5, 1),
+                connection = ConnectionState.Reconnecting,
                 initialSync = InitialSyncState.Unavailable,
             ).taskListLoadState,
         )

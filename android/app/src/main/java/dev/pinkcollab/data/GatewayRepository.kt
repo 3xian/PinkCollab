@@ -113,7 +113,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     }
 
     fun reconnectUnavailableHosts() {
-        state.value.hosts.values.filter { it.connection is ConnectionState.Reconnecting || it.connection is ConnectionState.Offline }.forEach { connect(it.paired) }
+        state.value.hosts.values.filter { it.connection == ConnectionState.Reconnecting || it.connection is ConnectionState.Offline }.forEach { connect(it.paired) }
     }
 
     fun networkUnavailable() {

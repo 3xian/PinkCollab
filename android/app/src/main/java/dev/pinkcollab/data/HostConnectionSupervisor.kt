@@ -91,8 +91,10 @@ internal class HostConnectionSupervisor(
             job = scope.launch {
                 var failedAttempts = 0
                 while (isActive && isCurrent(currentGeneration)) {
-                    emitState(currentGeneration, ConnectionState.Connecting)
-                    val disconnect = awaitSocket(currentGeneration)
+                    // Keep the retry status visible until a fresh snapshot arrives.
+                    val initialAttempt = failedAttempts == 0
+                    if (initialAttempt) emitState(currentGeneration, ConnectionState.Connecting)
+                    val disconnect = awaitSocket(currentGeneration, initialAttempt)
                     if (!isCurrent(currentGeneration)) return@launch
                     if (disconnect.authenticationRequired) {
                         emitState(currentGeneration, ConnectionState.AuthenticationRequired)
@@ -104,13 +106,7 @@ internal class HostConnectionSupervisor(
                     }
                     failedAttempts = if (disconnect.hadSnapshot) 1 else failedAttempts + 1
                     val retryDelay = retryDelayMillis(failedAttempts)
-                    emitState(
-                        currentGeneration,
-                        ConnectionState.Reconnecting(
-                            attempt = failedAttempts,
-                            nextRetryEpochMillis = System.currentTimeMillis() + retryDelay,
-                        ),
-                    )
+                    emitState(currentGeneration, ConnectionState.Reconnecting)
                     delay(retryDelay)
                 }
             }
@@ -154,7 +150,7 @@ internal class HostConnectionSupervisor(
             }
         }
 
-        private suspend fun awaitSocket(expectedGeneration: Long): Disconnect =
+        private suspend fun awaitSocket(expectedGeneration: Long, initialAttempt: Boolean): Disconnect =
             suspendCancellableCoroutine { continuation ->
                 val hadSnapshot = AtomicBoolean()
                 val socket = api.client.newWebSocket(
@@ -168,7 +164,7 @@ internal class HostConnectionSupervisor(
                                 webSocket.cancel()
                                 return
                             }
-                            emitState(expectedGeneration, ConnectionState.Synchronizing)
+                            if (initialAttempt) emitState(expectedGeneration, ConnectionState.Synchronizing)
                             synchronized(lock) {
                                 socket = webSocket
                                 desiredSessions[paired.host.id]?.forEach(::subscribe)
