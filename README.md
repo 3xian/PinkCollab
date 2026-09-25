@@ -2,7 +2,7 @@
 
 <h1 align="center">PinkCollab</h1>
 
-<p align="center"><strong>An Awesome Android client for Oh My Pi (OMP).</strong></p>
+<p align="center"><strong>An awesome Android client for Oh My Pi (OMP).</strong></p>
 
 [OMP](https://omp.sh/) runs on a host you own. Start a session from your phone, follow it live, and answer when it needs you.
 
