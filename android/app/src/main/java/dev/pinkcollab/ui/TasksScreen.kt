@@ -209,6 +209,7 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
             ) {
                 Text(
                     "Bring OMP to your phone",
+                    modifier = Modifier.brandGradientMask(),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
