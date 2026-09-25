@@ -24,6 +24,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.*
@@ -41,7 +42,28 @@ internal fun ResourcesScreen(
     var hostPendingRemoval by remember { mutableStateOf<Host?>(null) }
 
     if (app.hosts.isEmpty()) {
-        EmptyState("No workspaces yet", "Connect a host to see the project directories it allows.", "Connect host", pair)
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 32.dp).padding(top = 80.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "No workspaces yet",
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Connect a host to see the project directories it allows.",
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(24.dp))
+            PrimaryButton(onClick = pair) { Text("Connect host") }
+        }
         return
     }
     LazyColumn(

@@ -73,6 +73,7 @@ internal fun TasksScreen(
         TasksTopBar(
             activeTaskCount = sessions.count { it.isActive },
             taskCount = sessions.size,
+            showWorkspaces = app.hosts.isNotEmpty(),
             openResources = openResources,
         )
         TasksPagerBar(
@@ -237,17 +238,21 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                PrimaryButton(
-                    onClick = connectHost,
+                Button(
+                    onClick = rememberHapticOnClick(connectHost),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF6846B2),
+                        contentColor = Color.White,
+                    ),
                 ) {
                     Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                     Spacer(Modifier.width(9.dp))
-                    Text("Connect your OMP host")
+                    Text("Connect OMP host")
                 }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "You can scan a QR code or enter the connection details manually.",
+                    "You can scan a QR code or enter info manually.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Gray400,
                     textAlign = TextAlign.Center,
@@ -290,6 +295,7 @@ private fun PairingStepRow(number: Int, step: PairingStep) {
 private fun TasksTopBar(
     activeTaskCount: Int,
     taskCount: Int,
+    showWorkspaces: Boolean,
     openResources: () -> Unit,
 ) {
     Row(
@@ -328,34 +334,36 @@ private fun TasksTopBar(
             style = MaterialTheme.typography.labelMedium,
             color = TextMid,
         )
-        TextButton(
-            onClick = rememberHapticOnClick(openResources),
-            contentPadding = PaddingValues(0.dp),
-        ) {
-            Row(
-                Modifier
-                    .height(30.dp)
-                    .background(Color.White.copy(alpha = 0.065f), RoundedCornerShape(50))
-                    .padding(horizontal = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        if (showWorkspaces) {
+            TextButton(
+                onClick = rememberHapticOnClick(openResources),
+                contentPadding = PaddingValues(0.dp),
             ) {
                 Row(
-                    Modifier.brandGradientMask(),
+                    Modifier
+                        .height(30.dp)
+                        .background(Color.White.copy(alpha = 0.065f), RoundedCornerShape(50))
+                        .padding(horizontal = 9.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        Icons.Outlined.FolderOpen,
-                        contentDescription = null,
-                        Modifier.size(16.dp),
-                        tint = Color.White,
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        "Workspaces",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White,
-                    )
+                    Row(
+                        Modifier.brandGradientMask(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.FolderOpen,
+                            contentDescription = null,
+                            Modifier.size(16.dp),
+                            tint = Color.White,
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "Workspaces",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White,
+                        )
+                    }
                 }
             }
         }

@@ -3,6 +3,7 @@ package dev.pinkcollab.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -18,7 +19,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Listing
-import dev.pinkcollab.ui.theme.GlowBackground
+import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.CancellationException
@@ -88,8 +89,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
         ) { ready ->
             if (!ready) {
                 StartupLoadingScreen()
-            } else Box(Modifier.fillMaxSize()) {
-            GlowBackground(Modifier.matchParentSize())
+            } else Box(Modifier.fillMaxSize().background(Base0)) {
             Scaffold(
                 containerColor = Color.Transparent,
                 contentColor = MaterialTheme.colorScheme.onBackground,

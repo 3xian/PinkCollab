@@ -26,7 +26,7 @@ class StartupLoadingTest {
     )
 
     @Test
-    fun `ready state releases startup immediately`() = runTest {
+    fun `ready state keeps startup visible for three seconds`() = runTest {
         val states = MutableStateFlow(AppState())
         var ready = false
         launch {
@@ -34,6 +34,12 @@ class StartupLoadingTest {
             ready = true
         }
 
+        runCurrent()
+        assertFalse(ready)
+        advanceTimeBy(2_999)
+        runCurrent()
+        assertFalse(ready)
+        advanceTimeBy(1)
         runCurrent()
         assertTrue(ready)
     }
@@ -47,6 +53,33 @@ class StartupLoadingTest {
             ready = true
         }
 
+        runCurrent()
+        assertFalse(ready)
+
+        states.value = appWithHost(
+            connection = ConnectionState.Online(1),
+            lastSyncedAtEpochMillis = 1,
+            initialSync = InitialSyncState.Ready,
+        )
+        runCurrent()
+        assertFalse(ready)
+        advanceTimeBy(3_000)
+        runCurrent()
+
+        assertTrue(ready)
+    }
+
+    @Test
+    fun `snapshot arriving after three seconds releases startup without extra delay`() = runTest {
+        val states = MutableStateFlow(appWithHost(ConnectionState.Synchronizing))
+        var ready = false
+        launch {
+            awaitStartupReadiness(states, maximumDurationMillis = 8_000)
+            ready = true
+        }
+
+        runCurrent()
+        advanceTimeBy(5_000)
         runCurrent()
         assertFalse(ready)
 
@@ -87,6 +120,9 @@ class StartupLoadingTest {
             ready = true
         }
 
+        runCurrent()
+        assertFalse(ready)
+        advanceTimeBy(3_000)
         runCurrent()
         assertTrue(ready)
 

@@ -154,13 +154,14 @@ private fun PairHostSheet(
     ) {
         Column {
             Text(
-                "Connect your OMP host",
+                "Connect OMP host",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
+                color = Color.White,
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Run the pair command on the host and scan the QR code it prints. The code expires in 5 minutes.",
+                "Run the pair command on the host and scan the QR code it prints. Expires in 5 minutes.",
                 color = TextMid,
             )
         }

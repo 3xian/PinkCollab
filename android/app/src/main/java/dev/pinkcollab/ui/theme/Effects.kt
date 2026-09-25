@@ -8,7 +8,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -170,45 +169,13 @@ fun Modifier.animatedNoiseGradient(
     }
 }
 
-/** Full-bleed near-black canvas with restrained brand-color glow orbs. */
-@Composable
-fun GlowBackground(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        drawRect(Base0)
-        // Violet bloom anchors the navigation area.
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(BrandPurple.copy(alpha = 0.18f), Color.Transparent),
-                center = Offset(size.width * 0.12f, -size.height * 0.08f),
-                radius = size.minDimension * 1.05f,
-            ),
-        )
-        // Orchid bloom gives the content depth without lifting the black base.
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(BrandPink.copy(alpha = 0.14f), Color.Transparent),
-                center = Offset(size.width * 1.02f, size.height * 0.95f),
-                radius = size.minDimension * 0.95f,
-            ),
-        )
-        // faint deep-purple floor glow at the bottom center
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Purple700.copy(alpha = 0.24f), Color.Transparent),
-                center = Offset(size.width * 0.5f, size.height * 1.12f),
-                radius = size.width * 0.85f,
-            ),
-        )
-    }
-}
-
 /** Brand-gradient hairline: white edges read as grey against the near-black base. */
 private fun edgeBrush(alpha: Float): Brush =
     Brush.linearGradient(listOf(BrandPurple.copy(alpha = alpha), BrandPink.copy(alpha = alpha)))
 
 /**
  * Frosted-glass panel: translucent gradient fill plus a purple→violet hairline border.
- * Drawn over [GlowBackground] it reads as glass without paying per-node blur cost,
+ * Drawn over the dark app background it reads as glass without paying per-node blur cost,
  * which keeps long scrolling lists smooth.
  *
  * The outline is derived from [shape], so pills and cards each get a matching corner
