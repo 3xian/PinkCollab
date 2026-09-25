@@ -57,8 +57,8 @@ android {
         applicationId = "dev.pinkcollab"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1001
-        versionName = "0.1.1"
+        versionCode = 2000
+        versionName = "0.2.0"
     }
     signingConfigs {
         releaseSigning?.let { values ->

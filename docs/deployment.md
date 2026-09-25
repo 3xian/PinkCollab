@@ -1,6 +1,6 @@
 # Deployment and networking
 
-Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. This guide describes the current source checkout (Gateway API v2); released v0.1.1 app and Gateway use API v1 together. First-run steps are in the [README](../README.md), and command defaults are in [reference](reference.md).
+Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. First-run steps are in the [README](../README.md), and command defaults are in [reference](reference.md).
 
 The Gateway always listens on loopback and never terminates TLS. Something in front of it presents HTTPS and forwards to `http://127.0.0.1:8787`.
 
@@ -235,7 +235,6 @@ There is no separate diagnostic subcommand. Use `status` only while the Gateway 
 | `pair` stops before printing a code | Pass `--url https://…`, or set `public_url`. The command will not invent an address. |
 | The phone cannot open the URL | You pasted `127.0.0.1`, Serve or Funnel is not running, or the proxy certificate is not trusted. |
 | Pairing returns invalid or expired | The code is older than five minutes, or a previous attempt already consumed it. Run `pair` again. |
-| The app says the protocol version is unsupported | Use the app and Gateway from the same release, or build both from the current v2 checkout. |
 | Live updates die behind a proxy | The proxy is not forwarding `Upgrade` and `Authorization`. |
 | The service starts, then sessions fail to launch OMP | The service account is wrong, or `PATH` cannot satisfy the OMP launcher even though `omp` is absolute. |
 | An old config fails on startup | Remove `tls_cert` and `tls_key`, and keep `listen` on loopback. |

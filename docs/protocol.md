@@ -1,6 +1,6 @@
 # PinkCollab Gateway API v2
 
-Gateway API v2 is a breaking protocol, independent of OMP's RPC transport version. The Android app and Gateway must both support v2. `/api/v1/*` returns HTTP 426 with `code: protocol_upgrade_required`.
+This API is independent of OMP's RPC transport version.
 
 ## Authentication and errors
 
@@ -62,4 +62,3 @@ OMP's JSONL transcript is the authority. The history source identifies the curre
 
 History pages and live WebSocket updates are separate reads without cross-source atomicity. Android offers a separate saved-history view while attached and pages history automatically when detached. It does not merge OMP file entries into the live tail by guessing whether their text or IDs match. Resume uses the stored server-side OMP mapping, starts a new runtime generation, and never replays old Operations.
 
-On upgrade, SQLite schema v2 retains host identity, paired clients, pairing tokens, session metadata, and the private OMP mapping. It does not migrate old mixed `status` into a runtime fact. A consistent pre-migration backup is created with SQLite `VACUUM INTO`. Stop the old Gateway and its runtimes before starting v2. An unclean exit may leave a conservative runtime lease; v2 refuses a second writer until an operator verifies the old process and descendants are gone and clears the exact lease with the Gateway stopped. Downgrading the database to v1 is unsupported; restore the pre-v2 backup for rollback.

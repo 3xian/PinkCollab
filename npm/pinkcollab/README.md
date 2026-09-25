@@ -11,6 +11,6 @@ pinkcollab serve
 
 Oh My Pi (OMP) remains a separate dependency; `omp --version` must work before the Gateway can run sessions.
 
-The app and Gateway must support the same Gateway API version. Release v0.1.1 uses API v1; the current source checkout uses API v2. Use the matching release APK or build both components from source.
+Install the Android app from the same release as this Gateway package.
 
 Supported targets are macOS arm64/x64, Linux arm64/x64, and Windows x64. The platform binary is delivered through an optional `@pinkcollab/gateway-*` dependency selected by npm.

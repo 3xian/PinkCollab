@@ -1,6 +1,6 @@
 # CLI and configuration
 
-Command and configuration reference for the current source checkout (Gateway API v2). The latest published release is v0.1.1 and uses API v1; its app and Gateway must be used together.
+Command and configuration reference for this release.
 
 This page is not an install guide. First-run steps are in the [README](../README.md). Network setup is in [Deployment](deployment.md).
 

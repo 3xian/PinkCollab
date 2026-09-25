@@ -27,7 +27,7 @@ The supervisor drains OMP output independently of Android and uses a bounded fra
 
 | Data | Authority | Recovery behavior |
 | --- | --- | --- |
-| Host identity, pairing, SessionRecord, OMP mapping, Operation receipt | Gateway SQLite | Preserved across clean restart and v1-to-v2 migration |
+| Host identity, pairing, SessionRecord, OMP mapping, Operation receipt | Gateway SQLite | Preserved across clean restart |
 | Conversation and tool transcript | OMP JSONL session file | Read on demand, by branch-bound pages; never copied into SQLite as another authority |
 | Process state, pending input, current model, live preview | Live OMP process and Gateway memory | Rebuilt from a new snapshot while the process lives; absent after process exit |
 | Android history pages | Local display cache | Valid only for the matching source and subscription |
@@ -36,6 +36,3 @@ An old Session can be resumed by starting a new runtime and loading its server-s
 
 The Gateway tracks `epoch` and `revision` per subscribed resource. The host summary list and each open session detail have separate cursors. Android replaces a resource with its subscription snapshot and accepts only contiguous changes. A reconnect takes a fresh snapshot; there is no persistent event replay. This avoids resolving concurrent REST and WebSocket updates by timestamps.
 
-## Upgrade boundary
-
-Gateway API v1 and Android v1 are incompatible with v2. The database migration creates a consistent pre-v2 backup, keeps identity and credentials, and extracts durable fields from old session JSON. It does not copy v1 runtime status into v2. The OMP session files are not moved or deleted. Stop the old Gateway before migration; restoring the pre-v2 backup is the rollback path for an old binary.

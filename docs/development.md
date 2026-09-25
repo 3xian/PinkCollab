@@ -1,13 +1,13 @@
 # Development
 
-Build and test PinkCollab from this repository. Source builds use Gateway API v2; the published v0.1.1 app and Gateway use API v1. Build both components from this checkout when testing them together. For publishing, use the [release process](npm-release.md).
+Build and test PinkCollab from this repository. Build the app and Gateway from this checkout when testing them together. For publishing, use the [release process](npm-release.md).
 
 ## What you need
 
 | Area | Requirements |
 | --- | --- |
 | Gateway | Rust 1.89+ |
-| Android | JDK 17+, Android SDK 36, and a Gateway with API v2 |
+| Android | JDK 17+ and Android SDK 36 |
 | npm and website checks | Node.js 18+; Chrome or Chromium only when regenerating the social card |
 
 The npm packages ship prebuilt binaries. `npm install -g pinkcollab` does not compile Rust.

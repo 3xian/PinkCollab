@@ -18,10 +18,8 @@ The live projection is a bounded preview. While attached, **Saved history** open
 
 An input card presents OMP's select, confirm, input, or editor request. Only one answer to a request is accepted. The model sheet lists models reported by OMP and separately offers thinking levels. It has no Ctrl+P role or cycle-order rules. Model controls require an attached runtime; opening history does not start one.
 
-## Disconnects and upgrades
+## Disconnects
 
 A phone disconnect does not stop OMP. Reconnecting replaces the list and open-session live views with fresh subscription snapshots. The app does not queue offline prompts. If the Gateway restarts, it does not reattach old processes; the Session and OMP transcript remain. Starting that Session later creates a new runtime generation. An unclean exit can leave a conservative runtime lease. Run `pinkcollab leases`; after stopping the Gateway and verifying the old OMP process and descendants are gone, run `pinkcollab clear-lease --session <id> --generation <generation> --verified-exited`. The exact generation prevents clearing a newer lease by mistake.
-
-Gateway API v2 requires a v2 Android client. An old client receives an upgrade error instead of silently interpreting new data. Pairing and authorization survive database migration. Before installing v2, stop the old Gateway and its OMP runtimes. A consistent pre-v2 SQLite backup is created on first migration; an old Gateway binary cannot be pointed directly at the migrated database. See [architecture](architecture.md) and [protocol](protocol.md).
 
 Removing a host in Android deletes the phone's local connection only. To revoke that device on the Gateway, run `pinkcollab clients` and `pinkcollab revoke --client <clientId>` on the host.
