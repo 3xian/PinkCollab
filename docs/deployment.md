@@ -1,6 +1,6 @@
 # Deployment and networking
 
-Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. Installation of the first session is the [README](../README.md). Command defaults are in [reference](reference.md).
+Choose how a phone reaches the Gateway, how a device is granted and revoked, and how the process stays up. This guide describes the current source checkout (Gateway API v2); released v0.1.1 app and Gateway use API v1 together. First-run steps are in the [README](../README.md), and command defaults are in [reference](reference.md).
 
 The Gateway always listens on loopback and never terminates TLS. Something in front of it presents HTTPS and forwards to `http://127.0.0.1:8787`.
 
@@ -9,24 +9,13 @@ flowchart LR
     A[Phone] -->|HTTPS / WSS| B[TLS terminated in front] -->|HTTP| C[Gateway 127.0.0.1:8787]
 ```
 
-## Contents
-
-- [Choose a front end](#choose-a-front-end)
-- [Tailscale Serve](#tailscale-serve-private)
-- [Tailscale Funnel](#tailscale-funnel)
-- [Your own reverse proxy](#your-own-reverse-proxy)
-- [Pairing and security](#pairing-and-security)
-- [Run as a background service](#run-as-a-background-service)
-- [Updates](#updates)
-- [When something fails](#when-something-fails)
-
 ## Choose a front end
 
 The [README](../README.md) uses Tailscale Funnel. Serve and your own proxy are the other choices.
 
 | Front end | Who can connect | You need | Tradeoff |
 | --- | --- | --- | --- |
-| **Tailscale Serve** | The phone, at the host's Tailscale HTTPS name | Tailscale on the host | Private. No certificate to install on the Gateway. The phone does not install Tailscale. |
+| **Tailscale Serve** | Devices in the same tailnet | Tailscale on the host and phone | Private to the tailnet; no certificate to install on the Gateway. |
 | **Tailscale Funnel** (default) | The public internet | Funnel allowed for this node | No certificate to install on the Gateway. The endpoint is public; the hostname is not a secret. |
 | **Your own reverse proxy** | Whatever that proxy exposes | A certificate the phone trusts, plus WebSocket and `Authorization` forwarding | Fits an existing HTTPS name. You operate the proxy. |
 
@@ -38,7 +27,7 @@ Android release builds require HTTPS. Plain HTTP is accepted only by debug build
 
 ## Tailscale Serve — private
 
-Tailscale runs on the host. Nothing is published to the public internet. Tailscale terminates TLS; you do not install or renew a certificate file on the Gateway. The phone opens the HTTPS URL. It does not install Tailscale.
+Tailscale runs on the host and phone. [Serve is available only within the tailnet](https://tailscale.com/docs/features/tailscale-serve). Tailscale terminates TLS; the Gateway needs no certificate file.
 
 ```sh
 tailscale serve --bg http://127.0.0.1:8787
@@ -231,7 +220,7 @@ launchctl kickstart -k gui/$(id -u)/dev.pinkcollab.gateway
 
 After `npm install -g pinkcollab@latest`, stop the service, repeat the platform-specific copy above, and start it again. For a Gateway built from source, rebuild it ([Development](development.md#build-the-gateway)) and copy the fresh `gateway/target/release/pinkcollab-gateway` over the installed binary.
 
-Identity and credentials survive a binary replacement. They live in SQLite in the data directory, not in the binary. A graceful shutdown stops the OMP runtimes the Gateway started. Starting the new binary does not resume them. Sessions that were live show as offline. See [what a restart restores](architecture.md#what-a-restart-restores).
+Identity and credentials survive a binary replacement in SQLite. A graceful shutdown stops the OMP runtimes the Gateway started. Starting the new binary does not resume them. See [data ownership and recovery](architecture.md#data-ownership-and-recovery).
 
 Configs written before embedded TLS was removed must drop `tls_cert` and `tls_key`. The Gateway rejects a file that still sets them.
 
@@ -246,7 +235,7 @@ There is no separate diagnostic subcommand. Use `status` only while the Gateway 
 | `pair` stops before printing a code | Pass `--url https://…`, or set `public_url`. The command will not invent an address. |
 | The phone cannot open the URL | You pasted `127.0.0.1`, Serve or Funnel is not running, or the proxy certificate is not trusted. |
 | Pairing returns invalid or expired | The code is older than five minutes, or a previous attempt already consumed it. Run `pair` again. |
-| The app says the protocol version is unsupported | The APK and Gateway are not both speaking protocol 1. Use a matching pair. |
+| The app says the protocol version is unsupported | Use the app and Gateway from the same release, or build both from the current v2 checkout. |
 | Live updates die behind a proxy | The proxy is not forwarding `Upgrade` and `Authorization`. |
 | The service starts, then sessions fail to launch OMP | The service account is wrong, or `PATH` cannot satisfy the OMP launcher even though `omp` is absolute. |
 | An old config fails on startup | Remove `tls_cert` and `tls_key`, and keep `listen` on loopback. |

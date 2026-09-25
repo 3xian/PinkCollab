@@ -26,6 +26,8 @@ flowchart TD
 
 ## Install
 
+The latest published release (v0.1.1) uses Gateway API v1. The current source checkout uses API v2. Install the app and Gateway from the same release, or build both from this checkout; do not mix them.
+
 1. **Host:** Node.js 18+. Install Tailscale and allow Funnel for this node.
 2. **Phone:** install the [release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
 

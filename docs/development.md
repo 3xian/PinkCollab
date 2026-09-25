@@ -1,24 +1,14 @@
 # Development
 
-Build and test PinkCollab from this repository. Installing a release APK or the npm Gateway does not require this page. Publishing a release is [npm-release.md](npm-release.md), not a step here.
-
-## Contents
-
-- [What you need](#what-you-need)
-- [Build the Gateway](#build-the-gateway)
-- [Build Android](#build-android)
-- [Validation](#validation)
-- [Project layout](#project-layout)
+Build and test PinkCollab from this repository. Source builds use Gateway API v2; the published v0.1.1 app and Gateway use API v1. Build both components from this checkout when testing them together. For publishing, use the [release process](npm-release.md).
 
 ## What you need
 
-| You are… | You need | You do not need |
-| --- | --- | --- |
-| Installing the release app and Gateway | The steps in the [README](../README.md) | Rust, a JDK, or the Android SDK |
-| Changing the Android client | JDK 17 or newer, Android SDK 36, and a Gateway that speaks protocol 1 | To publish npm packages |
-| Changing the Gateway | Rust 1.89+ | The Android SDK, unless you are also changing the app |
-| Checking the website | Node.js 18 or newer, and Chrome or Chromium for the browser checks | A Rust compile, unless you are also changing the Gateway |
-| Cutting a release | Maintainer credentials and the [release process](npm-release.md) | This page's local commands as a substitute for the workflow |
+| Area | Requirements |
+| --- | --- |
+| Gateway | Rust 1.89+ |
+| Android | JDK 17+, Android SDK 36, and a Gateway with API v2 |
+| npm and website checks | Node.js 18+; Chrome or Chromium only when regenerating the social card |
 
 The npm packages ship prebuilt binaries. `npm install -g pinkcollab` does not compile Rust.
 
@@ -53,9 +43,7 @@ Install that debug APK on a connected phone:
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Windows ADB in this workspace is `F:/AndroidSDK/platform-tools/adb.exe` when it is not on `PATH`. The debug APK is not signed with the release key. Android will not install it over the release app. Uninstall the other signing first. That removes pairings stored on the phone; revoke the device on the host separately.
-
-Phone operations after install — Workspaces, create, steer, Interrupt, Stop — belong in [usage](usage.md), not in this build section.
+The debug APK uses a different signing key from the release app. To switch between them, uninstall the existing app first. This removes pairings stored on the phone; revoke the device on the host separately.
 
 On some Windows/JDK setups Gradle fails with `Unable to establish loopback connection`. Create `C:/tmp` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/tmp`.
 
@@ -110,4 +98,4 @@ website/                         GitHub Pages site: index.html · styles.css · 
 docs/                            further reading; install and first use are in the repository README
 ```
 
-Next: [protocol](protocol.md) if the change crosses the HTTP boundary, or [npm-release.md](npm-release.md) if you are the person cutting a tag.
+For API changes, see the [protocol](protocol.md).

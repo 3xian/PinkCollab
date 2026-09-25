@@ -91,7 +91,7 @@
           </dl>
           <a class="button button-primary" href="https://github.com/3xian/PinkCollab/blob/main/README.md">Read the setup guide <span aria-hidden="true">↗</span></a>
           <a class="build-link" href="https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk">Download the release Android APK <span aria-hidden="true">↗</span></a>
-          <span class="build-note">Install the signed APK from the latest GitHub release; <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">Gateway binaries and checksums</a> are available there too. The current Android app requires Gateway protocol version 1; check protocol compatibility when mixing releases. A debug APK may require uninstalling the release app before installation because it uses a different signing key.</span>
+          <span class="build-note">Install the signed APK and Gateway from the same release; <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">Gateway binaries and checksums</a> are available there too. Release v0.1.1 uses Gateway API v1, while the current source checkout uses API v2. Build both components from source to try v2. A debug APK may require uninstalling the release app first because it uses a different signing key.</span>
         </div>
         <div class="install-panel">
           <div class="install-top"><span class="terminal-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Install the gateway</span></div>
@@ -115,7 +115,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
               <li>In another terminal, print a pairing code with <code>pinkcollab pair</code>.</li>
               <li>Open PinkCollab on Android, scan the code within 5 minutes, choose a workspace, create a session, and send your first prompt.</li>
             </ol>
-            <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>. For a direct download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory.</p>
+            <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>, and build the matching Android app from source. For a direct release download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory.</p>
             <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
             <a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment and networking guide <span aria-hidden="true">→</span></a>
           </div>
@@ -133,7 +133,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
               <div class="arch-runtime">
                 <article class="arch-node"><span class="arch-icon" aria-hidden="true">↔</span><span class="arch-kicker">RUST SERVICE</span><h3>PinkCollab Gateway</h3><p>Auth, sessions, streaming</p></article>
                 <div class="arch-connection arch-connection-inner"><span>spawn</span><i aria-hidden="true"></i><small>NDJSON</small></div>
-                <article class="arch-node arch-omp-node"><span class="arch-icon arch-icon-word" aria-hidden="true">OMP</span><span class="arch-kicker">ONE PROCESS PER SESSION</span><h3>Oh My Pi</h3><p>Plans, tools, coding</p></article>
+                <article class="arch-node arch-omp-node"><span class="arch-icon arch-icon-word" aria-hidden="true">OMP</span><span class="arch-kicker">ONE PROCESS PER ACTIVE SESSION</span><h3>Oh My Pi</h3><p>Plans, tools, coding</p></article>
               </div>
               <div class="arch-local-state"><span class="arch-state-title">Host-local state</span><div><span><b aria-hidden="true">⌁</b>Allowed workspaces</span><span><b aria-hidden="true">◫</b>Session metadata</span><span><b aria-hidden="true">≡</b>OMP session files</span></div></div>
             </div>
@@ -164,9 +164,9 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
             <a class="powered-link" href="https://omp.sh/">Meet Oh My Pi <span aria-hidden="true">↗</span></a>
           </div>
           <ul class="powered-list">
-            <li><b>Real OMP processes.</b> Starting a session from Android spawns <code>omp --mode rpc-ui</code> on the host that owns the code.</li>
+            <li><b>Real OMP processes.</b> Sending the first prompt from Android starts <code>omp --mode rpc-ui</code> on the host that owns the code in the current source version.</li>
             <li><b>Host-side credentials.</b> Configure model provider credentials on the host, not the phone; OMP may transmit them to your provider for model requests.</li>
-            <li><b>Choose your reachability.</b> Run Tailscale on the host and use Serve or Funnel, or use your own HTTPS reverse proxy. The phone does not install Tailscale.</li>
+            <li><b>Choose your reachability.</b> Funnel needs Tailscale on the host; private Serve needs it on the host and phone. You can also use your own HTTPS reverse proxy.</li>
           </ul>
         </div>
       </section>

@@ -1,16 +1,8 @@
 # CLI and configuration
 
-Authoritative reference for the `pinkcollab` command and `config.yaml`. Defaults and rejections below match `gateway/src/main.rs`, `gateway/src/admin.rs`, and `gateway/src/config.rs` in this checkout, which is the same Gateway source as release v0.1.1.
+Command and configuration reference for the current source checkout (Gateway API v2). The latest published release is v0.1.1 and uses API v1; its app and Gateway must be used together.
 
 This page is not an install guide. First-run steps are in the [README](../README.md). Network setup is in [Deployment](deployment.md).
-
-## Contents
-
-- [Invocation](#invocation)
-- [Commands](#commands)
-- [Configuration](#configuration)
-- [Validation](#validation)
-- [Platform differences](#platform-differences)
 
 ## Invocation
 
@@ -41,14 +33,6 @@ The npm package name is `pinkcollab`. The standalone and source-built executable
 | `funnel [--https 443] [--dry-run] [--tailscale <path>] [--pair]` | Publishes the loopback listener with Tailscale Funnel, writes `public_url`, and exits. It does not start the Gateway. With `--pair` it prints a pairing code. `--https` must be 443, 8443, or 10000. `--dry-run` prints the plan and does not change Tailscale or mint a code. `--tailscale` is the CLI path when `tailscale` is not on `PATH`. Requires the node `funnel` attribute; otherwise the Tailscale CLI stops with `Funnel not available; "funnel" node attribute not set`. |
 | `service` | Windows only. Runs under the Service Control Manager. Starting it from a normal terminal fails with `service must be started by the Windows Service Control Manager`. |
 
-### Pairing token
-
-`pair` stores a SHA-256 hash of a 192-bit token (48 hex characters) with a 300-second expiry. A successful `POST /api/v2/pair` deletes that row in the same transaction, so the code works once. A wrong or expired token is rejected and does not become a credential. Generate a new code with `pair` after a failure or expiry.
-
-### `status` is not a health check
-
-`status` refusing to bind means the port is taken or the configuration is invalid. It does not query a running Gateway. Use the foreground log, or the service manager's logs, to see a process that is already up.
-
 ## Configuration
 
 File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/config.example.yaml`](../gateway/config.example.yaml). Unknown keys are rejected. `~` and `~/…` in `workspaces` expand when the file is loaded.
@@ -70,24 +54,7 @@ File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/confi
 
 The limit counts OMP runtimes from startup reservation through confirmed process exit. A SessionRecord without a process uses no slot, while an attached process whose latest turn has finished still uses one.
 
-A completed session whose process has not exited still occupies a slot. The slot is released when the process exits: after **Stop**, after a crash or normal exit, or when a start fails and the runtime is detached. A Gateway restart detaches every restored session, so those rows do not keep occupying slots, and it does not resume the processes.
-
-Creating a session past the limit fails with `OMP runtime limit reached` (HTTP 422).
-
-## Validation
-
-Startup and `init` reject:
-
-- an empty `workspaces` list
-- `max_sessions` outside 1–100
-- a non-loopback `listen` address
-- a `public_url` that is not a bare root URL
-- `omp_args` that override mode or session storage
-- `tls_cert` or `tls_key`
-- unknown fields
-- a workspace path that cannot be canonicalized to a directory
-
-`pair` additionally rejects a non-HTTPS URL unless the host is loopback or `10.0.2.2`.
+A completed session whose process has not exited still occupies a slot. Creating another SessionRecord remains possible at the limit, but starting its runtime or sending its first prompt fails until a slot is free. A restart does not resume OMP processes; unresolved exit leases may still block a session until cleared safely.
 
 ## Platform differences
 

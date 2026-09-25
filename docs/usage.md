@@ -12,7 +12,7 @@ When the runtime is working, sending another prompt steers that execution. When 
 
 ## Live page and history
 
-The session page subscribes to a versioned live view. It shows OMP output, model state, pending questions, and command receipts. `accepted` means Gateway stored the command; `dispatching` means it is entering OMP; `running` means execution is underway. If the result is `outcome_unknown`, inspect the conversation before issuing a new command. Retrying the same action after a network failure uses its original command ID while the app is running.
+The session page subscribes to a versioned live view. It shows OMP output, model state, pending questions, and command receipts. `accepted` means Gateway stored the command; `dispatching` means it is entering OMP; `running` means execution is underway. If the result is `outcome_unknown`, inspect the conversation before issuing a new command. After an uncertain network response or server error, retrying the same action in the running app first checks the original receipt, then resends the original command ID and payload only when safe. If Stop was sent without a stored receipt, inspect the runtime before trying again. Pending commands are not preserved across app restarts.
 
 The live projection is a bounded preview. While attached, **Saved history** opens a separate view of the durable OMP transcript and **Back to live** returns to current output. After the runtime detaches, the app reads saved history automatically. **Load earlier messages** retrieves older pages. A missing or corrupt history file is reported as unavailable. The app does not guess that a live message and a transcript entry are identical based on their text. The live view and saved history can be observed at different moments.
 

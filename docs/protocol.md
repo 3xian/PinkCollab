@@ -30,7 +30,7 @@ Creation body: `{commandId,hostId,cwd,title?}`. The Gateway canonicalizes and ch
 
 ## Commands and receipts
 
-Every command has a client-generated `commandId`, unique within `(clientId,sessionId)`. Retrying the same ID and semantic body returns the current receipt without another dispatch. Receipts are retained with the session management record.
+Every command has a client-generated `commandId`, unique within `(clientId,sessionId)`. Retrying the same ID and semantic body returns the current receipt without another dispatch. Receipts are retained with the session management record. After an uncertain response, the Android client keeps the original ID and serialized payload in memory, looks up the receipt, and resends only that same command when needed. Pending retries do not survive an app restart.
 
 ```json
 {"commandId":"example-1","type":"prompt","delivery":"start","message":"Check the build"}
@@ -46,7 +46,7 @@ Every command has a client-generated `commandId`, unique within `(clientId,sessi
 | `select_model` | `expectedGeneration`, `provider`, `modelId` | Select an OMP model without local role or Ctrl+P interpretation |
 | `set_thinking_level` | `expectedGeneration`, `level` | Set thinking independently; actual state comes from OMP |
 
-Operations progress through `accepted`, `dispatching`, optionally `running`, then `succeeded`, `failed`, `cancelled`, or `outcome_unknown`. `accepted` means a required receipt was persisted, not that OMP received the command. `dispatching` is saved before the external send boundary. After a Gateway restart, accepted commands are cancelled and dispatching/running commands become outcome unknown; neither is automatically replayed. The Gateway cannot promise exactly once execution across a crash. `runtimeGeneration` and `commandId` serve different purposes.
+Operations progress through `accepted`, `dispatching`, optionally `running`, then `succeeded`, `failed`, `cancelled`, or `outcome_unknown`. `accepted` means a required receipt was persisted, not that OMP received the command. `dispatching` is saved before the external send boundary. A Stop response with `receiptStored:false` means termination was requested but no durable receipt exists; clients must verify the runtime state instead of resending Stop automatically. After a Gateway restart, accepted commands are cancelled and dispatching/running commands become outcome unknown; neither is automatically replayed. A late OMP acknowledgement cannot turn an already settled execution back into `active`. The Gateway cannot promise exactly once execution across a crash. `runtimeGeneration` and `commandId` serve different purposes.
 
 ## WebSocket synchronization
 
@@ -58,7 +58,7 @@ Live messages carry IDs scoped to a runtime generation. `v2.timeline.reset` clea
 
 ## History and recovery
 
-OMP's JSONL transcript is the authority. The history source identifies the current branch leaf and content. A cursor binds to that source; if the file or branch changes, the server returns `stale_cursor` and the client restarts pagination. A missing or corrupt mapped file returns `history_unavailable`. A newly created session with no OMP mapping returns an empty page with `source:null`.
+OMP's JSONL transcript is the authority. The history source identifies the current branch leaf and content. A cursor binds to that source; if the file or branch changes, the server returns `stale_cursor` and the client restarts pagination. A missing or corrupt mapped file returns `history_unavailable`. A newly created session with no OMP mapping returns an empty page with `source:null`. `nextCursor:null` means pagination is complete.
 
 History pages and live WebSocket updates are separate reads without cross-source atomicity. Android offers a separate saved-history view while attached and pages history automatically when detached. It does not merge OMP file entries into the live tail by guessing whether their text or IDs match. Resume uses the stored server-side OMP mapping, starts a new runtime generation, and never replays old Operations.
 
