@@ -1,6 +1,64 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      gateway: ${{ steps.scope.outputs.full == 'true' || steps.filter.outputs.gateway == 'true' }}
+      android: ${{ steps.scope.outputs.full == 'true' || steps.filter.outputs.android == 'true' }}
+    steps:
+      - uses: actions/checkout@v5
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 0
+      - name: Check comparison baseline
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          # The PR files API exposes at most 3000 files. An incomplete list must
+          # never make a heavy job look unnecessary.
+          full=true
+          if [[ "$EVENT_NAME" == pull_request && "$PR_CHANGED_FILES" =~ ^[0-9]+$ && "$PR_CHANGED_FILES" -lt 3000 ]]; then
+            full=false
+          elif [[ "$EVENT_NAME" == push && "$BEFORE" =~ ^[0-9a-f]{40}$ && ! "$BEFORE" =~ ^0{40}$ ]] && git cat-file -e "$BEFORE^{commit}"; then
+            full=false
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+      - uses: dorny/paths-filter@v4.0.3
+        id: filter
+        if: steps.scope.outputs.full != 'true'
+        with:
+          base: ${{ github.event_name == 'push' && github.event.before || '' }}
+          filters: |
+            gateway:
+              - 'gateway/**'
+              - '.github/**'
+              - '.gitattributes'
+              - 'docs/protocol.md'
+            android:
+              - 'android/**'
+              - '.github/**'
+              - '.gitattributes'
+              - 'docs/protocol.md'
   npm:
     runs-on: ubuntu-latest
     steps:
@@ -19,6 +77,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/check-website
   gateway:
+    needs: changes
+    if: ${{ needs.changes.outputs.gateway == 'true' }}
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
@@ -37,8 +97,13 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - run: cargo test --all-features --locked
-      - run: cargo build --release --locked --bin pinkcollab-gateway
+      - if: github.event_name == 'pull_request'
+        run: cargo build --locked --bin pinkcollab-gateway
+      - if: github.event_name != 'pull_request'
+        run: cargo build --release --locked --bin pinkcollab-gateway
   android:
+    needs: changes
+    if: ${{ needs.changes.outputs.android == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -67,3 +132,35 @@ jobs:
         with:
           name: pinkcollab-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+  ci-required:
+    name: ci-required
+    needs: [changes, npm, website, gateway, android]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required checks
+        shell: bash
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          NPM_RESULT: ${{ needs.npm.result }}
+          WEBSITE_RESULT: ${{ needs.website.result }}
+          GATEWAY_NEEDED: ${{ needs.changes.outputs.gateway }}
+          GATEWAY_RESULT: ${{ needs.gateway.result }}
+          ANDROID_NEEDED: ${{ needs.changes.outputs.android }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+        run: |
+          for result in "$CHANGES_RESULT" "$NPM_RESULT" "$WEBSITE_RESULT"; do
+            if [[ "$result" != success ]]; then
+              echo "::error::A mandatory CI job ended with $result"
+              exit 1
+            fi
+          done
+          case "$GATEWAY_NEEDED:$GATEWAY_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "::error::Gateway was required=$GATEWAY_NEEDED but ended with $GATEWAY_RESULT"; exit 1 ;;
+          esac
+          case "$ANDROID_NEEDED:$ANDROID_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "::error::Android was required=$ANDROID_NEEDED but ended with $ANDROID_RESULT"; exit 1 ;;
+          esac
