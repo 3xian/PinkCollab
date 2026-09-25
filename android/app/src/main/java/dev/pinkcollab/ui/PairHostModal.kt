@@ -105,7 +105,8 @@ internal fun PairHostModal(
             modifier = Modifier.background(
                 Brush.verticalGradient(
                     0f to Purple700,
-                    0.48f to Color(0xFF1B1123),
+                    0.22f to Color(0xFF1B1123),
+                    0.42f to Base0,
                     1f to Base0,
                 ),
             ),
