@@ -1,131 +1,27 @@
 # Daily use
 
-This page is for operating sessions after the Gateway is paired. It describes what the Android app actually does. API calls that have no button are named as API-only.
+Install and pair as described in the [README](../README.md). The phone keeps its Gateway credential encrypted with Android Keystore; provider credentials stay in OMP on the host.
 
-For the first install, use the [README](../README.md). For HTTPS, revocation, and a background service, use [Deployment](deployment.md).
+## Create and continue a session
 
-## Contents
+Open **Workspaces**, choose a paired host and an allowed directory, then tap **Create session here**. Creation saves a conversation entry without starting OMP or using a process slot. The first prompt starts OMP lazily. **Start** attaches OMP without sending a prompt. Each later prompt can continue the same conversation; an attached process is not required for the conversation to remain available.
 
-- [Create a session](#create-a-session)
-- [Watch it](#watch-it)
-- [Add instructions](#add-instructions)
-- [Answer a question](#answer-a-question)
-- [Change the model](#change-the-model)
-- [Interrupt and Stop](#interrupt-and-stop)
-- [Several hosts](#several-hosts)
-- [After a turn finishes](#after-a-turn-finishes)
-- [After a disconnect or restart](#after-a-disconnect-or-restart)
-- [What the app does not expose](#what-the-app-does-not-expose)
+When the runtime is working, sending another prompt steers that execution. When OMP confirms it is settled, sending starts a new turn. **Interrupt** asks OMP to abort current work and keeps the process. **Stop** ends the process after confirmation; it preserves the Session and OMP transcript. Sending another prompt after Stop starts a new generation and loads that transcript. A stale Stop or answer cannot target a newer generation.
 
-<a id="create-a-task"></a>
-## Create a session
+`max_sessions` counts process slots from startup until confirmed process exit, including an attached process whose latest turn has finished. If the limit is reached, stop an attached runtime that is no longer needed. Creating a Session does not consume a slot.
 
-Open **Workspaces**, pick a paired host, and open an allowed directory. The browser lists child directories. It hides dot-directories and does not run Git or other project inspection. Tap **Create session here**.
+## Live page and history
 
-The app sends `POST /api/v1/sessions` with the host id and directory only. The Gateway starts `omp --mode rpc-ui` in that directory and leaves the session idle until you send a prompt. The title comes from the directory name until a prompt supplies one.
+The session page subscribes to a versioned live view. It shows OMP output, model state, pending questions, and command receipts. `accepted` means Gateway stored the command; `dispatching` means it is entering OMP; `running` means execution is underway. If the result is `outcome_unknown`, inspect the conversation before issuing a new command. Retrying the same action after a network failure uses its original command ID while the app is running.
 
-You cannot point the app at an OMP process you already started in a terminal. PinkCollab manages sessions its Gateway starts.
+The live projection is a bounded preview. While attached, **Saved history** opens a separate view of the durable OMP transcript and **Back to live** returns to current output. After the runtime detaches, the app reads saved history automatically. **Load earlier messages** retrieves older pages. A missing or corrupt history file is reported as unavailable. The app does not guess that a live message and a transcript entry are identical based on their text. The live view and saved history can be observed at different moments.
 
-The directory must sit under a workspace root from `config.yaml`. That allowlist is the Gateway's browse and create boundary. It is not an OS sandbox for OMP.
+An input card presents OMP's select, confirm, input, or editor request. Only one answer to a request is accepted. The model sheet lists models reported by OMP and separately offers thinking levels. It has no Ctrl+P role or cycle-order rules. Model controls require an attached runtime; opening history does not start one.
 
-## Watch it
+## Disconnects and upgrades
 
-Sessions from every paired host appear in one pager, newest first. A page shows the title, status, and host name. Opening a session loads its timeline.
+A phone disconnect does not stop OMP. Reconnecting replaces the list and open-session live views with fresh subscription snapshots. The app does not queue offline prompts. If the Gateway restarts, it does not reattach old processes; the Session and OMP transcript remain. Starting that Session later creates a new runtime generation. An unclean exit can leave a conservative runtime lease. Run `pinkcollab leases`; after stopping the Gateway and verifying the old OMP process and descendants are gone, run `pinkcollab clear-lease --session <id> --generation <generation> --verified-exited`. The exact generation prevents clearing a newer lease by mistake.
 
-Status labels in the app:
+Gateway API v2 requires a v2 Android client. An old client receives an upgrade error instead of silently interpreting new data. Pairing and authorization survive database migration. Before installing v2, stop the old Gateway and its OMP runtimes. A consistent pre-v2 SQLite backup is created on first migration; an old Gateway binary cannot be pointed directly at the migrated database. See [architecture](architecture.md) and [protocol](protocol.md).
 
-| Status | Label | What it means for you |
-| --- | --- | --- |
-| `starting` | Starting | OMP is launching. Commands are not useful yet. |
-| `running` | Running | A turn is in progress. You can steer, interrupt, or stop. |
-| `needs_input` | Needs you | OMP is waiting for an answer. The composer stays disabled until you answer or cancel. |
-| `idle` | Paused | The runtime is still attached, and no turn is running. Send another prompt, or stop. |
-| `completed` | Completed | The agent run ended. The process may still be attached. See below. |
-| `failed` | Failed | The turn or process failed. If the runtime is gone, you cannot prompt this session. |
-| `stopped` | Stopped | You stopped the process, or it exited outside a completed or failed run. No further commands. |
-| `offline` | Offline | The Gateway restarted while this session was live. The process was not restored. |
-
-`runtimeAttached` is the field that decides whether commands can still reach OMP. The app enables the composer only when that flag is true, the host is connected, and no question is pending. The activity string (for example "Interrupted") is not shown; the status label is.
-
-Live replies and tool activity update while the WebSocket is connected. The phone does not keep a private copy of the transcript. Force-closing the app drops the in-memory view; reopening it loads a snapshot and, when needed, the session detail again.
-
-## Add instructions
-
-Type in the composer and tap **Send**. The button label does not change. The placeholder does:
-
-- empty session: "What should OMP do?"
-- status `running`: "Steer OMP…"
-- otherwise: "Send another prompt…"
-
-The Gateway, not the app, sets OMP `streamingBehavior` to `steer` when the status is `running`. Any other attached status starts a new turn. You cannot send a prompt while a question is unanswered.
-
-Steering is useful only while a turn is running. If the session has already completed or gone idle, you are starting another turn, not nudging the one that finished.
-
-## Answer a question
-
-An attention card appears only when this session has a pending input request. The first-session example will not always produce one.
-
-The card covers the request types OMP sends:
-
-- **select** — one button per option. The value must match an option exactly.
-- **confirm** — Confirm or Decline.
-- **input** and **editor** — a text field. Editor uses a taller field.
-- **Cancel** is always available.
-
-After a successful answer the session returns to running. A stale or mismatched request id is rejected; answer the card that is on screen, or reopen the session to refresh it.
-
-## Change the model
-
-**Model** sits in the composer row with Interrupt, Stop, and Send. It is enabled while a runtime is attached. The sheet is a single-choice list in OMP's Ctrl+P order, including role and thinking level. Choosing an entry calls the model-selection API with provider, id, and role. The app does not expose the legacy cycle endpoint.
-
-The list is empty when OMP has no Ctrl+P models configured. Model credentials stay in OMP's host configuration. The phone never asks for them.
-
-## Interrupt and Stop
-
-These are different operations. Do not treat them as two labels for the same stop.
-
-**Interrupt** is enabled while the status is `running` or `needs_input` and the runtime is attached. There is no confirmation dialog. It sends OMP `abort`, moves the session to idle (the app label is Paused), clears a pending question, and leaves the process running. You can send another prompt.
-
-**Stop** is enabled whenever the runtime is attached. The app asks you to confirm. It closes OMP's stdin and terminates the process if it has not exited after three seconds. The session becomes `stopped`, the runtime is detached, and Model, Interrupt, Stop, and Send are disabled. You cannot resume that process. The transcript stays visible.
-
-A Gateway shutdown also stops the OMP processes that Gateway started. That is a host-side stop, not an Interrupt.
-
-## Several hosts
-
-Pair each computer separately. Android lists their sessions in one pager and keeps a connection per host. A host card shows whether that connection is online, reconnecting, offline, or needs pairing again.
-
-Removing a host in the app deletes the saved connection on the phone. The dialog says the host itself will not be changed. To revoke access, run `pinkcollab clients` and `pinkcollab revoke --client <clientId>` on that host. See [pairing and security](deployment.md#pairing-and-security).
-
-There is no multi-user permission model. Each Gateway has one host identity and a list of paired devices.
-
-## After a turn finishes
-
-`completed` means OMP reported `agent_end`. It does not mean the process exited, and it does not by itself free a `max_sessions` slot.
-
-If `runtimeAttached` is still true, Send another prompt. Interrupt stays disabled because the status is no longer `running`. Stop still works.
-
-If the process has exited, the runtime is detached and the composer stays disabled. Create a new session to continue in that project. The old transcript remains readable when the session file is still on the host.
-
-`max_sessions` counts a starting session and every session whose OMP process is still alive. A completed session with a live process still counts. A stopped, failed, or completed session whose process has exited does not. The default limit is 8. The authoritative rule is in [reference](reference.md#max_sessions).
-
-## After a disconnect or restart
-
-These are not the same event.
-
-**The phone loses the network, or you leave the app.** The OMP process keeps running on the host. When the app returns to the foreground, or the network comes back, it reconnects, takes a new snapshot, and reloads an open session. There is no replay of events missed while disconnected, and no system notification that a question arrived. Look at the session.
-
-**The Gateway process restarts.** Running OMP processes are not reattached. Sessions that were `starting`, `running`, `needs_input`, or `idle` become `offline`, with `runtimeAttached` false. `completed`, `failed`, and `stopped` keep those statuses, also detached. Pairings and session metadata remain. History is read on demand from OMP's session file for the current branch, including tool calls and results that file still holds, up to the same 500-item retention as the live timeline. That is not the live event stream. Message deltas, sequence numbers, and anything already trimmed are gone. If the session file is missing, the detail can be empty.
-
-**The host sleeps or shuts down.** PinkCollab does not keep a session running across that. Sleep suspends the machine's processes; shutdown ends them. On the next Gateway start, a session that was live shows as offline. Do not read "history is still there" as "the agent kept working."
-
-A phone-side cache of the transcript is not part of recovery. Only the pairing credential is stored on the device, encrypted by Android. Provider credentials are not.
-
-## What the app does not expose
-
-- Delete a session. `DELETE /api/v1/sessions/:id` exists and removes Gateway metadata only after the runtime is gone. It never deletes OMP's session files. The app has no delete control.
-- Cycle the model with the legacy endpoint. Use the model sheet.
-- Revoke a phone. That is a host command.
-- Attach a terminal session, open a shell, edit code, or operate Git.
-- Background notifications. A waiting input is visible in the open app only.
-
-Protocol details for those API calls are in [protocol](protocol.md).
+Removing a host in Android deletes the phone's local connection only. To revoke that device on the Gateway, run `pinkcollab clients` and `pinkcollab revoke --client <clientId>` on the host.

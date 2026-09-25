@@ -33,11 +33,11 @@ fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
         "{entry}"
     )
     .unwrap();
-    *parent = id;
+    *parent = id.clone();
     emit(
-        json!({"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":text}}),
+        json!({"type":"message_update","messageId":id,"assistantMessageEvent":{"type":"text_delta","delta":text}}),
     );
-    emit(json!({"type":"message_end","message":message}));
+    emit(json!({"type":"message_end","messageId":id,"message":message}));
     emit(json!({"type":"agent_end"}));
 }
 fn main() {
@@ -76,6 +76,11 @@ fn main() {
     let log = std::env::current_dir()
         .unwrap()
         .join("fixture-session.jsonl");
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+        .unwrap();
     let mut parent = String::new();
     let all_models = [
         json!({"provider":"fixture","id":"fast","name":"Fixture Fast"}),
@@ -89,6 +94,7 @@ fn main() {
     };
     let mut model_index = 0;
     let mut thinking_level = "medium".to_owned();
+    let mut pending_prompt_id: Option<Value> = None;
     emit(json!({"type":"ready","protocolVersion":1}));
     // `--stall-stdin` announces itself and then never drains its pipe, so a write larger than the
     // pipe buffer stays blocked exactly as a wedged OMP would leave it.
@@ -110,8 +116,19 @@ fn main() {
         };
         match frame["type"].as_str().unwrap_or_default() {
             "get_state" => ack(
-                json!({"sessionFile":log,"sessionId":"fixture","model":models[model_index],"thinkingLevel":thinking_level}),
+                json!({"sessionFile":log,"sessionId":"fixture","model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none(),"isStreaming":pending_prompt_id.is_some()}),
             ),
+            "get_available_thinking_levels" => ack(json!({"levels":["low","medium","high"]})),
+            "switch_session" => {
+                parent = std::fs::read_to_string(&log)
+                    .unwrap_or_default()
+                    .lines()
+                    .rev()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .find_map(|entry| entry["id"].as_str().map(str::to_owned))
+                    .unwrap_or_default();
+                ack(json!({"cancelled":false}));
+            }
             "cycle_model" => {
                 if models.len() == 1 {
                     ack(Value::Null)
@@ -151,9 +168,13 @@ fn main() {
                 }
                 let id = pinkcollab_gateway::storage::id("message_");
                 writeln!(std::fs::OpenOptions::new().create(true).append(true).open(&log).unwrap(),"{}",json!({"id":id,"parentId":parent,"type":"message","timestamp":chrono::Utc::now(),"message":{"role":"user","content":[{"type":"text","text":message}]}})).unwrap();
-                parent = id;
+                parent = id.clone();
                 ack(json!({}));
+                emit(
+                    json!({"type":"message_end","messageId":id,"message":{"role":"user","content":[{"type":"text","text":message}]}}),
+                );
                 emit(json!({"type":"agent_start"}));
+                pending_prompt_id = frame.get("id").cloned();
                 if message == "need input" {
                     emit(
                         json!({"type":"extension_ui_request","id":"question-1","method":"select","title":"Which API?","options":["compatibility","new"]}),
@@ -166,6 +187,10 @@ fn main() {
                         );
                     } else {
                         finish("Steering accepted", &log, &mut parent);
+                        emit(
+                            json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),
+                        );
+                        pending_prompt_id = None;
                     }
                 } else {
                     emit(
@@ -175,17 +200,31 @@ fn main() {
                         json!({"type":"tool_execution_end","toolCallId":"tool-1","toolName":"bash","result":{"content":[{"type":"text","text":"tests passed"}]}}),
                     );
                     finish("Task complete", &log, &mut parent);
+                    emit(
+                        json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),
+                    );
+                    pending_prompt_id = None;
                 }
             }
             "abort" => {
                 ack(json!({}));
                 emit(json!({"type":"agent_end"}));
+                if let Some(id) = pending_prompt_id.take() {
+                    emit(
+                        json!({"type":"prompt_result","id":id,"agentInvoked":true,"status":"aborted","sessionSettled":true}),
+                    );
+                }
             }
             "extension_ui_response" => {
                 // OMP can also switch models on its own; announce it so the Gateway re-reads its state.
                 model_index = (model_index + 1) % models.len();
                 emit(json!({"type":"model_changed"}));
                 finish("Answer received", &log, &mut parent);
+                if let Some(id) = pending_prompt_id.take() {
+                    emit(
+                        json!({"type":"prompt_result","id":id,"agentInvoked":true,"status":"completed","sessionSettled":true}),
+                    );
+                }
             }
             _ => ack(json!({})),
         }

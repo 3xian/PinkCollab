@@ -52,6 +52,7 @@ internal fun ResourcesScreen(
                 is ConnectionState.Reconnecting -> "Reconnecting…" to Amber300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
+                ConnectionState.UpgradeRequired -> "App update required" to Red400
             }
             Card(
                 Modifier.fillMaxWidth().glassPanel(CardShape),
@@ -123,6 +124,7 @@ internal fun ResourcesScreen(
                                 is ConnectionState.Reconnecting -> "Reconnecting to load allowed directories"
                                 is ConnectionState.Offline -> "Reconnect this host to load its directories"
                                 ConnectionState.AuthenticationRequired -> "Pair this host again to load its directories"
+                                ConnectionState.UpgradeRequired -> "Update PinkCollab to load directories"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = Gray400,

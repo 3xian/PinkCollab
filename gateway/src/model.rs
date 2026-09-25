@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-pub const PROTOCOL_VERSION: u32 = 1;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Host {
@@ -20,25 +19,6 @@ pub struct Attention {
     #[serde(default)]
     pub options: Vec<String>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Session {
-    pub id: String,
-    pub host_id: String,
-    pub cwd: String,
-    pub title: String,
-    pub status: String,
-    pub activity: String,
-    pub needs_attention: bool,
-    #[serde(default)]
-    pub runtime_attached: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attention: Option<Attention>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    #[serde(skip)]
-    pub session_file: String,
-}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
@@ -46,42 +26,7 @@ pub struct ModelInfo {
     pub id: String,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelChoice {
-    pub provider: String,
-    pub id: String,
-    pub name: String,
-    pub role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking_level: Option<String>,
-}
-
-impl ModelChoice {
-    pub fn from_model(model: ModelInfo, role: String, thinking_level: Option<String>) -> Self {
-        Self {
-            provider: model.provider,
-            id: model.id,
-            name: model.name,
-            role,
-            thinking_level,
-        }
-    }
-
-    pub fn active_model(&self, thinking_level: Option<String>) -> ModelInfo {
-        ModelInfo {
-            provider: self.provider.clone(),
-            id: self.id.clone(),
-            name: self.name.clone(),
-            role: Some(self.role.clone()),
-            thinking_level,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -221,13 +166,6 @@ impl TimelineItem {
         update.timestamp = self.timestamp;
         *self = update;
     }
-}
-#[derive(Clone, Debug, Serialize)]
-pub struct Detail {
-    pub session: Session,
-    pub timeline: Vec<TimelineItem>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<ModelInfo>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Event {

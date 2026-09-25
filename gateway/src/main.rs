@@ -6,7 +6,6 @@ use pinkcollab_gateway::{
     events::Bus,
     model::Host,
     omp,
-    session::Registry,
     storage::Store,
     workspace::Browser,
 };
@@ -71,6 +70,17 @@ enum Commands {
         #[arg(long)]
         client: String,
     },
+    /// List conservative runtime leases left by processes that were not confirmed exited.
+    Leases,
+    /// Clear one lease after verifying its OMP process and descendants have exited.
+    ClearLease {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        generation: String,
+        #[arg(long)]
+        verified_exited: bool,
+    },
 }
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -85,6 +95,12 @@ async fn main() -> Result<()> {
         Commands::Clients => admin::clients(&cli.data_dir),
         Commands::Status => admin::status(&cli.data_dir).await,
         Commands::Revoke { client } => admin::revoke(&cli.data_dir, &client),
+        Commands::Leases => admin::leases(&cli.data_dir),
+        Commands::ClearLease {
+            session,
+            generation,
+            verified_exited,
+        } => admin::clear_lease(&cli.data_dir, &session, &generation, verified_exited),
         Commands::Funnel {
             https,
             dry_run,
@@ -115,15 +131,15 @@ async fn serve_until(
     let browser = Arc::new(Browser::new(&config.workspaces)?);
     let host_id = store.host_id()?;
     let bus = Arc::new(Bus::default());
-    let registry = Registry::new(
+    store.recover_operations()?;
+    let v2 = pinkcollab_gateway::v2_runtime::SessionDirectory::new(
         store.clone(),
-        bus.clone(),
         browser.clone(),
-        host_id.clone(),
+        bus.clone(),
         config.omp.clone(),
         config.omp_args.clone(),
         config.max_sessions,
-    )?;
+    );
     let version = omp::version(&config.omp).await;
     let app = api::router(App {
         host: Host {
@@ -136,8 +152,8 @@ async fn serve_until(
         },
         store,
         browser,
-        registry: registry.clone(),
         bus: bus.clone(),
+        v2: v2.clone(),
     });
     let handle = axum_server::Handle::new();
     let server_handle = handle.clone();
@@ -162,13 +178,13 @@ async fn serve_until(
     tokio::pin!(task);
     tokio::select! {
         result = &mut task => {
-            registry.close().await;
+            v2.close().await;
             result??;
         },
         _ = stop => {
             bus.publish("gateway.shutdown", serde_json::json!({}));
             handle.graceful_shutdown(Some(Duration::from_secs(10)));
-            registry.close().await;
+            v2.close().await;
             task.await??;
         },
     }

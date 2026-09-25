@@ -24,6 +24,7 @@ internal class HostConnectionSupervisor(
 ) {
     private val lock = Any()
     private val connections = mutableMapOf<String, HostConnection>()
+    private val desiredSessions = mutableMapOf<String, MutableSet<String>>()
 
     fun connect(paired: PairedHost) {
         synchronized(lock) {
@@ -34,7 +35,37 @@ internal class HostConnectionSupervisor(
     }
 
     fun forget(hostId: String) {
-        synchronized(lock) { connections.remove(hostId)?.stop() }
+        synchronized(lock) { connections.remove(hostId)?.stop(); desiredSessions.remove(hostId) }
+    }
+
+    fun subscribe(hostId: String, sessionId: String) {
+        synchronized(lock) {
+            desiredSessions.getOrPut(hostId) { mutableSetOf() }.add(sessionId)
+            connections[hostId]?.subscribe(sessionId)
+        }
+    }
+
+    fun isDesired(hostId: String, sessionId: String): Boolean =
+        synchronized(lock) { desiredSessions[hostId]?.contains(sessionId) == true }
+
+    fun focus(hostId: String, sessionId: String) {
+        synchronized(lock) {
+            desiredSessions.forEach { (otherHost, sessions) ->
+                sessions.toList().filter { otherHost != hostId || it != sessionId }.forEach { old ->
+                    sessions.remove(old)
+                    connections[otherHost]?.unsubscribe(old)
+                }
+            }
+            desiredSessions.getOrPut(hostId) { mutableSetOf() }.add(sessionId)
+            connections[hostId]?.subscribe(sessionId)
+        }
+    }
+
+    fun unsubscribe(hostId: String, sessionId: String) {
+        synchronized(lock) {
+            desiredSessions[hostId]?.remove(sessionId)
+            connections[hostId]?.unsubscribe(sessionId)
+        }
     }
 
     fun networkUnavailable(hostIds: Collection<String>) {
@@ -44,6 +75,15 @@ internal class HostConnectionSupervisor(
     private inner class HostConnection(private val paired: PairedHost) {
         private val generation = AtomicLong()
         private var job: Job? = null
+        private var socket: WebSocket? = null
+
+        fun subscribe(sessionId: String) {
+            socket?.send(JSONObject().put("type", "subscribe").put("resource", "session/$sessionId").toString())
+        }
+
+        fun unsubscribe(sessionId: String) {
+            socket?.send(JSONObject().put("type", "unsubscribe").put("resource", "session/$sessionId").toString())
+        }
 
         fun start() {
             val currentGeneration = generation.incrementAndGet()
@@ -56,6 +96,10 @@ internal class HostConnectionSupervisor(
                     if (!isCurrent(currentGeneration)) return@launch
                     if (disconnect.authenticationRequired) {
                         emitState(currentGeneration, ConnectionState.AuthenticationRequired)
+                        return@launch
+                    }
+                    if (disconnect.upgradeRequired) {
+                        emitState(currentGeneration, ConnectionState.UpgradeRequired)
                         return@launch
                     }
                     failedAttempts = if (disconnect.hadSnapshot) 1 else failedAttempts + 1
@@ -74,6 +118,8 @@ internal class HostConnectionSupervisor(
 
         fun stop() {
             generation.incrementAndGet()
+            socket?.cancel()
+            socket = null
             job?.cancel()
             job = null
         }
@@ -113,7 +159,7 @@ internal class HostConnectionSupervisor(
                 val hadSnapshot = AtomicBoolean()
                 val socket = api.client.newWebSocket(
                     Request.Builder()
-                        .url(paired.url + "/api/v1/events")
+                        .url(paired.url + "/api/v2/events")
                         .header("Authorization", "Bearer ${paired.credential}")
                         .build(),
                     object : WebSocketListener() {
@@ -123,6 +169,10 @@ internal class HostConnectionSupervisor(
                                 return
                             }
                             emitState(expectedGeneration, ConnectionState.Synchronizing)
+                            synchronized(lock) {
+                                socket = webSocket
+                                desiredSessions[paired.host.id]?.forEach(::subscribe)
+                            }
                         }
 
                         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -135,10 +185,12 @@ internal class HostConnectionSupervisor(
                         }
 
                         override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+                            synchronized(lock) { if (socket === webSocket) socket = null }
                             if (continuation.isActive) {
                                 continuation.resume(
                                     Disconnect(
                                         authenticationRequired = response?.code == 401,
+                                        upgradeRequired = response?.code == 426,
                                         hadSnapshot = hadSnapshot.get(),
                                     ),
                                 )
@@ -150,6 +202,7 @@ internal class HostConnectionSupervisor(
                         }
 
                         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                            synchronized(lock) { if (socket === webSocket) socket = null }
                             if (continuation.isActive) {
                                 continuation.resume(
                                     Disconnect(
@@ -166,6 +219,7 @@ internal class HostConnectionSupervisor(
 
     private data class Disconnect(
         val authenticationRequired: Boolean = false,
+        val upgradeRequired: Boolean = false,
         val hadSnapshot: Boolean = false,
     )
 }

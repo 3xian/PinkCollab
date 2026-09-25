@@ -36,12 +36,14 @@ The npm package name is `pinkcollab`. The standalone and source-built executable
 | `pair [--url <root>] [--qr <file>]` | Mints a single-use pairing token, prints pairing JSON on stdout, and renders a QR on stderr when stderr is a terminal. `--qr` also writes a PNG. `--url` overrides `public_url`. If neither is set, the command fails and tells you to pass `--url` or run `funnel`. It does not guess a Tailscale hostname and does not start HTTPS. The URL must be `https`, or `http` only for `127.0.0.1`, `localhost`, or `10.0.2.2`. |
 | `clients` | Lists paired devices: `clientId`, escaped name, pairing time. Prints `No paired devices.` when the list is empty. |
 | `revoke --client <clientId>` | Deletes that device's credential on the host. Fails when the id is unknown. Does not contact the phone. |
+| `leases` | Lists session IDs and runtime generations whose process exit was not confirmed before a Gateway restart. |
+| `clear-lease --session <id> --generation <generation> --verified-exited` | Clears one exact lease. Requires the Gateway to be stopped; use only after checking the old OMP process and descendants are gone. |
 | `funnel [--https 443] [--dry-run] [--tailscale <path>] [--pair]` | Publishes the loopback listener with Tailscale Funnel, writes `public_url`, and exits. It does not start the Gateway. With `--pair` it prints a pairing code. `--https` must be 443, 8443, or 10000. `--dry-run` prints the plan and does not change Tailscale or mint a code. `--tailscale` is the CLI path when `tailscale` is not on `PATH`. Requires the node `funnel` attribute; otherwise the Tailscale CLI stops with `Funnel not available; "funnel" node attribute not set`. |
 | `service` | Windows only. Runs under the Service Control Manager. Starting it from a normal terminal fails with `service must be started by the Windows Service Control Manager`. |
 
 ### Pairing token
 
-`pair` stores a SHA-256 hash of a 192-bit token (48 hex characters) with a 300-second expiry. A successful `POST /api/v1/pair` deletes that row in the same transaction, so the code works once. A wrong or expired token is rejected and does not become a credential. Generate a new code with `pair` after a failure or expiry.
+`pair` stores a SHA-256 hash of a 192-bit token (48 hex characters) with a 300-second expiry. A successful `POST /api/v2/pair` deletes that row in the same transaction, so the code works once. A wrong or expired token is rejected and does not become a credential. Generate a new code with `pair` after a failure or expiry.
 
 ### `status` is not a health check
 
@@ -66,7 +68,7 @@ File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/confi
 
 ### `max_sessions`
 
-The limit counts sessions whose status is `starting`, plus sessions whose OMP process is still alive. It does not count a session merely because its status is `completed`.
+The limit counts OMP runtimes from startup reservation through confirmed process exit. A SessionRecord without a process uses no slot, while an attached process whose latest turn has finished still uses one.
 
 A completed session whose process has not exited still occupies a slot. The slot is released when the process exits: after **Stop**, after a crash or normal exit, or when a start fails and the runtime is detached. A Gateway restart detaches every restored session, so those rows do not keep occupying slots, and it does not resume the processes.
 

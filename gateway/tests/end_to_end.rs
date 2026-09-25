@@ -4,7 +4,6 @@ use pinkcollab_gateway::{
     api::{self, App},
     events::Bus,
     model::Host,
-    session::{InputResponse, Registry},
     storage::Store,
     workspace::Browser,
 };
@@ -15,9 +14,6 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 struct Harness {
     dir: tempfile::TempDir,
     store: Arc<Store>,
-    registry: Arc<Registry>,
-    browser: Arc<Browser>,
-    bus: Arc<Bus>,
     host: Host,
     url: String,
     server: tokio::task::JoinHandle<()>,
@@ -41,22 +37,20 @@ impl Harness {
             omp_version: "fixture".into(),
             gateway_version: "0.1.0".into(),
         };
-        let registry = Registry::new(
+        let v2 = pinkcollab_gateway::v2_runtime::SessionDirectory::new(
             store.clone(),
-            bus.clone(),
             browser.clone(),
-            host.id.clone(),
+            bus.clone(),
             env!("CARGO_BIN_EXE_omp-fixture").into(),
             args,
             max,
-        )
-        .unwrap();
+        );
         let app = api::router(App {
             host: host.clone(),
             store: store.clone(),
-            browser: browser.clone(),
-            registry: registry.clone(),
-            bus: bus.clone(),
+            browser,
+            bus,
+            v2,
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -66,9 +60,6 @@ impl Harness {
         Self {
             dir,
             store,
-            registry,
-            browser,
-            bus,
             host,
             url,
             server,
@@ -79,50 +70,19 @@ impl Harness {
         std::fs::create_dir_all(&path).unwrap();
         pinkcollab_gateway::workspace::display(&path)
     }
-    fn events_request(
-        &self,
-        credential: Option<&str>,
-    ) -> tokio_tungstenite::tungstenite::http::Request<()> {
-        let mut request = self
-            .url
-            .replace("http://", "ws://")
-            .add_path("/api/v1/events")
-            .into_client_request()
-            .unwrap();
-        if let Some(credential) = credential {
-            request.headers_mut().insert(
-                "Authorization",
-                format!("Bearer {credential}").parse().unwrap(),
-            );
-        }
-        request
-    }
     async fn pair(&self) -> String {
         let token = self.store.new_pairing().unwrap();
         let response = reqwest::Client::new()
-            .post(format!("{}/api/v1/pair", self.url))
+            .post(format!("{}/api/v2/pair", self.url))
             .json(&json!({"token":token,"name":"phone"}))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), 201);
         let body: Value = response.json().await.unwrap();
-        assert_eq!(body["protocolVersion"], 1);
+        assert_eq!(body["protocolVersion"], 2);
         assert_eq!(body["host"]["id"], self.host.id);
         body["credential"].as_str().unwrap().into()
-    }
-    async fn wait_status(&self, id: &str, status: &str) {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let detail = self.registry.detail(id).await.unwrap();
-                if detail.session.status == status {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("session did not enter {status}"));
     }
 }
 impl Drop for Harness {
@@ -131,41 +91,109 @@ impl Drop for Harness {
     }
 }
 
+async fn wait_operation(
+    client: &reqwest::Client,
+    url: &str,
+    credential: &str,
+    status: &str,
+) -> Value {
+    tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let receipt: Value = client
+                .get(url)
+                .bearer_auth(credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if receipt["status"] == status {
+                return receipt;
+            }
+            if ["failed", "outcome_unknown", "cancelled"]
+                .iter()
+                .any(|terminal| receipt["status"] == *terminal)
+            {
+                panic!("unexpected receipt: {receipt}");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
-async fn task_can_start_without_an_initial_prompt() {
-    let h = Harness::new(8).await;
+async fn v2_session_list_pages_by_stable_creation_order() {
+    let h = Harness::new(1).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let cwd = h.cwd("empty-task");
-
-    let response = client
-        .post(format!("{}/api/v1/sessions", h.url))
+    let endpoint = format!("{}/api/v2/sessions", h.url);
+    for number in 0..3 {
+        let response = client
+            .post(&endpoint)
+            .bearer_auth(&credential)
+            .json(&json!({"commandId":format!("create-{number}"),"hostId":h.host.id,"cwd":h.cwd(&format!("page-{number}"))}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 201);
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let mut request = client
+            .get(&endpoint)
+            .bearer_auth(&credential)
+            .query(&[("limit", "1")]);
+        if let Some(value) = cursor.as_deref() {
+            request = request.query(&[("cursor", value)]);
+        }
+        let page: Value = request.send().await.unwrap().json().await.unwrap();
+        let sessions = page["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert!(seen.insert(sessions[0]["session"]["id"].as_str().unwrap().to_owned()));
+        cursor = page["nextCursor"].as_str().map(str::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen.len(), 3);
+    let invalid = client
+        .get(&endpoint)
         .bearer_auth(&credential)
-        .json(&json!({"hostId":h.host.id,"cwd":cwd}))
+        .query(&[("cursor", "bad")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), 400);
+    assert_eq!(
+        invalid.json::<Value>().await.unwrap()["code"],
+        "invalid_cursor"
+    );
+}
+
+#[tokio::test]
+async fn v2_lazy_session_prompt_receipt_and_generation_bound_stop() {
+    let h = Harness::new(1).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let cwd = h.cwd("v2-task");
+    let create = json!({"commandId":"create-one","hostId":h.host.id,"cwd":cwd});
+    let endpoint = format!("{}/api/v2/sessions", h.url);
+    let response = client
+        .post(&endpoint)
+        .bearer_auth(&credential)
+        .json(&create)
         .send()
         .await
         .unwrap();
     assert_eq!(response.status(), 201);
     let session: Value = response.json().await.unwrap();
     let id = session["id"].as_str().unwrap();
-    assert_eq!(session["status"], "idle");
-    assert_eq!(session["runtimeAttached"], true);
-    assert_eq!(session["title"], "empty-task");
-
-    let command = format!("{}/api/v1/sessions/{id}", h.url);
-    let compressed = client
-        .get(&command)
-        .bearer_auth(&credential)
-        .header(reqwest::header::ACCEPT_ENCODING, "gzip")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        compressed.headers().get(reqwest::header::CONTENT_ENCODING),
-        Some(&reqwest::header::HeaderValue::from_static("gzip")),
-    );
     let detail: Value = client
-        .get(&command)
+        .get(format!("{endpoint}/{id}"))
         .bearer_auth(&credential)
         .send()
         .await
@@ -173,169 +201,85 @@ async fn task_can_start_without_an_initial_prompt() {
         .json()
         .await
         .unwrap();
-    assert!(detail["timeline"].as_array().unwrap().is_empty());
-
+    assert!(
+        detail["runtime"].is_null(),
+        "creating a session must not start OMP"
+    );
+    assert!(detail["session"].get("status").is_none());
     assert_eq!(
         client
-            .post(format!("{command}/prompt"))
+            .post(&endpoint)
             .bearer_auth(&credential)
-            .json(&json!({"message":"hold"}))
+            .json(&create)
             .send()
             .await
             .unwrap()
             .status(),
         200
     );
-    h.wait_status(id, "running").await;
-    h.registry
-        .command(id.into(), "stop".into(), String::new(), Default::default())
+    let changed = json!({"commandId":"create-one","hostId":h.host.id,"cwd":h.cwd("other")});
+    let conflict = client
+        .post(&endpoint)
+        .bearer_auth(&credential)
+        .json(&changed)
+        .send()
         .await
         .unwrap();
-}
+    assert_eq!(conflict.status(), 409);
+    assert_eq!(
+        conflict.json::<Value>().await.unwrap()["code"],
+        "idempotency_conflict"
+    );
 
-#[tokio::test]
-async fn phone_to_gateway_to_omp_closed_loop() {
-    let h = Harness::new(8).await;
-    let client = reqwest::Client::new();
-    let credential = h.pair().await;
-    assert_eq!(
-        client
-            .get(format!("{}/api/v1/host", h.url))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        401
-    );
-    assert_eq!(
-        client
-            .get(format!("{}/api/v1/fs/list", h.url))
-            .bearer_auth(&credential)
-            .query(&[("path", h.dir.path().to_string_lossy().to_string())])
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        403
-    );
-    let roots: Value = client
-        .get(format!("{}/api/v1/workspaces", h.url))
+    let commands = format!("{endpoint}/{id}/commands");
+    let prompt =
+        json!({"commandId":"prompt-one","type":"prompt","delivery":"start","message":"hello"});
+    let accepted = client
+        .post(&commands)
         .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(roots.as_array().unwrap().len(), 1);
-    let (mut socket, _) = tokio_tungstenite::connect_async(h.events_request(Some(&credential)))
-        .await
-        .unwrap();
-    let first = socket.next().await.unwrap().unwrap();
-    let snapshot: Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
-    assert_eq!(snapshot["type"], "snapshot");
-    assert_eq!(snapshot["payload"]["protocolVersion"], 1);
-    assert_eq!(snapshot["payload"]["host"]["id"], h.host.id);
-    assert_eq!(
-        snapshot["payload"]["workspaces"].as_array().unwrap().len(),
-        1
-    );
-    let cwd = h.cwd("shop");
-    let response = client
-        .post(format!("{}/api/v1/sessions", h.url))
-        .bearer_auth(&credential)
-        .json(&json!({"hostId":h.host.id,"cwd":cwd,"prompt":"need input"}))
+        .json(&prompt)
         .send()
         .await
         .unwrap();
-    assert_eq!(response.status(), 201);
-    let session: Value = response.json().await.unwrap();
-    let id = session["id"].as_str().unwrap();
-    let command = format!("{}/api/v1/sessions/{id}", h.url);
-    let current: Value = client
-        .get(&command)
-        .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(current["model"]["id"], "fast");
-    let cycled: Value = client
-        .post(format!("{command}/model/cycle"))
-        .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(cycled["model"]["id"], "smart");
-    let cycled: Value = client
-        .get(&command)
-        .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(cycled["model"]["id"], "smart");
-    h.wait_status(id, "needs_input").await;
-    let mut saw_attention = false;
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while let Some(Ok(message)) = socket.next().await {
-            if message.is_text()
-                && let Ok(text) = message.to_text()
-            {
-                let frame: Value = serde_json::from_str(text).unwrap();
-                if frame["type"] == "attention.created" {
-                    saw_attention = true;
-                    break;
-                }
+    assert_eq!(accepted.status(), 202, "{}", accepted.text().await.unwrap());
+    let operation_url = format!("{endpoint}/{id}/operations/prompt-one");
+    let operation = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let receipt: Value = client
+                .get(&operation_url)
+                .bearer_auth(&credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if receipt["status"] == "succeeded" {
+                break receipt;
             }
+            if receipt["status"] == "failed" || receipt["status"] == "outcome_unknown" {
+                panic!("unexpected receipt: {receipt}");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
     .unwrap();
-    assert!(saw_attention);
+    let generation = operation["runtimeGeneration"].as_str().unwrap();
+    assert!(!generation.is_empty());
     assert_eq!(
         client
-            .post(format!("{command}/respond"))
+            .post(&commands)
             .bearer_auth(&credential)
-            .json(&json!({"id":"stale","value":"new"}))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        409
-    );
-    assert_eq!(
-        client
-            .post(format!("{command}/prompt"))
-            .bearer_auth(&credential)
-            .json(&json!({"message":"other"}))
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        409
-    );
-    assert_eq!(
-        client
-            .post(format!("{command}/respond"))
-            .bearer_auth(&credential)
-            .json(&json!({"id":"question-1","value":"new"}))
+            .json(&prompt)
             .send()
             .await
             .unwrap()
             .status(),
         200
     );
-    h.wait_status(id, "completed").await;
-    let detail: Value = client
-        .get(&command)
+    let view: Value = client
+        .get(format!("{endpoint}/{id}"))
         .bearer_auth(&credential)
         .send()
         .await
@@ -343,548 +287,341 @@ async fn phone_to_gateway_to_omp_closed_loop() {
         .json()
         .await
         .unwrap();
-    assert!(
-        detail["timeline"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["text"] == "Answer received")
-    );
-    assert_eq!(detail["session"]["needsAttention"], false);
-    // The fixture switched models on its own before answering, so the Gateway must have re-read OMP state.
-    assert_eq!(detail["model"]["id"], "fast");
-    let running = h
-        .registry
-        .create(
-            h.host.id.clone(),
-            h.cwd("running"),
-            "hold".into(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    h.wait_status(&running.id, "running").await;
-    h.registry
-        .command(
-            running.id.clone(),
-            "prompt".into(),
-            "steer".into(),
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    h.wait_status(&running.id, "completed").await;
-    h.registry
-        .command(
-            running.id.clone(),
-            "prompt".into(),
-            "hold".into(),
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    h.wait_status(&running.id, "running").await;
-    h.registry
-        .command(
-            running.id.clone(),
-            "interrupt".into(),
-            String::new(),
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    h.wait_status(&running.id, "idle").await;
-    h.registry
-        .command(
-            running.id.clone(),
-            "stop".into(),
-            String::new(),
-            Default::default(),
-        )
-        .await
-        .unwrap();
-    h.wait_status(&running.id, "stopped").await;
-    assert!(
-        !h.registry
-            .detail(&running.id)
+    assert_eq!(view["runtime"]["generation"], generation);
+    assert_eq!(view["runtime"]["execution"], "quiescent");
+    let tool = view["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["kind"] == "tool")
+        .expect("live tool result");
+    assert_eq!(tool["tool"]["name"], "bash");
+    assert_eq!(tool["tool"]["arguments"]["command"], "cargo test");
+    assert_eq!(tool["tool"]["result"], "tests passed");
+    let stop =
+        json!({"commandId":"stop-one","type":"stop_runtime","expectedGeneration":generation});
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&stop)
+            .send()
             .await
             .unwrap()
-            .session
-            .runtime_attached
+            .status(),
+        202
     );
-    h.registry.delete(&running.id).await.unwrap();
-    assert!(h.registry.detail(&running.id).await.is_err());
-    h.registry.close().await;
-    socket.close(None).await.unwrap();
-    let restarted = Registry::new(
-        h.store.clone(),
-        h.bus.clone(),
-        h.browser.clone(),
-        h.host.id.clone(),
-        env!("CARGO_BIN_EXE_omp-fixture").into(),
-        vec![],
-        8,
-    )
-    .unwrap();
-    let recent = restarted.detail(id).await.unwrap();
-    assert!(!recent.session.runtime_attached);
-    assert!(
-        recent
-            .timeline
-            .iter()
-            .any(|item| item.text == "Answer received")
-    );
-    assert!(
-        restarted
-            .command(
-                id.into(),
-                "prompt".into(),
-                "again".into(),
-                Default::default()
-            )
-            .await
-            .is_err()
-    );
-}
-#[tokio::test]
-async fn websocket_requires_a_paired_credential() {
-    let h = Harness::new(1).await;
-    assert!(
-        tokio_tungstenite::connect_async(h.events_request(None))
-            .await
-            .is_err()
-    );
-    assert!(
-        tokio_tungstenite::connect_async(h.events_request(Some("not-a-credential")))
-            .await
-            .is_err()
-    );
-    let credential = h.pair().await;
-    let (mut socket, _) = tokio_tungstenite::connect_async(h.events_request(Some(&credential)))
-        .await
-        .unwrap();
-    let first = socket.next().await.unwrap().unwrap();
-    let snapshot: Value = serde_json::from_str(first.to_text().unwrap()).unwrap();
-    assert_eq!(snapshot["type"], "snapshot");
-    socket.close(None).await.unwrap();
-    h.registry.close().await;
-}
-#[tokio::test]
-async fn cycling_without_an_alternative_model_is_rejected() {
-    let h = Harness::with_args(1, vec!["--single-model".into()]).await;
-    let client = reqwest::Client::new();
-    let credential = h.pair().await;
-    let response = client
-        .post(format!("{}/api/v1/sessions", h.url))
-        .bearer_auth(&credential)
-        .json(&json!({"hostId":h.host.id,"cwd":h.cwd("single"),"prompt":"hold"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 201);
-    let session: Value = response.json().await.unwrap();
-    let response = client
-        .post(format!(
-            "{}/api/v1/sessions/{}/model/cycle",
-            h.url,
-            session["id"].as_str().unwrap()
-        ))
-        .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 409);
-    let body: Value = response.json().await.unwrap();
-    assert_eq!(body["error"], "no alternative model is configured");
-    h.registry.close().await;
-}
-
-#[tokio::test]
-async fn available_models_can_be_selected_explicitly() {
-    let h = Harness::new(1).await;
-    let client = reqwest::Client::new();
-    let credential = h.pair().await;
-    let cwd = h.cwd("models");
-    let omp_dir = std::path::Path::new(&cwd).join(".omp");
-    std::fs::create_dir_all(&omp_dir).unwrap();
-    std::fs::write(
-        omp_dir.join("config.yml"),
-        "modelRoles:\n  default: fixture/fast\n  smart: fixture/smart:low\n  deep: fixture/smart:high\ncycleOrder:\n  - default\n  - smart\n  - deep\n",
-    )
-    .unwrap();
-    let created: Value = client
-        .post(format!("{}/api/v1/sessions", h.url))
-        .bearer_auth(&credential)
-        .json(&json!({"hostId":h.host.id,"cwd":cwd,"prompt":"hold"}))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let command = format!(
-        "{}/api/v1/sessions/{}",
-        h.url,
-        created["id"].as_str().unwrap()
-    );
-
-    let available: Value = client
-        .get(format!("{command}/models"))
-        .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(available["models"].as_array().unwrap().len(), 3);
-    assert_eq!(available["models"][1]["id"], "smart");
-    assert_eq!(available["models"][1]["role"], "smart");
-    assert_eq!(available["models"][2]["id"], "smart");
-    assert_eq!(available["models"][2]["role"], "deep");
-
-    let selected: Value = client
-        .post(format!("{command}/model"))
-        .bearer_auth(&credential)
-        .json(&json!({"provider":"fixture","id":"smart","role":"deep"}))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(selected["model"]["id"], "smart");
-    assert_eq!(selected["model"]["role"], "deep");
-    assert_eq!(selected["model"]["thinkingLevel"], "high");
-    let detail: Value = client
-        .get(&command)
-        .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert_eq!(detail["model"]["id"], "smart");
-    assert_eq!(detail["model"]["role"], "deep");
-    assert_eq!(detail["model"]["thinkingLevel"], "high");
-
-    let rejected = client
-        .post(format!("{command}/model"))
-        .bearer_auth(&credential)
-        .json(&json!({"provider":"fixture","id":"missing","role":"smart"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(rejected.status(), 409);
-    h.registry.close().await;
-}
-
-trait AddPath {
-    fn add_path(self, path: &str) -> String;
-}
-impl AddPath for String {
-    fn add_path(self, path: &str) -> String {
-        format!("{self}{path}")
-    }
-}
-
-#[tokio::test]
-async fn failed_prompt_and_runtime_limits_do_not_leak_processes() {
-    let h = Harness::new(1).await;
-    let result = h
-        .registry
-        .create(
-            h.host.id.clone(),
-            h.cwd("failed"),
-            "fail".into(),
-            String::new(),
-        )
-        .await;
-    assert!(result.is_err());
-    let list = h.registry.list().await;
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].status, "failed");
-    let s = h
-        .registry
-        .create(
-            h.host.id.clone(),
-            h.cwd("active"),
-            "hold".into(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    assert!(
-        h.registry
-            .create(
-                h.host.id.clone(),
-                h.cwd("limit"),
-                "hold".into(),
-                String::new()
-            )
-            .await
-            .is_err()
-    );
-    h.registry
-        .command(s.id, "stop".into(), String::new(), Default::default())
-        .await
-        .unwrap();
-    // The quota counts live processes, so a stop must free its slot without another event-loop
-    // round trip; otherwise a caller that retries right after stopping is wrongly refused.
-    let again = h
-        .registry
-        .create(
-            h.host.id.clone(),
-            h.cwd("again"),
-            "hold".into(),
-            String::new(),
-        )
-        .await
-        .unwrap();
-    h.registry
-        .command(again.id, "stop".into(), String::new(), Default::default())
-        .await
-        .unwrap();
-    h.registry.close().await;
-}
-
-#[tokio::test]
-async fn disconnected_client_does_not_abandon_runtime() {
-    let h = Harness::new(2).await;
-    let registry = h.registry.clone();
-    let host = h.host.id.clone();
-    let cwd = h.cwd("cancelled");
-    let request = tokio::spawn(async move {
-        registry
-            .create(host, cwd, "hold".into(), String::new())
-            .await
-    });
-    tokio::time::sleep(Duration::from_millis(5)).await;
-    request.abort();
-    tokio::time::timeout(Duration::from_secs(5), async {
+    tokio::time::timeout(Duration::from_secs(8), async {
         loop {
-            let list = h.registry.list().await;
-            if list.first().is_some_and(|s| s.status == "running") {
+            let receipt: Value = client
+                .get(format!("{endpoint}/{id}/operations/stop-one"))
+                .bearer_auth(&credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if receipt["status"] == "succeeded" {
                 break;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            if receipt["status"] == "failed" || receipt["status"] == "outcome_unknown" {
+                panic!("unexpected stop receipt: {receipt}");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
     .unwrap();
-    h.registry.close().await;
-}
-
-#[tokio::test]
-async fn stopped_detail_refreshes_history_after_the_log_changes() {
-    let h = Harness::new(8).await;
-    let session = h
-        .registry
-        .create(
-            h.host.id.clone(),
-            h.cwd("cached-history"),
-            String::new(),
-            String::new(),
-        )
+    let view: Value = client
+        .get(format!("{endpoint}/{id}"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
         .await
         .unwrap();
-    h.registry
-        .command(
-            session.id.clone(),
-            "stop".into(),
-            String::new(),
-            InputResponse::default(),
-        )
-        .await
-        .unwrap();
-    let path = std::path::Path::new(&session.session_file);
-    let first = json!({"id":"a","parentId":null,"type":"message","timestamp":"2026-09-20T00:00:00Z","message":{"role":"user","content":"First"}});
-    std::fs::write(path, format!("{first}\n")).unwrap();
-    assert_eq!(
-        h.registry.detail(&session.id).await.unwrap().timeline[0].text,
-        "First"
-    );
-
-    let second = json!({"id":"b","parentId":"a","type":"message","timestamp":"2026-09-20T00:00:01Z","message":{"role":"user","content":"Second"}});
-    use std::io::Write;
-    writeln!(
-        std::fs::OpenOptions::new().append(true).open(path).unwrap(),
-        "{second}"
-    )
-    .unwrap();
-    let detail = h.registry.detail(&session.id).await.unwrap();
-    assert_eq!(
-        detail
-            .timeline
-            .iter()
-            .map(|item| item.text.as_str())
-            .collect::<Vec<_>>(),
-        ["First", "Second"]
-    );
+    assert!(view["runtime"].is_null());
 }
 
 #[tokio::test]
-async fn history_follows_parent_branch() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("session.jsonl");
-    let message = |id: &str, parent: Option<&str>, text: &str| {
-        json!({"id":id,"parentId":parent,"type":"message","timestamp":"2026-09-14T00:00:00Z","message":{"role":"assistant","content":[{"type":"text","text":text}]}}).to_string()
-    };
-    std::fs::write(
-        &path,
-        [
-            message("a", None, "root"),
-            message("b", Some("a"), "abandoned branch"),
-            message("c", Some("a"), "current branch"),
-        ]
-        .join("\n"),
-    )
-    .unwrap();
-    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
-    assert_eq!(
-        history
-            .iter()
-            .map(|item| item.text.as_str())
-            .collect::<Vec<_>>(),
-        ["root", "current branch"]
-    );
-}
-
-#[tokio::test]
-async fn history_pairs_tool_calls_with_results_and_skips_thinking() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("session.jsonl");
-    let rows = [
-        json!({
-            "id":"a", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
-            "message":{"role":"assistant","content":[
-                {"type":"thinking","thinking":"private"},
-                {"type":"toolCall","id":"call-1","name":"edit","arguments":{"path":"src/Login.kt"}}
-            ]}
-        }),
-        json!({
-            "id":"b", "parentId":"a", "type":"message", "timestamp":"2026-09-20T00:00:01Z",
-            "message":{"role":"toolResult","toolCallId":"call-1","toolName":"edit","content":[{"type":"text","text":"updated"}],"isError":false}
-        }),
-        json!({
-            "id":"c", "parentId":"b", "type":"message", "timestamp":"2026-09-20T00:00:02Z",
-            "message":{"role":"assistant","content":[{"type":"text","text":"Fixed."}]}
-        }),
-    ];
-    std::fs::write(
-        &path,
-        rows.into_iter()
-            .map(|row| row.to_string())
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
-    .unwrap();
-
-    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
-    assert_eq!(history.len(), 2);
-    let tool = history[0].tool.as_ref().unwrap();
-    assert_eq!(tool.call_id, "call-1");
-    assert_eq!(tool.name, "edit");
-    assert_eq!(tool.arguments["path"], "src/Login.kt");
-    assert_eq!(tool.result, "updated");
-    assert!(tool.completed && !tool.is_error);
-    assert_eq!(history[1].text, "Fixed.");
-}
-
-#[tokio::test]
-async fn history_limit_preserves_visible_messages_before_tool_heavy_runs() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("session.jsonl");
-    let mut rows = vec![json!({
-        "id":"user", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
-        "message":{"role":"user","content":"Keep this request"}
-    })];
-    let mut parent = "user".to_string();
-    for index in 0..501 {
-        let call_entry = format!("call-entry-{index}");
-        let result_entry = format!("result-entry-{index}");
-        let call_id = format!("call-{index}");
-        rows.push(json!({
-            "id":call_entry.clone(), "parentId":parent.clone(), "type":"message", "timestamp":"2026-09-20T00:00:01Z",
-            "message":{"role":"assistant","content":[{"type":"toolCall","id":call_id.clone(),"name":"read","arguments":{"path":format!("src/{index}.rs")}}]}
-        }));
-        rows.push(json!({
-            "id":result_entry.clone(), "parentId":call_entry, "type":"message", "timestamp":"2026-09-20T00:00:02Z",
-            "message":{"role":"toolResult","toolCallId":call_id,"toolName":"read","content":[{"type":"text","text":"ok"}],"isError":false}
-        }));
-        parent = result_entry;
+async fn v2_websocket_snapshot_precedes_versioned_changes() {
+    use futures_util::SinkExt;
+    async fn next_json<S>(socket: &mut S) -> Value
+    where
+        S: futures_util::Stream<
+                Item = Result<
+                    tokio_tungstenite::tungstenite::Message,
+                    tokio_tungstenite::tungstenite::Error,
+                >,
+            > + Unpin,
+    {
+        loop {
+            if let Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) =
+                socket.next().await
+            {
+                return serde_json::from_str(&text).unwrap();
+            }
+        }
     }
-    std::fs::write(
-        &path,
-        rows.into_iter()
-            .map(|row| row.to_string())
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
-    .unwrap();
-
-    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
-    assert_eq!(history.len(), 500);
-    assert_eq!(history[0].kind, "user");
-    assert_eq!(history[0].text, "Keep this request");
-    assert_eq!(
-        history.iter().filter(|item| item.kind == "tool").count(),
-        499
+    let h = Harness::new(1).await;
+    let credential = h.pair().await;
+    let mut request = format!("{}/api/v2/events", h.url.replace("http://", "ws://"))
+        .into_client_request()
+        .unwrap();
+    request.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {credential}").parse().unwrap(),
     );
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let first = next_json(&mut socket).await;
+    assert_eq!(first["type"], "snapshot");
+    assert_eq!(first["resource"], "host/sessions");
+    let host_subscription = first["subscriptionId"].as_str().unwrap().to_owned();
+    let host_epoch = first["cursor"]["epoch"].as_str().unwrap().to_owned();
+    let base = first["cursor"]["revision"].as_u64().unwrap();
+    let client = reqwest::Client::new();
+    let response: Value = client
+        .post(format!("{}/api/v2/sessions", h.url))
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"create-ws","hostId":h.host.id,"cwd":h.cwd("ws")}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = response["id"].as_str().unwrap();
+    let change = next_json(&mut socket).await;
+    assert_eq!(change["type"], "change");
+    assert_eq!(change["subscriptionId"], host_subscription);
+    assert_eq!(change["epoch"], host_epoch);
+    assert_eq!(change["baseRevision"], base);
+    assert_eq!(change["revision"], base + 1);
+    let resource = format!("session/{id}");
+    socket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            json!({"type":"subscribe","resource":resource})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let detail = next_json(&mut socket).await;
+    assert_eq!(detail["type"], "snapshot");
+    assert_eq!(detail["resource"], resource);
+    assert_eq!(detail["payload"]["session"]["id"], id);
+    assert!(detail["payload"]["runtime"].is_null());
 }
 
-/// A transcript can record the result of a call in a different entry than the call itself, and the
-/// two frames describe one call: reconstructing them as two items would show the call twice.
 #[tokio::test]
-async fn history_merges_a_result_that_precedes_its_call() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("session.jsonl");
-    let rows = [
-        json!({
-            "id":"a", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
-            "message":{"role":"toolResult","toolCallId":"call-1","toolName":"edit","content":[{"type":"text","text":"updated"}],"isError":false}
-        }),
-        json!({
-            "id":"b", "parentId":"a", "type":"message", "timestamp":"2026-09-20T00:00:01Z",
-            "message":{"role":"assistant","content":[{"type":"toolCall","id":"call-1","name":"edit","arguments":{"path":"src/Login.kt"}}]}
-        }),
-    ];
-    std::fs::write(
-        &path,
-        rows.into_iter()
-            .map(|row| row.to_string())
-            .collect::<Vec<_>>()
-            .join("\n"),
+async fn v2_resume_keeps_transcript_and_uses_new_generation() {
+    let h = Harness::new(1).await;
+    let credential = h.pair().await;
+    let client = reqwest::Client::new();
+    let create: Value = client
+        .post(format!("{}/api/v2/sessions", h.url))
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"create-resume","hostId":h.host.id,"cwd":h.cwd("resume")}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = create["id"].as_str().unwrap();
+    let session_url = format!("{}/api/v2/sessions/{id}", h.url);
+    let commands = format!("{session_url}/commands");
+    let first = client
+        .post(&commands)
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"first","type":"prompt","delivery":"start","message":"hello"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 202);
+    let first = wait_operation(
+        &client,
+        &format!("{session_url}/operations/first"),
+        &credential,
+        "succeeded",
     )
-    .unwrap();
-
-    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
-    assert_eq!(history.len(), 1);
-    let tool = history[0].tool.as_ref().unwrap();
-    assert_eq!(tool.call_id, "call-1");
-    assert_eq!(tool.arguments["path"], "src/Login.kt");
-    assert_eq!(tool.result, "updated");
-    assert!(tool.completed && !tool.is_error);
-    assert_eq!(history[0].text, "Finished · edit");
+    .await;
+    let old_generation = first["runtimeGeneration"].as_str().unwrap().to_owned();
+    let catalog: Value = client
+        .get(format!("{session_url}/models"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(catalog["models"].as_array().unwrap().len(), 2);
+    assert!(
+        catalog["thinkingLevels"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("high"))
+    );
+    for (command_id, command) in [
+        (
+            "model",
+            json!({"type":"select_model","expectedGeneration":old_generation,"provider":"fixture","modelId":"smart"}),
+        ),
+        (
+            "thinking",
+            json!({"type":"set_thinking_level","expectedGeneration":old_generation,"level":"high"}),
+        ),
+    ] {
+        let mut request = command;
+        request["commandId"] = json!(command_id);
+        assert_eq!(
+            client
+                .post(&commands)
+                .bearer_auth(&credential)
+                .json(&request)
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            202
+        );
+        wait_operation(
+            &client,
+            &format!("{session_url}/operations/{command_id}"),
+            &credential,
+            "succeeded",
+        )
+        .await;
+    }
+    let detail: Value = client
+        .get(&session_url)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail["runtime"]["actualModel"]["id"], "smart");
+    assert_eq!(detail["runtime"]["actualModel"]["thinkingLevel"], "high");
+    let stop =
+        json!({"commandId":"stop-old","type":"stop_runtime","expectedGeneration":old_generation});
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&stop)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    wait_operation(
+        &client,
+        &format!("{session_url}/operations/stop-old"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    let page: Value = client
+        .get(format!("{session_url}/history?limit=1"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    let old_cursor = page["nextCursor"].as_str().unwrap();
+    let earlier: Value = client
+        .get(format!("{session_url}/history?cursor={old_cursor}"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(earlier["source"]["id"], page["source"]["id"]);
+    assert_eq!(earlier["items"][0]["kind"], "user");
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&json!({"commandId":"resume","type":"start_runtime"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    let resumed = wait_operation(
+        &client,
+        &format!("{session_url}/operations/resume"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    let new_generation = resumed["runtimeGeneration"].as_str().unwrap();
+    assert_ne!(old_generation, new_generation);
+    let stale_stop=client.post(&commands).bearer_auth(&credential)
+        .json(&json!({"commandId":"stale-stop","type":"stop_runtime","expectedGeneration":old_generation}))
+        .send().await.unwrap();
+    assert_eq!(stale_stop.status(), 202);
+    let stale_receipt = wait_operation(
+        &client,
+        &format!("{session_url}/operations/stale-stop"),
+        &credential,
+        "failed",
+    )
+    .await;
+    assert_eq!(stale_receipt["error"]["code"], "stale_runtime");
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(
+                &json!({"commandId":"second","type":"prompt","delivery":"start","message":"again"})
+            )
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    wait_operation(
+        &client,
+        &format!("{session_url}/operations/second"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    let stale = client
+        .get(format!("{session_url}/history?cursor={old_cursor}"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale.status(), 409);
+    assert_eq!(stale.json::<Value>().await.unwrap()["code"], "stale_cursor");
 }
 
 #[tokio::test]
-async fn history_keeps_assistant_errors_but_not_private_thinking() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("session.jsonl");
-    std::fs::write(
-        &path,
-        json!({
-            "id":"a", "parentId":null, "type":"message", "timestamp":"2026-09-20T00:00:00Z",
-            "message":{"role":"assistant","content":[{"type":"thinking","thinking":"private"}],"stopReason":"error","errorMessage":"provider unavailable"}
-        })
-        .to_string(),
-    )
-    .unwrap();
-
-    let history = pinkcollab_gateway::session::history(&path).await.unwrap();
-    assert_eq!(history.len(), 1);
-    assert_eq!(history[0].kind, "error");
-    assert_eq!(history[0].text, "provider unavailable");
+async fn v1_routes_explain_the_breaking_upgrade() {
+    let h = Harness::new(1).await;
+    let response = reqwest::Client::new()
+        .get(format!("{}/api/v1/host", h.url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 426);
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["code"],
+        "protocol_upgrade_required"
+    );
 }

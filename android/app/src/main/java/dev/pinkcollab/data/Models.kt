@@ -10,10 +10,10 @@ data class ModelInfo(
     val provider: String,
     val id: String,
     val name: String,
-    val role: String? = null,
     val thinkingLevel: String? = null,
 )
-data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean) {
+data class ModelCatalog(val models: List<ModelInfo>, val thinkingLevels: List<String>)
+data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val runtimeGeneration: String? = null, val runtimeExecution: String = "unknown") {
     /** A session is active while its OMP runtime is live, including the startup hand-off. */
     val isActive: Boolean get() = status == "starting" || runtimeAttached
 }
@@ -51,7 +51,24 @@ data class ToolArguments(
 }
 data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean)
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
-data class SessionDetail(val session: Session, val timeline: List<TimelineItem>, val streaming: String = "", val model: ModelInfo? = null)
+data class OperationReceipt(val commandId: String, val status: String, val commandType: String, val errorCode: String? = null)
+data class SessionDetail(
+    val session: Session,
+    val timeline: List<TimelineItem>,
+    val streaming: String = "",
+    val model: ModelInfo? = null,
+    val cursor: Cursor? = null,
+    val subscriptionId: String? = null,
+    val operations: List<OperationReceipt> = emptyList(),
+    val historySourceId: String? = null,
+    val nextHistoryCursor: String? = null,
+    val historyItems: List<TimelineItem> = emptyList(),
+    val liveItems: List<TimelineItem> = emptyList(),
+)
+data class Cursor(val epoch: String, val revision: Long) {
+    fun accepts(epoch: String, baseRevision: Long, revision: Long): Boolean =
+        this.epoch == epoch && baseRevision == this.revision && revision > this.revision
+}
 data class Workspace(val name: String, val path: String)
 data class Listing(val path: String, val parent: String?, val directories: List<Workspace>)
 sealed interface ConnectionState {
@@ -61,6 +78,7 @@ sealed interface ConnectionState {
     data class Reconnecting(val attempt: Int, val nextRetryEpochMillis: Long) : ConnectionState
     data class Offline(val reason: String? = null) : ConnectionState
     data object AuthenticationRequired : ConnectionState
+    data object UpgradeRequired : ConnectionState
 }
 data class HostState(
     val paired: PairedHost,
@@ -68,6 +86,8 @@ data class HostState(
     val sessions: List<Session> = emptyList(),
     val workspaces: List<Workspace> = emptyList(),
     val revision: Long = 0,
+    val cursor: Cursor? = null,
+    val subscriptionId: String? = null,
     val lastSyncedAtEpochMillis: Long? = null,
     val initialSync: InitialSyncState = InitialSyncState.Pending,
 ) {
@@ -102,10 +122,32 @@ enum class TaskListLoadState { Loading, Ready, Unavailable }
 
 fun JSONObject.host() = Host(getString("id"), getString("name"), getString("os"), optString("ompVersion"), optString("gatewayVersion"))
 fun Host.json() = JSONObject().put("id", id).put("name", name).put("os", os).put("ompVersion", ompVersion).put("gatewayVersion", gatewayVersion)
-fun JSONObject.session(): Session {
-    val a = optJSONObject("attention")?.let { Attention(it.getString("id"), it.getString("type"), it.getString("text"), it.optJSONArray("options")?.strings().orEmpty()) }
-    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), getString("status"), getString("activity"), getBoolean("needsAttention"), a, getString("createdAt"), getString("updatedAt"), optBoolean("runtimeAttached"))
+fun JSONObject.session(runtime: JSONObject? = null): Session {
+    val pending = runtime?.optJSONArray("pendingInputs")?.objects().orEmpty()
+    val a = pending.firstOrNull()?.let { Attention(it.getString("id"), it.getString("type"), it.optString("text"), it.optJSONArray("options")?.strings().orEmpty()) }
+    val phase = runtime?.optString("phase") ?: ""
+    val execution = runtime?.optString("execution") ?: "unknown"
+    val status = when {
+        phase == "starting" -> "starting"
+        phase == "stopping" -> "stopped"
+        a != null -> "needs_input"
+        execution == "active" -> "running"
+        else -> "idle"
+    }
+    val activity = runtime?.optString("activity")?.takeIf { it.isNotBlank() } ?: when (status) {
+        "starting" -> "Starting OMP"
+        "running" -> "Working"
+        "needs_input" -> "Waiting for input"
+        else -> "Ready to continue"
+    }
+    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() }, execution)
 }
+fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))
+fun JSONObject.cursor() = Cursor(getString("epoch"), getLong("revision"))
+fun JSONObject.receipt() = OperationReceipt(getString("commandId"), getString("status"), getString("commandType"), optJSONObject("error")?.optString("code"))
+fun Session.withRuntime(runtime: JSONObject?): Session = JSONObject()
+    .put("id", id).put("hostId", hostId).put("cwd", cwd).put("title", title)
+    .put("createdAt", createdAt).put("updatedAt", updatedAt).session(runtime)
 fun JSONObject.item(): TimelineItem {
     val tool = optJSONObject("tool")?.let {
         val arguments = when (val value = it.opt("arguments")) {
@@ -128,7 +170,6 @@ fun JSONObject.modelInfo() = ModelInfo(
     provider = getString("provider"),
     id = getString("id"),
     name = getString("name"),
-    role = optString("role").takeIf { it.isNotBlank() },
     thinkingLevel = optString("thinkingLevel").takeIf { it.isNotBlank() },
 )
 

@@ -1,155 +1,85 @@
 use crate::{model::TimelineItem, omp};
-use anyhow::Result;
+use anyhow::{Context, Result, ensure};
 use chrono::Utc;
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    io::{self, Write},
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::SystemTime,
-};
+use sha2::{Digest, Sha256};
+use std::{collections::HashMap, path::Path};
+use tokio::sync::Semaphore;
 
 /// The live timeline and reconstructed history use the same retention policy.
 pub(crate) const TIMELINE_LIMIT: usize = 500;
-/// Maximum combined serialized size of reconstructed timelines kept for repeated detail reads.
-const HISTORY_CACHE_LIMIT: usize = 32 * 1024 * 1024;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct HistoryStamp {
-    len: u64,
-    modified: SystemTime,
-}
-
-struct CachedHistory {
-    stamp: HistoryStamp,
-    timeline: Arc<Vec<TimelineItem>>,
-    bytes: usize,
-    used: u64,
-}
-
-#[derive(Default)]
-struct CacheState {
-    entries: HashMap<PathBuf, CachedHistory>,
-    bytes: usize,
-    clock: u64,
-}
-
-impl CacheState {
-    fn get(&mut self, path: &Path, stamp: HistoryStamp) -> Option<Arc<Vec<TimelineItem>>> {
-        let entry = self.entries.get_mut(path)?;
-        if entry.stamp != stamp {
-            self.remove(path);
-            return None;
-        }
-        self.clock += 1;
-        entry.used = self.clock;
-        Some(entry.timeline.clone())
-    }
-
-    fn remove(&mut self, path: &Path) {
-        if let Some(entry) = self.entries.remove(path) {
-            self.bytes -= entry.bytes;
-        }
-    }
-
-    fn insert(
-        &mut self,
-        path: PathBuf,
-        stamp: HistoryStamp,
-        timeline: Vec<TimelineItem>,
-        bytes: usize,
-    ) -> Arc<Vec<TimelineItem>> {
-        self.remove(&path);
-        let timeline = Arc::new(timeline);
-        if bytes <= HISTORY_CACHE_LIMIT {
-            while self.bytes + bytes > HISTORY_CACHE_LIMIT {
-                let Some(oldest) = self
-                    .entries
-                    .iter()
-                    .min_by_key(|(_, entry)| entry.used)
-                    .map(|(path, _)| path.clone())
-                else {
-                    break;
-                };
-                self.remove(&oldest);
-            }
-            self.clock += 1;
-            self.bytes += bytes;
-            self.entries.insert(
-                path,
-                CachedHistory {
-                    stamp,
-                    timeline: timeline.clone(),
-                    bytes,
-                    used: self.clock,
-                },
-            );
-        }
-        timeline
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct HistoryCache {
-    state: parking_lot::Mutex<CacheState>,
-}
-
-impl HistoryCache {
-    pub async fn load(&self, path: &Path) -> Result<Vec<TimelineItem>> {
-        let metadata = tokio::fs::metadata(path).await?;
-        let stamp = HistoryStamp {
-            len: metadata.len(),
-            modified: metadata.modified()?,
-        };
-        if let Some(timeline) = self.state.lock().get(path, stamp) {
-            return Ok((*timeline).clone());
-        }
-        let timeline = history(path).await?;
-        let latest = tokio::fs::metadata(path).await?;
-        let latest = HistoryStamp {
-            len: latest.len(),
-            modified: latest.modified()?,
-        };
-        if latest != stamp {
-            return Ok(timeline);
-        }
-        let mut counter = ByteCounter(0);
-        let bytes = serde_json::to_writer(&mut counter, &timeline)
-            .map(|()| counter.0)
-            .unwrap_or(HISTORY_CACHE_LIMIT + 1);
-        Ok((*self
-            .state
-            .lock()
-            .insert(path.to_path_buf(), stamp, timeline, bytes))
-        .clone())
-    }
-}
-
-struct ByteCounter(usize);
-
-impl Write for ByteCounter {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0 = self.0.saturating_add(bytes.len());
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
+static HISTORY_READERS: Semaphore = Semaphore::const_new(2);
 pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
+    let (mut timeline, _, _) = build_history(path, false).await?;
+    trim_timeline(&mut timeline, TIMELINE_LIMIT);
+    Ok(timeline)
+}
+
+pub async fn history_page(
+    path: &Path,
+    session_id: &str,
+    cursor: Option<&str>,
+    limit: usize,
+) -> Result<Value> {
+    ensure!((1..=100).contains(&limit), "invalid_page_limit");
+    let _permit = HISTORY_READERS
+        .try_acquire()
+        .context("history_unavailable: history readers busy")?;
+    let before = tokio::fs::metadata(path)
+        .await
+        .context("history_unavailable")?;
+    ensure!(
+        before.len() <= 128 * 1024 * 1024,
+        "history_unavailable: file exceeds read budget"
+    );
+    let (timeline, leaf, content_hash) = build_history(path, true)
+        .await
+        .context("history_unavailable")?;
+    let after = tokio::fs::metadata(path)
+        .await
+        .context("history_unavailable")?;
+    ensure!(
+        before.len() == after.len() && before.modified()? == after.modified()?,
+        "stale_cursor"
+    );
+    let source = hex::encode(Sha256::digest(
+        format!("{session_id}:{leaf}:{content_hash}").as_bytes(),
+    ));
+    let end = match cursor {
+        Some(cursor) => {
+            let (fingerprint, index) = cursor.split_once(':').context("stale_cursor")?;
+            ensure!(fingerprint == source, "stale_cursor");
+            index.parse::<usize>().context("stale_cursor")?
+        }
+        None => timeline.len(),
+    };
+    ensure!(end <= timeline.len(), "stale_cursor");
+    let start = end.saturating_sub(limit);
+    let next_cursor = (start > 0).then(|| format!("{source}:{start}"));
+    let page = serde_json::json!({"items":&timeline[start..end],"source":{"id":source,"branchLeaf":leaf,"byteLength":after.len()},"nextCursor":next_cursor});
+    ensure!(
+        serde_json::to_vec(&page)?.len() <= 8 * 1024 * 1024,
+        "history_unavailable: page exceeds response budget; request a smaller limit"
+    );
+    Ok(page)
+}
+
+async fn build_history(path: &Path, strict: bool) -> Result<(Vec<TimelineItem>, String, String)> {
     use futures_util::StreamExt;
     use tokio_util::codec::{FramedRead, LinesCodec};
     let file = tokio::fs::File::open(path).await?;
     let mut lines = FramedRead::new(file, LinesCodec::new_with_max_length(16 * 1024 * 1024));
+    let mut digest = Sha256::new();
     let mut entries = HashMap::<String, Value>::new();
     let mut leaf = String::new();
     while let Some(line) = lines.next().await {
         let line = line?;
-        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
-            continue;
+        digest.update(line.as_bytes());
+        digest.update(b"\n");
+        let entry = match serde_json::from_str::<Value>(&line) {
+            Ok(entry) => entry,
+            Err(err) if strict => return Err(err.into()),
+            Err(_) => continue,
         };
         let id = omp::string(&entry, "id");
         if !id.is_empty() {
@@ -157,10 +87,19 @@ pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
             entries.insert(id.into(), entry);
         }
     }
+    let branch_leaf = leaf.clone();
     let mut chain = vec![];
     let mut visited = std::collections::HashSet::new();
-    while !leaf.is_empty() && visited.insert(leaf.clone()) {
+    while !leaf.is_empty() {
+        ensure!(
+            !strict || visited.insert(leaf.clone()),
+            "history_unavailable: branch cycle"
+        );
+        if !strict && !visited.insert(leaf.clone()) {
+            break;
+        }
         let Some(entry) = entries.get(&leaf) else {
+            ensure!(!strict, "history_unavailable: missing branch parent");
             break;
         };
         chain.push(entry);
@@ -259,8 +198,7 @@ pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
             });
         }
     }
-    trim_timeline(&mut timeline, TIMELINE_LIMIT);
-    Ok(timeline)
+    Ok((timeline, branch_leaf, hex::encode(digest.finalize())))
 }
 
 /// Upserts a tool item by call id. A transcript can hold the result of a call in a different entry

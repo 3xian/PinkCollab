@@ -97,13 +97,13 @@ public_url: https://dev-server.example.com
 ```mermaid
 flowchart TB
     A["pair → QR or JSON (url + token)"] --> B["Phone scans or pastes"]
-    B --> C["POST /api/v1/pair"]
+    B --> C["POST /api/v2/pair"]
     C --> D["Phone stores Bearer credential"]
 ```
 
 - The QR carries the Gateway root URL and a one-time token. It does not carry provider credentials.
 - `pair` uses `--url` or the configured `public_url`. If neither exists it stops, instead of guessing from Tailscale or printing a loopback URL. JSON stays on stdout. The QR is shown when stderr is a terminal. `--qr <file>` also writes a PNG.
-- `/api/v1/pair` is the only endpoint reachable without a credential. Everything else, including the WebSocket, returns 401 without a valid `Bearer` token. Tokens are not accepted in the query string. A request that carries an `Origin` header is rejected; this API is not a browser client.
+- `/api/v2/pair` is the only v2 endpoint reachable without a credential. Everything else, including the WebSocket, returns 401 without a valid `Bearer` token. Tokens are not accepted in the query string. A request that carries an `Origin` header is rejected; this API is not a browser client.
 - The pairing token lives five minutes and is consumed by one successful pair. After a failure or expiry, run `pair` again.
 
 ```sh

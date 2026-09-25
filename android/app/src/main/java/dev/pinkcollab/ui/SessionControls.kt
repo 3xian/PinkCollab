@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.ModelInfo
+import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.ui.theme.*
 
 @Composable
@@ -118,21 +119,19 @@ internal fun ComposerSendButton(
 
 internal fun isSelectedModel(current: ModelInfo?, candidate: ModelInfo): Boolean {
     current ?: return false
-    if (current.provider != candidate.provider || current.id != candidate.id) return false
-    if (current.role != null) return current.role == candidate.role &&
-        current.thinkingLevel == candidate.thinkingLevel
-    return candidate.thinkingLevel == null || current.thinkingLevel == candidate.thinkingLevel
+    return current.provider == candidate.provider && current.id == candidate.id
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ModelPickerSheet(
-    state: LoadState<List<ModelInfo>>?,
+    state: LoadState<ModelCatalog>?,
     current: ModelInfo?,
     enabled: Boolean,
     dismiss: () -> Unit,
     retry: () -> Unit,
     select: (ModelInfo) -> Unit,
+    selectThinkingLevel: (String) -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = dismiss, containerColor = MaterialTheme.colorScheme.surface) {
         Column(
@@ -159,17 +158,17 @@ internal fun ModelPickerSheet(
                     Text(state.message, color = MaterialTheme.colorScheme.error)
                     OutlinedButton(onClick = rememberHapticOnClick(retry)) { Text("Retry") }
                 }
-                is LoadState.Ready -> if (state.value.isEmpty()) {
+                is LoadState.Ready -> if (state.value.models.isEmpty()) {
                     Text(
-                        "No Ctrl+P models are configured.",
+                        "No models are available from OMP.",
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
                         color = TextMid,
                     )
                 } else {
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
                         itemsIndexed(
-                            state.value,
-                            key = { _, model -> "${model.role}/${model.provider}/${model.id}/${model.thinkingLevel}" },
+                            state.value.models,
+                            key = { _, model -> "${model.provider}/${model.id}" },
                         ) { _, model ->
                             val selected = isSelectedModel(current, model)
                             Row(
@@ -180,34 +179,10 @@ internal fun ModelPickerSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        model.role?.let { role ->
-                                            Surface(
-                                                color = Purple400.copy(alpha = 0.12f),
-                                                shape = RoundedCornerShape(7.dp),
-                                            ) {
-                                                Text(
-                                                    role.uppercase(),
-                                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = Purple200,
-                                                )
-                                            }
-                                            Spacer(Modifier.width(9.dp))
-                                        }
-                                        Text(model.name, style = MaterialTheme.typography.bodyLarge)
-                                    }
+                                    Text(model.name, style = MaterialTheme.typography.bodyLarge)
                                     Spacer(Modifier.height(4.dp))
                                     Text(
-                                        buildString {
-                                            append(model.provider)
-                                            append(" · ")
-                                            append(model.id)
-                                            model.thinkingLevel?.let {
-                                                append(" · ")
-                                                append(it)
-                                            }
-                                        },
+                                        "${model.provider} · ${model.id}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextMid,
                                     )
@@ -220,6 +195,19 @@ internal fun ModelPickerSheet(
                                 )
                             }
                         }
+                    }
+                }
+            }
+            if (state is LoadState.Ready && state.value.thinkingLevels.isNotEmpty()) {
+                Text("Thinking level", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.value.thinkingLevels.forEach { level ->
+                        FilterChip(
+                            selected = current?.thinkingLevel == level,
+                            onClick = { selectThinkingLevel(level) },
+                            label = { Text(level) },
+                            enabled = enabled,
+                        )
                     }
                 }
             }

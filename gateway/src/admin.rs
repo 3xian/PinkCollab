@@ -141,6 +141,41 @@ pub fn clients(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn leases(dir: &Path) -> Result<()> {
+    let store = Store::open(dir)?;
+    let leases = store.runtime_leases()?;
+    if leases.is_empty() {
+        println!("No runtime leases.");
+    } else {
+        for (session, generation) in leases {
+            println!("{session} {generation}");
+        }
+    }
+    Ok(())
+}
+
+pub fn clear_lease(
+    dir: &Path,
+    session: &str,
+    generation: &str,
+    verified_exited: bool,
+) -> Result<()> {
+    ensure!(
+        verified_exited,
+        "--verified-exited is required after checking the old OMP process and descendants are gone"
+    );
+    let config = Config::load(dir)?;
+    let _listener = TcpListener::bind(config.listen)
+        .context("stop the Gateway before clearing a runtime lease")?;
+    let store = Store::open(dir)?;
+    ensure!(
+        store.release_runtime(session, generation)?,
+        "no matching runtime lease"
+    );
+    println!("Cleared lease for {session} {generation}");
+    Ok(())
+}
+
 pub fn revoke(dir: &Path, client: &str) -> Result<()> {
     let store = Store::open(dir)?;
     ensure!(

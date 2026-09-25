@@ -143,7 +143,8 @@ impl Runtime {
         let stdin = child.stdin.take().context("OMP stdin unavailable")?;
         let stdout = child.stdout.take().context("OMP stdout unavailable")?;
         let (input, mut commands) = mpsc::channel::<(Value, oneshot::Sender<Result<()>>)>(32);
-        let (output, receiver) = mpsc::channel(256);
+        // A frame is at most 1 MiB; this caps queued stdout at roughly 32 MiB.
+        let (output, receiver) = mpsc::channel(32);
         let (ready_tx, ready) = watch::channel(false);
         let (exit_tx, exited) = watch::channel(false);
         let (stop, mut stopping) = watch::channel(false);
@@ -271,8 +272,14 @@ impl Runtime {
         rx.await.context("OMP input closed")?
     }
 
-    pub async fn request(&self, mut frame: Value) -> Result<Value> {
-        let request_id = id("req_");
+    pub async fn request(&self, frame: Value) -> Result<Value> {
+        self.request_with_id(id("req_"), frame).await
+    }
+
+    /// A caller-supplied id lets the session controller correlate a later `prompt_result` with
+    /// the durable command receipt. OMP echoes this id in the immediate response and terminal
+    /// result; it is scoped to this process and never accepted from a client as a raw RPC frame.
+    pub async fn request_with_id(&self, request_id: String, mut frame: Value) -> Result<Value> {
         frame["id"] = json!(request_id);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().insert(request_id.clone(), tx);
@@ -296,10 +303,33 @@ impl Runtime {
 
     /// Ends the OMP process. Bounded by [`TERMINATE_GRACE`]: termination is owned by [`Process`],
     /// so it works even while a write is blocked or a client has stopped draining events.
-    pub async fn stop(&self) {
+    pub async fn stop_confirmed(&self) -> Result<()> {
         let _ = self.stop.send(true);
         let process = self.process.clone();
-        let _ = tokio::task::spawn_blocking(move || process.terminate(TERMINATE_GRACE)).await;
+        tokio::time::timeout(
+            Duration::from_secs(12),
+            tokio::task::spawn_blocking(move || process.terminate(TERMINATE_GRACE)),
+        )
+        .await
+        .context("OMP termination did not finish")?
+        .context("OMP terminator failed")?;
+        let mut exited = self.exited.clone();
+        tokio::time::timeout(Duration::from_secs(12), async {
+            while !*exited.borrow() {
+                exited
+                    .changed()
+                    .await
+                    .context("OMP exit observation closed")?;
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        .context("OMP exit was not confirmed")??;
+        Ok(())
+    }
+
+    pub async fn stop(&self) {
+        let _ = self.stop_confirmed().await;
     }
 
     pub fn alive(&self) -> bool {
@@ -356,5 +386,5 @@ pub fn text_content(message: &Value) -> String {
                 .collect::<Vec<_>>()
                 .join("\n")
         })
-        .unwrap_or_default()
+        .unwrap_or_else(|| string(message, "content").to_owned())
 }

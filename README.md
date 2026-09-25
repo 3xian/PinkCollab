@@ -62,7 +62,7 @@ If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attr
 - [CLI and configuration](docs/reference.md)
 - [Daily use](docs/usage.md)
 - [Architecture](docs/architecture.md)
-- [Protocol v1](docs/protocol.md)
+- [Protocol v2](docs/protocol.md)
 - [Deployment and networking](docs/deployment.md)
 - [Development](docs/development.md)
 - [Releases](docs/npm-release.md)

@@ -36,7 +36,7 @@ import org.json.JSONObject
 internal fun TasksScreen(
     app: AppState,
     detailLoads: Map<SessionKey, LoadState<Unit>>,
-    modelLoads: Map<SessionKey, LoadState<List<ModelInfo>>>,
+    modelLoads: Map<SessionKey, LoadState<ModelCatalog>>,
     operations: Set<OperationKey>,
     selectedSessionId: String,
     onSessionSelected: (String) -> Unit,
@@ -48,6 +48,9 @@ internal fun TasksScreen(
     onCommand: (Session, String) -> Unit,
     onRespond: (Session, JSONObject) -> Unit,
     onSelectModel: (Session, ModelInfo) -> Unit,
+    onSetThinkingLevel: (Session, String) -> Unit,
+    onLoadSavedHistory: (Session) -> Unit,
+    onLoadEarlier: (Session) -> Unit,
 ) {
     // updatedAt changes continuously while an agent works; createdAt keeps the pager stable.
     val sessions = app.hosts.values
@@ -113,8 +116,8 @@ internal fun TasksScreen(
                 val session = sessions[pageIndex]
                 val key = SessionKey(session.hostId, session.id)
                 val detail = app.details[session.id]
-                LaunchedEffect(key, detail == null) {
-                    if (detail == null) loadSession(session, false)
+                LaunchedEffect(key, pagerState.currentPage) {
+                    if (pageIndex == pagerState.currentPage) loadSession(session, true)
                 }
                 val detailState = detail?.let { LoadState.Ready(it) }
                     ?: when (val request = detailLoads[key]) {
@@ -132,6 +135,9 @@ internal fun TasksScreen(
                     modelState = modelLoads[key],
                     onLoadModels = { force -> loadModels(session, force) },
                     onSelectModel = { model -> onSelectModel(session, model) },
+                    onSetThinkingLevel = { level -> onSetThinkingLevel(session, level) },
+                    onLoadSavedHistory = { onLoadSavedHistory(session) },
+                    onLoadEarlier = { onLoadEarlier(session) },
                 )
             }
         }

@@ -17,6 +17,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+class GatewayHttpException(val statusCode: Int, val errorCode: String?, message: String) : IOException(message)
+
 class GatewayApi {
     // Tailscale Serve and similar reverse tunnels can reset large HTTP/2 timeline responses with
     // PROTOCOL_ERROR. PinkCollab makes few independent requests, so HTTP/1.1 is the reliable path.
@@ -53,9 +55,13 @@ class GatewayApi {
                         val text = it.body?.string().orEmpty()
                         if (!continuation.isActive) return
                         if (it.isSuccessful) continuation.resume(text)
-                        else continuation.resumeWithException(
-                            IOException(runCatching { JSONObject(text).getString("error") }.getOrDefault("Gateway HTTP ${it.code}")),
-                        )
+                        else {
+                            val parsed = runCatching { JSONObject(text) }.getOrNull()
+                            val message = if (it.code == 426) "Update PinkCollab to use this Gateway"
+                                else parsed?.optString("message")?.ifBlank { parsed.optString("error") }?.ifBlank { "Gateway HTTP ${it.code}" }
+                                    ?: "Gateway HTTP ${it.code}"
+                            continuation.resumeWithException(GatewayHttpException(it.code, parsed?.optString("code"), message))
+                        }
                     }
                 } catch (error: Exception) {
                     // OkHttp does not route exceptions thrown while consuming a response body to

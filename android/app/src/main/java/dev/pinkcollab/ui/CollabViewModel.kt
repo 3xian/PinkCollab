@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import dev.pinkcollab.data.CredentialStore
 import dev.pinkcollab.data.GatewayRepository
 import dev.pinkcollab.data.ModelInfo
+import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.Session
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +38,7 @@ class CollabViewModel(application: Application) : AndroidViewModel(application) 
     internal val detailLoads = mutableDetailLoads.asStateFlow()
     private val detailLoadLock = Any()
 
-    private val mutableModelLoads = MutableStateFlow<Map<SessionKey, LoadState<List<ModelInfo>>>>(emptyMap())
+    private val mutableModelLoads = MutableStateFlow<Map<SessionKey, LoadState<ModelCatalog>>>(emptyMap())
     internal val modelLoads = mutableModelLoads.asStateFlow()
     private val modelLoadLock = Any()
 

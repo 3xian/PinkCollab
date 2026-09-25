@@ -158,6 +158,21 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                     repo.selectModel(session.hostId, session.id, model)
                                 }
                             },
+                            onSetThinkingLevel = { session, level ->
+                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
+                                    repo.setThinkingLevel(session.hostId, session.id, level)
+                                }
+                            },
+                            onLoadSavedHistory = { session ->
+                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
+                                    repo.loadSavedHistory(session.hostId, session.id)
+                                }
+                            },
+                            onLoadEarlier = { session ->
+                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
+                                    repo.loadEarlierHistory(session.hostId, session.id)
+                                }
+                            },
                         )
 
                         AppRoute.Resources -> ResourcesScreen(

@@ -1,85 +1,41 @@
 # Architecture
 
-Why the pieces are split this way, what each one stores, and which failures they survive. Day-to-day consequences are in [usage](usage.md#after-a-disconnect-or-restart). The wire contract is in [protocol](protocol.md).
-
-## Contents
-
-- [Components](#components)
-- [A session's lifetime](#a-sessions-lifetime)
-- [Where data lives](#where-data-lives)
-- [What a restart restores](#what-a-restart-restores)
-- [Why OMP keeps the transcript](#why-omp-keeps-the-transcript)
-
-## Components
+PinkCollab keeps OMP on the host. Android uses Gateway API v2 over HTTPS and WebSocket; the Gateway starts OMP through its local NDJSON RPC interface. See the [protocol](protocol.md) for wire details and [daily use](usage.md) for the app behavior.
 
 ```mermaid
 flowchart LR
-    A[Android] -->|HTTPS / WSS| T[HTTPS front end]
-    T -->|loopback HTTP| G[Gateway]
+    A[Android] -->|HTTPS / WSS| G[Gateway]
     G -->|NDJSON| O[OMP process]
-    O -->|provider API| P[Model provider]
-    G --- S[(SQLite)]
-    O --- J[(OMP session file)]
+    G --- S[(SQLite: identity, sessions, receipts)]
+    O --- J[(OMP transcript)]
+    O --> P[Model provider]
 ```
 
-| Piece | Role |
-| --- | --- |
-| Android app | Paired-host list, session pager, composer, attention card, model sheet. Holds the Gateway credential. Not a second agent. |
-| HTTPS front end | Terminates TLS and forwards HTTP and WebSocket, including `Authorization`, to loopback. Not part of the Gateway binary. |
-| Gateway | Authenticates devices, enforces the workspace allowlist, starts one OMP process per session, and fans events out to connected phones. |
-| OMP | Plans, calls tools, and talks to the model provider with the host's existing configuration. |
-| Model provider | Receives whatever OMP sends under that configuration. Outside the machine. |
+## Three lifecycles
 
-The Gateway is a Rust service using Tokio and Axum. Android is Kotlin and Jetpack Compose. Those choices are implementation details. They are not the reason to install it.
-
-PinkCollab does not replace OMP, attach to a process you started in a terminal, or relay traffic through a PinkCollab-operated cloud.
-
-<a id="a-tasks-lifetime"></a>
-## A session's lifetime
-
-1. The phone chooses a directory under an allowed root. The Gateway checks the path, then starts `omp --mode rpc-ui` with any configured `omp_args` in that directory. It waits up to 30 seconds for OMP's ready frame.
-2. An omitted prompt leaves the session idle and attached. The first composer send is an ordinary prompt.
-3. While the status is `running`, a further prompt is sent with `streamingBehavior=steer`. Otherwise it starts a new turn.
-4. `agent_end` marks the session `completed`. `turn_end` does not. Completion does not detach the process.
-5. **Interrupt** sends `abort`, sets `idle`, and keeps the process. **Stop** closes stdin, waits up to three seconds, then terminates the process and detaches it.
-6. If the process exits on its own outside `completed` or `failed`, the session becomes `stopped`. A transport failure marks it `failed`.
-
-`max_sessions` counts starting sessions and sessions with a live process. A completed-but-still-running session counts. The slot frees when the process is gone, not when the status word changes. See [reference](reference.md#max_sessions).
-
-Commands against a detached runtime fail. The app disables them. The API returns 409.
-
-## Where data lives
-
-| Data | Where | Leaves the host? |
-| --- | --- | --- |
-| Host id, client token hashes, pairing-token hashes, session metadata, OMP session-file path | Gateway SQLite (`pinkcollab.db`, WAL) in the data directory | No, except that a paired phone learns the host id and session metadata over the API |
-| Bearer credential | Phone, encrypted with Android Keystore; only a hash on the host | The phone must store it to reconnect. Revocation deletes the host-side hash. |
-| Provider credentials and model configuration | OMP, on the host | OMP may send them, prompts, or code to the configured provider. PinkCollab does not copy them onto the phone. |
-| Conversation and tool transcript | OMP's own session file | The phone receives the projection the Gateway serves. The file itself stays on the host. |
-| Live timeline, streaming deltas, event sequence | Gateway memory, up to 500 timeline items | Sent to connected phones. Not written to SQLite. |
-| Workspace files | The host filesystem | OMP can read and write them within the OS user's permissions. The allowlist does not stop that. |
-
-SQLite does not store the transcript. The session row's `session_file` is not part of the JSON sent to clients.
-
-The in-memory timeline and a reconstructed history share one retention rule: at most 500 items, dropping the oldest hidden tool bookkeeping before the oldest user, assistant, or error message.
-
-## What a restart restores
-
-| Event | Running OMP process | Session row | History you can read |
+| Object | Identity | Owner | Lifetime |
 | --- | --- | --- | --- |
-| Phone disconnects | Keeps running | Unchanged | Live view resumes from a new snapshot, not from missed deltas |
-| Gateway restarts | Not restored. A graceful shutdown stops processes the Gateway owned | Live statuses become `offline` and detached. `completed`, `failed`, and `stopped` keep their status, also detached | Current branch of the OMP session file, if it is still there, including paired tool calls and results, subject to the 500-item rule |
-| Host sleeps | Suspended with the machine. Not a PinkCollab resume feature | Unchanged until the Gateway process itself restarts | Unchanged |
-| Host shuts down | Gone | On the next Gateway start, previously live sessions are offline | Whatever OMP wrote before shutdown |
+| SessionRecord | `sessionId` | Gateway SQLite | Persistent conversation and display metadata; creating it does not start OMP |
+| Runtime | `runtimeGeneration` | Gateway supervisor and OMP | One live process; a later resume uses a new generation |
+| Operation | `clientId + sessionId + commandId` | Gateway SQLite | One user's command receipt; retrying its ID never dispatches it again |
 
-History reconstruction walks `parentId` from the latest entry and keeps that branch. It is not a replay of the WebSocket. Arguments are present when the call itself is in the file; a result-only reconstruction can have `arguments: null`. Lines that cannot be parsed are skipped. A missing file yields an empty timeline rather than an error to the client.
+The in-memory session controller owns each active session's runtime projection. Its `phase`, `execution`, pending inputs, model, and live messages come from actual process or OMP facts. A completed prompt can leave the process attached and the conversation ready for another prompt. A process slot is released only after confirmed exit. The Gateway checks the workspace again before every startup or resume. That allowlist governs browsing and runtime placement; it is not an operating system sandbox for OMP tools.
 
-"The file is on disk" does not mean the app can rebuild every live tool event, sequence number, or streaming draft.
+The supervisor drains OMP output independently of Android and uses a bounded frame reader. Stop is outside ordinary command dispatch, so a waiting prompt RPC cannot block process termination. An unclean Gateway death leaves a durable lease; startup will refuse another writer to that session until the old process has been verified gone. A graceful Gateway shutdown stops processes it owns.
 
-## Why OMP keeps the transcript
+## Data ownership and recovery
 
-The Gateway is a control plane for processes it starts. OMP already has a session log, provider setup, and tool runtime. Copying that log into SQLite would fork the record OMP itself continues. Leaving it in OMP's file means a Gateway upgrade does not migrate transcripts, and it also means PinkCollab cannot resurrect a process whose operating system has already reaped it.
+| Data | Authority | Recovery behavior |
+| --- | --- | --- |
+| Host identity, pairing, SessionRecord, OMP mapping, Operation receipt | Gateway SQLite | Preserved across clean restart and v1-to-v2 migration |
+| Conversation and tool transcript | OMP JSONL session file | Read on demand, by branch-bound pages; never copied into SQLite as another authority |
+| Process state, pending input, current model, live preview | Live OMP process and Gateway memory | Rebuilt from a new snapshot while the process lives; absent after process exit |
+| Android history pages | Local display cache | Valid only for the matching source and subscription |
 
-That split is why a restart can show an old conversation and still refuse another prompt: the text survived, the runtime did not.
+An old Session can be resumed by starting a new runtime and loading its server-side OMP mapping. Old unfinished Operations are marked cancelled or outcome unknown on restart and are never sent again automatically. Missing or corrupt history is an explicit error. OMP history and the live WebSocket projection are separate reads, so they do not form a single atomic transcript snapshot.
 
-Next: [protocol](protocol.md) if you are building a client, or [deployment](deployment.md) if you are deciding who can open the HTTPS front end.
+The Gateway tracks `epoch` and `revision` per subscribed resource. The host summary list and each open session detail have separate cursors. Android replaces a resource with its subscription snapshot and accepts only contiguous changes. A reconnect takes a fresh snapshot; there is no persistent event replay. This avoids resolving concurrent REST and WebSocket updates by timestamps.
+
+## Upgrade boundary
+
+Gateway API v1 and Android v1 are incompatible with v2. The database migration creates a consistent pre-v2 backup, keeps identity and credentials, and extracts durable fields from old session JSON. It does not copy v1 runtime status into v2. The OMP session files are not moved or deleted. Stop the old Gateway before migration; restoring the pre-v2 backup is the rollback path for an old binary.

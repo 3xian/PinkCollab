@@ -56,9 +56,12 @@ internal fun SessionPage(
     onPrompt: (String, () -> Unit) -> Unit,
     onCommand: (String) -> Unit,
     onRespond: (JSONObject) -> Unit,
-    modelState: LoadState<List<ModelInfo>>?,
+    modelState: LoadState<ModelCatalog>?,
     onLoadModels: (Boolean) -> Unit,
     onSelectModel: (ModelInfo) -> Unit,
+    onSetThinkingLevel: (String) -> Unit,
+    onLoadSavedHistory: () -> Unit,
+    onLoadEarlier: () -> Unit,
 ) {
     when (state) {
         LoadState.Loading -> {
@@ -78,12 +81,16 @@ internal fun SessionPage(
     var prompt by rememberSaveable(session.id) { mutableStateOf("") }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
     var showStopConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
+    var showSavedHistory by rememberSaveable(session.id) { mutableStateOf(false) }
+    LaunchedEffect(session.runtimeGeneration) { showSavedHistory = false }
     val attached = session.runtimeAttached && host?.connected == true
-    val displayTimeline = remember(detail.timeline) { projectSessionTimeline(detail.timeline) }
+    val historyMode = showSavedHistory && session.runtimeAttached
+    val visibleItems = if (historyMode) detail.historyItems else detail.timeline
+    val displayTimeline = remember(visibleItems) { projectSessionTimeline(visibleItems) }
     val timelineState = rememberLazyListState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
-    val inputEnabled = attached && !busy && session.attention == null
+    val inputEnabled = host?.connected == true && !busy && session.attention == null && session.status != "starting" && (!session.runtimeAttached || session.runtimeExecution != "unknown")
     val canSend = prompt.isNotBlank() && inputEnabled
     var inputFocused by remember { mutableStateOf(false) }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
@@ -141,16 +148,30 @@ internal fun SessionPage(
             ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            if (session.runtimeAttached) item(key = "history-toggle") {
+                TextButton(onClick = {
+                    showSavedHistory = !showSavedHistory
+                    followTimeline = !showSavedHistory
+                    if (showSavedHistory) onLoadSavedHistory()
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (historyMode) "Back to live" else "Saved history")
+                }
+            }
+            if (detail.nextHistoryCursor != null && (historyMode || !session.runtimeAttached)) item(key = "load-earlier") {
+                TextButton(onClick = onLoadEarlier, modifier = Modifier.fillMaxWidth()) {
+                    Text("Load earlier messages")
+                }
+            }
             if (displayTimeline.isEmpty()) item {
                 Text(
-                    "Waiting for the agent…",
+                    if (historyMode) "No saved messages on this branch yet" else "Waiting for the agent…",
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMid,
                 )
             }
             items(displayTimeline, key = { it.id }) { item -> DisplayItem(item, markwon) }
-            if (detail.streaming.isNotBlank()) item {
+            if (!historyMode && detail.streaming.isNotBlank()) item {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -167,6 +188,18 @@ internal fun SessionPage(
                     }
                 }
             }
+            detail.operations.lastOrNull()?.takeIf { it.status != "succeeded" }?.let { receipt -> item(key = "operation-${receipt.commandId}") {
+                val text = when (receipt.status) {
+                    "accepted" -> "${receipt.commandType}: received by Gateway"
+                    "dispatching" -> "${receipt.commandType}: sending to OMP"
+                    "running" -> "${receipt.commandType}: running"
+                    "outcome_unknown" -> "${receipt.commandType}: outcome unconfirmed; check this session before retrying"
+                    "failed" -> "${receipt.commandType}: ${receipt.errorCode ?: "failed"}"
+                    "cancelled" -> "${receipt.commandType}: cancelled"
+                    else -> "${receipt.commandType}: ${receipt.status}"
+                }
+                Text(text, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = if (receipt.status == "outcome_unknown" || receipt.status == "failed") Red400 else TextMid)
+            } }
             session.attention?.let { attention -> item { AttentionCard(attention, !busy && attached, onRespond) } }
             item(key = "composer-placeholder") {
                 Spacer(
@@ -260,6 +293,13 @@ internal fun SessionPage(
                     enabled = attached && !busy,
                     color = Purple200,
                 )
+                if (!session.runtimeAttached) ComposerActionButton(
+                    icon = Icons.Outlined.Tune,
+                    label = "Start",
+                    onClick = { onCommand("start") },
+                    enabled = host?.connected == true && !busy,
+                    color = Purple200,
+                )
                 ComposerActionButton(
                     icon = Icons.Outlined.PauseCircleOutline,
                     label = "Interrupt",
@@ -292,6 +332,10 @@ internal fun SessionPage(
             select = { model ->
                 showModels = false
                 onSelectModel(model)
+            },
+            selectThinkingLevel = { level ->
+                showModels = false
+                onSetThinkingLevel(level)
             },
         )
     }
