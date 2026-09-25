@@ -4,7 +4,7 @@ use pinkcollab_gateway::{
     api::{self, App},
     events::Bus,
     model::Host,
-    session::Registry,
+    session::{InputResponse, Registry},
     storage::Store,
     workspace::Browser,
 };
@@ -674,6 +674,54 @@ async fn disconnected_client_does_not_abandon_runtime() {
     .await
     .unwrap();
     h.registry.close().await;
+}
+
+#[tokio::test]
+async fn stopped_detail_refreshes_history_after_the_log_changes() {
+    let h = Harness::new(8).await;
+    let session = h
+        .registry
+        .create(
+            h.host.id.clone(),
+            h.cwd("cached-history"),
+            String::new(),
+            String::new(),
+        )
+        .await
+        .unwrap();
+    h.registry
+        .command(
+            session.id.clone(),
+            "stop".into(),
+            String::new(),
+            InputResponse::default(),
+        )
+        .await
+        .unwrap();
+    let path = std::path::Path::new(&session.session_file);
+    let first = json!({"id":"a","parentId":null,"type":"message","timestamp":"2026-09-20T00:00:00Z","message":{"role":"user","content":"First"}});
+    std::fs::write(path, format!("{first}\n")).unwrap();
+    assert_eq!(
+        h.registry.detail(&session.id).await.unwrap().timeline[0].text,
+        "First"
+    );
+
+    let second = json!({"id":"b","parentId":"a","type":"message","timestamp":"2026-09-20T00:00:01Z","message":{"role":"user","content":"Second"}});
+    use std::io::Write;
+    writeln!(
+        std::fs::OpenOptions::new().append(true).open(path).unwrap(),
+        "{second}"
+    )
+    .unwrap();
+    let detail = h.registry.detail(&session.id).await.unwrap();
+    assert_eq!(
+        detail
+            .timeline
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>(),
+        ["First", "Second"]
+    );
 }
 
 #[tokio::test]

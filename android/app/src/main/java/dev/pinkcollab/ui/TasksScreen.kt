@@ -87,6 +87,7 @@ internal fun TasksScreen(
                         description = "PinkCollab could not load sessions from the paired hosts.",
                         action = "Manage hosts",
                         onAction = openResources,
+                        modifier = Modifier.offset(y = (-56).dp),
                     )
 
                     TaskListLoadState.Ready -> if (app.hosts.isEmpty()) {

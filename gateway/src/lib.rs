@@ -2,6 +2,7 @@ pub mod api;
 pub mod config;
 pub mod events;
 pub mod funnel;
+mod history;
 pub mod model;
 mod model_cycle;
 pub mod omp;

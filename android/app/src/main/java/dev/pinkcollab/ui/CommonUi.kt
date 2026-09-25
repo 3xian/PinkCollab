@@ -11,6 +11,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.ui.theme.PrimaryButton
 import dev.pinkcollab.ui.theme.Purple400
@@ -21,27 +22,41 @@ internal fun EmptyState(
     description: String,
     action: String? = null,
     onAction: () -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Box(
-            Modifier.size(96.dp).drawBehind {
-                drawCircle(Brush.radialGradient(listOf(Purple400.copy(alpha = 0.30f), Color.Transparent)))
-            },
-            contentAlignment = Alignment.Center,
+    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+        Column(
+            modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(Icons.Outlined.Hub, null, Modifier.size(52.dp), tint = Purple400)
-        }
-        Spacer(Modifier.height(24.dp))
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(8.dp))
-        Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-        action?.let {
+            Box(
+                Modifier.size(96.dp).drawBehind {
+                    drawCircle(Brush.radialGradient(listOf(Purple400.copy(alpha = 0.30f), Color.Transparent)))
+                },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Outlined.Hub, null, Modifier.size(52.dp), tint = Purple400)
+            }
             Spacer(Modifier.height(24.dp))
-            PrimaryButton(onClick = onAction) { Text(it) }
+            Text(
+                title,
+                modifier = Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                description,
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+            action?.let {
+                Spacer(Modifier.height(24.dp))
+                PrimaryButton(onClick = onAction) { Text(it) }
+            }
         }
     }
 }

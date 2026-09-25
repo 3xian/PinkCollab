@@ -1,6 +1,8 @@
+pub use crate::history::history;
+use crate::history::{HistoryCache, TIMELINE_LIMIT, trim_timeline};
 use crate::{
     events::{self, Bus},
-    model::{Detail, ModelChoice, ModelInfo, Session, TimelineItem},
+    model::{Attention, Detail, ModelChoice, ModelInfo, Session, TimelineItem},
     model_cycle,
     omp::{self, Output, Runtime},
     storage::{self, Store},
@@ -11,13 +13,14 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::Path, sync::Arc};
-use tokio::sync::Mutex;
-
-/// How many timeline items a session keeps in memory. Both the live timeline and a reconstructed
-/// history use the same number and the same retention policy.
-const TIMELINE_LIMIT: usize = 500;
+use tokio::{
+    sync::{Mutex, OwnedMutexGuard},
+    task::JoinHandle,
+};
 
 struct Entry {
+    // Exposed to readers only after the matching SQLite write succeeds.
+    committed_session: Session,
     session: Session,
     timeline: Vec<TimelineItem>,
     model: Option<ModelInfo>,
@@ -40,7 +43,11 @@ fn detach(e: &mut Entry) {
     e.session.runtime_attached = false;
 }
 pub struct Registry {
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
+    // Acquired before `state` for metadata changes, then held until the write is committed back
+    // into memory. This keeps durable snapshots and their events in mutation order.
+    persist_gate: Arc<Mutex<()>>,
+    history_cache: HistoryCache,
     store: Arc<Store>,
     pub bus: Arc<Bus>,
     browser: Arc<Browser>,
@@ -83,6 +90,7 @@ impl Registry {
             entries.insert(
                 session.id.clone(),
                 Entry {
+                    committed_session: session.clone(),
                     session,
                     timeline: Vec::new(),
                     model: None,
@@ -94,10 +102,12 @@ impl Registry {
             );
         }
         Ok(Arc::new(Self {
-            state: Mutex::new(State {
+            state: Arc::new(Mutex::new(State {
                 entries,
                 closing: false,
-            }),
+            })),
+            persist_gate: Arc::new(Mutex::new(())),
+            history_cache: HistoryCache::default(),
             store,
             bus,
             browser,
@@ -109,7 +119,11 @@ impl Registry {
     }
     pub async fn list(&self) -> Vec<Session> {
         let state = self.state.lock().await;
-        let mut list: Vec<_> = state.entries.values().map(|e| e.session.clone()).collect();
+        let mut list: Vec<_> = state
+            .entries
+            .values()
+            .map(|e| e.committed_session.clone())
+            .collect();
         list.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
         list
     }
@@ -117,11 +131,16 @@ impl Registry {
         let (session, timeline, model) = {
             let state = self.state.lock().await;
             let e = state.entries.get(id).context("session not found")?;
-            (e.session.clone(), e.timeline.clone(), e.model.clone())
+            (
+                e.committed_session.clone(),
+                e.timeline.clone(),
+                e.model.clone(),
+            )
         };
         // OMP owns transcripts. Read its branch-aware session log on demand instead of copying it to SQLite.
         let timeline = if timeline.is_empty() && !session.session_file.is_empty() {
-            history(Path::new(&session.session_file))
+            self.history_cache
+                .load(Path::new(&session.session_file))
                 .await
                 .unwrap_or_default()
         } else {
@@ -133,6 +152,7 @@ impl Registry {
             model,
         })
     }
+
     pub async fn cycle_model(&self, id: &str) -> Result<ModelInfo> {
         let (gate, runtime) = self.runtime(id).await?;
         let _guard = gate.lock().await;
@@ -258,11 +278,51 @@ impl Registry {
             .context("session has no attached OMP runtime")?;
         Ok((e.command.clone(), runtime))
     }
-    fn save(&self, e: &mut Entry) -> Result<()> {
+    fn queue_entry_save(
+        &self,
+        e: &mut Entry,
+        gate: OwnedMutexGuard<()>,
+        attention_created: Option<Attention>,
+    ) -> JoinHandle<Result<()>> {
         e.session.updated_at = Utc::now();
-        self.store.save(&e.session)?;
-        self.bus.publish("session.updated", json!(e.session));
-        Ok(())
+        let session = e.session.clone();
+        let store = self.store.clone();
+        let bus = self.bus.clone();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            let _gate = gate;
+            let write_session = session.clone();
+            let result = tokio::task::spawn_blocking(move || store.save(&write_session))
+                .await
+                .context("session metadata writer stopped")
+                .and_then(|result| result);
+            let mut state = state.lock().await;
+            let e = state
+                .entries
+                .get_mut(&session.id)
+                .context("session removed during save")?;
+            match result {
+                Ok(()) => {
+                    e.committed_session = session.clone();
+                    if let Some(attention) = attention_created {
+                        bus.publish(
+                            "attention.created",
+                            json!({"sessionId":session.id,"attention":attention}),
+                        );
+                    }
+                    bus.publish("session.updated", json!(session));
+                    Ok(())
+                }
+                Err(err) => {
+                    e.session = e.committed_session.clone();
+                    Err(err)
+                }
+            }
+        })
+    }
+
+    async fn saved(write: JoinHandle<Result<()>>) -> Result<()> {
+        write.await.context("session metadata writer stopped")?
     }
     fn item(&self, e: &mut Entry, mut item: TimelineItem) {
         if item.id.is_empty() {
@@ -302,6 +362,16 @@ impl Registry {
         result
     }
     async fn apply(&self, id: &str, f: Value) -> Result<()> {
+        let mut update = events::normalize(&f);
+        let changed = update.status.is_some()
+            || update.activity.is_some()
+            || update.attention.is_some()
+            || update.clear_attention;
+        let gate = if changed {
+            Some(self.persist_gate.clone().lock_owned().await)
+        } else {
+            None
+        };
         let mut state = self.state.lock().await;
         let Some(e) = state.entries.get_mut(id) else {
             return Ok(());
@@ -326,11 +396,6 @@ impl Registry {
         {
             return Ok(());
         }
-        let mut update = events::normalize(&f);
-        let changed = update.status.is_some()
-            || update.activity.is_some()
-            || update.attention.is_some()
-            || update.clear_attention;
         if let Some(status) = update.status {
             let status = if status == "completed" && e.session.status == "failed" {
                 update.activity = Some(e.session.activity.clone());
@@ -353,23 +418,27 @@ impl Registry {
             e.session.attention = None;
             e.session.needs_attention = false;
         }
+        let attention_created = update.attention.clone();
         if let Some(attention) = update.attention {
             e.session.needs_attention = true;
-            self.bus.publish(
-                "attention.created",
-                json!({"sessionId":id,"attention":attention}),
-            );
             e.session.attention = Some(attention);
         }
         if let Some(item) = update.item {
             self.item(e, item);
         }
-        if changed {
-            self.save(e)?;
+        let write = if changed {
+            Some(self.queue_entry_save(e, gate.unwrap(), attention_created))
+        } else {
+            None
+        };
+        drop(state);
+        if let Some(write) = write {
+            Self::saved(write).await?;
         }
         Ok(())
     }
     async fn exit(&self, id: &str, error: Option<String>) -> Result<()> {
+        let gate = self.persist_gate.clone().lock_owned().await;
         let mut state = self.state.lock().await;
         let Some(e) = state.entries.get_mut(id) else {
             return Ok(());
@@ -388,7 +457,9 @@ impl Registry {
             e.session.status = "stopped".into();
             e.session.activity = "OMP process exited".into();
         }
-        self.save(e)
+        let write = self.queue_entry_save(e, gate, None);
+        drop(state);
+        Self::saved(write).await
     }
     pub async fn create(
         self: &Arc<Self>,
@@ -453,6 +524,7 @@ impl Registry {
         let _guard = command.lock().await;
         let session_id = session.id.clone();
         {
+            let _gate = self.persist_gate.clone().lock_owned().await;
             let mut state = self.state.lock().await;
             ensure!(!state.closing, "gateway is shutting down");
             ensure!(
@@ -465,11 +537,13 @@ impl Registry {
                     < self.max,
                 "OMP runtime limit reached"
             );
+            // Creation is infrequent and must not expose a session before its first durable row.
             self.store.save(&session)?;
             self.bus.publish("session.updated", json!(session));
             state.entries.insert(
                 session_id.clone(),
                 Entry {
+                    committed_session: session.clone(),
                     session,
                     timeline: Vec::new(),
                     model: None,
@@ -488,13 +562,15 @@ impl Registry {
                 return Err(err);
             }
         };
-        {
+        let gate = self.persist_gate.clone().lock_owned().await;
+        let write = {
             let mut state = self.state.lock().await;
             let entry = state.entries.get_mut(&session_id).unwrap();
             entry.runtime = Some(runtime.clone());
             entry.session.runtime_attached = true;
-            self.save(entry)?;
-        }
+            self.queue_entry_save(entry, gate, None)
+        };
+        Self::saved(write).await?;
         let weak = Arc::downgrade(self);
         let event_id = session_id.clone();
         tokio::spawn(async move {
@@ -514,7 +590,8 @@ impl Registry {
         let result = async {
             runtime.wait_ready().await?;
             let response = runtime.request(json!({"type":"get_state"})).await?;
-            {
+            let gate = self.persist_gate.clone().lock_owned().await;
+            let write = {
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(&session_id).unwrap();
                 e.session.session_file = omp::string(&response["data"], "sessionFile").into();
@@ -525,8 +602,9 @@ impl Registry {
                     e.session.status = "idle".into();
                     e.session.activity = "Ready".into();
                 }
-                self.save(e)?;
-            }
+                self.queue_entry_save(e, gate, None)
+            };
+            Self::saved(write).await?;
             if has_initial_prompt {
                 let ack = runtime
                     .request(json!({"type":"prompt","message":prompt}))
@@ -543,7 +621,8 @@ impl Registry {
         }
         .await;
         if let Err(err) = result {
-            {
+            let gate = self.persist_gate.clone().lock_owned().await;
+            let write = {
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(&session_id).unwrap();
                 e.session.status = "failed".into();
@@ -553,18 +632,21 @@ impl Registry {
                     "OMP startup failed"
                 }
                 .into();
-                self.save(e)?;
-            }
+                self.queue_entry_save(e, gate, None)
+            };
+            Self::saved(write).await?;
             runtime.stop().await;
             // The process is gone, so release its quota here. Waiting for the exit report to come
             // back through the event loop leaves a window where a failed start still counts, and a
             // caller retrying right after a startup failure would be told the limit is reached.
-            {
+            let gate = self.persist_gate.clone().lock_owned().await;
+            let write = {
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(&session_id).unwrap();
                 detach(e);
-                self.save(e)?;
-            }
+                self.queue_entry_save(e, gate, None)
+            };
+            Self::saved(write).await?;
             return Err(err);
         }
         Ok(self.detail(&session_id).await?.session)
@@ -601,6 +683,9 @@ impl Registry {
                 .clone()
         };
         let _guard = gate.lock().await;
+        // A command must decide against the latest durable attention and status, including an
+        // update whose SQLite write was already queued when the command arrived.
+        let persist = self.persist_gate.lock().await;
         let (runtime, session) = {
             let state = self.state.lock().await;
             let e = state.entries.get(id).context("session not found")?;
@@ -609,9 +694,10 @@ impl Registry {
                     .clone()
                     .filter(|r| r.alive())
                     .context("session has no attached OMP runtime")?,
-                e.session.clone(),
+                e.committed_session.clone(),
             )
         };
+        drop(persist);
         match command {
             "prompt" => {
                 ensure!(
@@ -644,13 +730,16 @@ impl Registry {
                     state.entries.get_mut(id).unwrap().interrupted = true;
                 }
                 runtime.request(json!({"type":"abort"})).await?;
+                let persist = self.persist_gate.clone().lock_owned().await;
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(id).unwrap();
                 e.session.status = "idle".into();
                 e.session.activity = "Interrupted".into();
                 e.session.attention = None;
                 e.session.needs_attention = false;
-                self.save(e)?;
+                let write = self.queue_entry_save(e, persist, None);
+                drop(state);
+                Self::saved(write).await?;
             }
             "stop" => {
                 {
@@ -681,9 +770,11 @@ impl Registry {
                     format!("Answered: {}", response.value)
                 };
                 runtime.write(frame).await?;
+                let persist = self.persist_gate.clone().lock_owned().await;
                 let mut state = self.state.lock().await;
                 let e = state.entries.get_mut(id).unwrap();
-                if e.session
+                let write = if e
+                    .session
                     .attention
                     .as_ref()
                     .is_some_and(|current| current.id == a.id)
@@ -692,15 +783,22 @@ impl Registry {
                     e.session.needs_attention = false;
                     e.session.status = "running".into();
                     e.session.activity = "Thinking".into();
-                    self.save(e)?;
-                }
+                    Some(self.queue_entry_save(e, persist, None))
+                } else {
+                    None
+                };
                 self.item(e, events::item("user", text, ""));
+                drop(state);
+                if let Some(write) = write {
+                    Self::saved(write).await?;
+                }
             }
             _ => bail!("unknown command"),
         }
         Ok(())
     }
     pub async fn delete(&self, id: &str) -> Result<()> {
+        let _persist = self.persist_gate.clone().lock_owned().await;
         let mut state = self.state.lock().await;
         let e = state.entries.get(id).context("session not found")?;
         ensure!(
@@ -767,152 +865,6 @@ fn model_info(value: &Value) -> Result<ModelInfo> {
     })
 }
 
-pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
-    use futures_util::StreamExt;
-    use tokio_util::codec::{FramedRead, LinesCodec};
-    let file = tokio::fs::File::open(path).await?;
-    let mut lines = FramedRead::new(file, LinesCodec::new_with_max_length(16 * 1024 * 1024));
-    let mut entries = HashMap::<String, Value>::new();
-    let mut leaf = String::new();
-    while let Some(line) = lines.next().await {
-        let line = line?;
-        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-        let id = omp::string(&entry, "id");
-        if !id.is_empty() {
-            leaf = id.into();
-            entries.insert(id.into(), entry);
-        }
-    }
-    let mut chain = vec![];
-    let mut visited = std::collections::HashSet::new();
-    while !leaf.is_empty() && visited.insert(leaf.clone()) {
-        let Some(entry) = entries.get(&leaf) else {
-            break;
-        };
-        chain.push(entry);
-        leaf = omp::string(entry, "parentId").into();
-    }
-    chain.reverse();
-    let mut timeline: Vec<TimelineItem> = vec![];
-    for entry in chain {
-        if entry["type"] != "message" {
-            continue;
-        }
-        let m = &entry["message"];
-        let role = omp::string(m, "role");
-        let timestamp = omp::string(entry, "timestamp")
-            .parse()
-            .unwrap_or_else(|_| Utc::now());
-        if role == "toolResult" || role == "tool" {
-            let call_id = omp::string(m, "toolCallId");
-            if call_id.is_empty() {
-                continue;
-            }
-            let result = omp::text_content(m);
-            upsert_tool(
-                &mut timeline,
-                TimelineItem::tool_completed(
-                    call_id,
-                    omp::string(m, "toolName"),
-                    result,
-                    m["isError"] == true,
-                    timestamp,
-                ),
-            );
-            continue;
-        }
-        if !["user", "assistant"].contains(&role) {
-            continue;
-        }
-        let entry_id = omp::string(entry, "id");
-        if role == "assistant"
-            && let Some(parts) = m["content"].as_array()
-        {
-            for (index, part) in parts.iter().enumerate() {
-                match omp::string(part, "type") {
-                    "text" => {
-                        let text = omp::string(part, "text").trim();
-                        if !text.is_empty() {
-                            timeline.push(TimelineItem {
-                                id: format!("{entry_id}:{index}"),
-                                kind: "assistant".into(),
-                                text: text.into(),
-                                detail: String::new(),
-                                tool: None,
-                                timestamp,
-                            });
-                        }
-                    }
-                    "toolCall" => {
-                        let call_id = omp::string(part, "id");
-                        let name = omp::string(part, "name");
-                        if call_id.is_empty() || name.is_empty() {
-                            continue;
-                        }
-                        let arguments = part["arguments"].clone();
-                        upsert_tool(
-                            &mut timeline,
-                            TimelineItem::tool_started(call_id, name, arguments, timestamp),
-                        );
-                    }
-                    _ => {}
-                }
-            }
-            if omp::string(m, "stopReason") == "error" {
-                timeline.push(TimelineItem {
-                    id: format!("{entry_id}:error"),
-                    kind: "error".into(),
-                    text: omp::string(m, "errorMessage").into(),
-                    detail: String::new(),
-                    tool: None,
-                    timestamp,
-                });
-            }
-            continue;
-        }
-        let text = m["content"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| omp::text_content(m));
-        if !text.is_empty() {
-            timeline.push(TimelineItem {
-                id: entry_id.into(),
-                kind: role.into(),
-                text,
-                detail: String::new(),
-                tool: None,
-                timestamp,
-            });
-        }
-    }
-    trim_timeline(&mut timeline, TIMELINE_LIMIT);
-    Ok(timeline)
-}
-
-/// Upserts a tool item by call id. A transcript can hold the result of a call in a different entry
-/// than the call itself (or in the other order), and both frames describe one call.
-fn upsert_tool(timeline: &mut Vec<TimelineItem>, item: TimelineItem) {
-    match timeline.iter_mut().find(|existing| existing.id == item.id) {
-        Some(existing) => existing.merge_tool_update(item),
-        None => timeline.push(item),
-    }
-}
-
-fn is_visible_timeline_boundary(item: &TimelineItem) -> bool {
-    matches!(item.kind.as_str(), "user" | "assistant" | "error")
-}
-
-/// Drops the oldest hidden bookkeeping before the oldest visible message, so a burst of tool calls
-/// cannot push the conversation itself out of the timeline. Shared by the live timeline and by
-/// reconstructed history, which are documented as using the same retention policy.
-fn trim_timeline(timeline: &mut Vec<TimelineItem>, limit: usize) {
-    while timeline.len() > limit {
-        let index = timeline
-            .iter()
-            .position(|item| !is_visible_timeline_boundary(item))
-            .unwrap_or(0);
-        timeline.remove(index);
-    }
-}
+#[cfg(test)]
+#[path = "session_tests.rs"]
+mod tests;
