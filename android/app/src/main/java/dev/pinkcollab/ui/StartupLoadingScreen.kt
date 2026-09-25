@@ -1,11 +1,13 @@
 package dev.pinkcollab.ui
 
+import android.graphics.Movie
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -15,18 +17,27 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -86,14 +97,7 @@ internal fun StartupLoadingScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Image(
-                painter = painterResource(R.drawable.pinkcollab_logo),
-                contentDescription = null,
-                modifier = Modifier
-                    .width(88.dp)
-                    .height(88.dp)
-                    .clip(RoundedCornerShape(20.dp)),
-            )
+            AnimatedStartupLogo()
             Spacer(Modifier.height(20.dp))
             Text(
                 "PinkCollab",
@@ -133,6 +137,51 @@ internal fun StartupLoadingScreen() {
                 "Syncing OMP sessions…",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMid.copy(alpha = captionAlpha),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnimatedStartupLogo() {
+    val context = LocalContext.current
+    val movie = remember(context) {
+        context.resources.openRawResource(R.raw.login_logo).use(Movie::decodeStream)
+    }
+    var elapsedMillis by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(movie) {
+        var startNanos = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (startNanos == 0L) startNanos = now
+                elapsedMillis = (now - startNanos) / 1_000_000L
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .size(176.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(Color(0xFFF7F7FA))
+            .padding(8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (movie != null) {
+            Canvas(Modifier.fillMaxSize()) {
+                val frameDuration = movie.duration().takeIf { it > 0 } ?: 1920
+                val canvas = drawContext.canvas.nativeCanvas
+                val saved = canvas.save()
+                canvas.scale(size.width / movie.width(), size.height / movie.height())
+                movie.setTime((elapsedMillis % frameDuration).toInt())
+                movie.draw(canvas, 0f, 0f)
+                canvas.restoreToCount(saved)
+            }
+        } else {
+            Image(
+                painter = painterResource(R.drawable.pinkcollab_logo),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
