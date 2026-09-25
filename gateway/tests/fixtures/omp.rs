@@ -19,6 +19,17 @@ fn flood_stdout() -> ! {
     }
     std::process::exit(1);
 }
+#[allow(clippy::zombie_processes)] // The fixture deliberately leaves its child for the Gateway job to reap.
+fn spawn_lingering_child(cwd: &std::path::Path) {
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--linger-child")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    std::fs::write(cwd.join("child.pid"), child.id().to_string()).unwrap();
+}
 fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
     let id = pinkcollab_gateway::storage::id("message_");
     let message =
@@ -42,6 +53,10 @@ fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
 }
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
+    if args.iter().any(|arg| arg == "--linger-child") {
+        std::thread::sleep(std::time::Duration::from_secs(300));
+        return;
+    }
     if args.get(1).map(String::as_str) == Some("config")
         && args.get(2).map(String::as_str) == Some("list")
     {
@@ -72,6 +87,13 @@ fn main() {
     // that grows a buffer until OMP stops writing.
     if args.iter().any(|arg| arg == "--flood-stdout") {
         flood_stdout();
+    }
+    if args.iter().any(|arg| arg == "--spawn-child") {
+        let cwd = std::env::current_dir().unwrap();
+        while !cwd.join("job-ready").exists() {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        spawn_lingering_child(&cwd);
     }
     let log = std::env::current_dir()
         .unwrap()

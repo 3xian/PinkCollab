@@ -8,4 +8,6 @@ pub mod omp;
 pub mod storage;
 pub mod v2_model;
 pub mod v2_runtime;
+#[cfg(windows)]
+mod windows_job;
 pub mod workspace;

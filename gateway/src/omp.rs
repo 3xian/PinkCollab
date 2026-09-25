@@ -54,32 +54,49 @@ pub enum Output {
 /// blocked stdin write nor a stalled event consumer can keep a stop from taking effect.
 struct Process {
     child: Mutex<Child>,
-    terminated: AtomicBool,
+    #[cfg(windows)]
+    job: crate::windows_job::Job,
 }
 
 impl Process {
-    /// Idempotent. Closes nothing itself: closing stdin is the writer's job, and this waits out
-    /// `grace` for OMP to exit on its own before killing and reaping. Returns the exit status, or
-    /// `None` when another caller already terminated the process.
-    fn terminate(&self, grace: Duration) -> Option<ExitStatus> {
-        if self.terminated.swap(true, Ordering::SeqCst) {
-            return None;
-        }
+    /// Concurrent callers serialize on the child handle and observe the same reaped exit status.
+    /// A failed kill or wait is an error, never evidence that the process has exited.
+    fn terminate(&self, grace: Duration) -> Result<ExitStatus> {
         let mut child = self.child.lock();
         let deadline = Instant::now() + grace;
         loop {
-            match child.try_wait() {
-                Ok(Some(status)) => return Some(status),
-                Ok(None) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20));
+            if let Some(status) = child.try_wait().context("cannot inspect OMP process")? {
+                #[cfg(not(windows))]
+                return Ok(status);
+                #[cfg(windows)]
+                if self.job.empty()? {
+                    return Ok(status);
                 }
-                // Nothing left to wait for: kill it and reap it so no zombie survives the session.
-                _ => break,
             }
+            if Instant::now() >= deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
-        let _ = child.kill();
-        let _ = child.wait();
-        child.try_wait().ok().flatten()
+        #[cfg(windows)]
+        {
+            self.job.terminate_and_wait()?;
+            child.wait().context("cannot reap OMP process")
+        }
+        #[cfg(not(windows))]
+        {
+            if let Err(err) = child.kill() {
+                // The child may have exited between the final poll and the kill request.
+                if let Some(status) = child
+                    .try_wait()
+                    .context("cannot inspect OMP after kill failed")?
+                {
+                    return Ok(status);
+                }
+                return Err(err).context("cannot kill OMP process");
+            }
+            child.wait().context("cannot reap OMP process")
+        }
     }
 }
 
@@ -96,13 +113,22 @@ struct Shutdown {
 impl Shutdown {
     /// Idempotent: ends the process, releases every pending request and reports the outcome once.
     fn finish(&self, reason: Option<String>) {
+        if self.finished.load(Ordering::SeqCst) {
+            return;
+        }
+        let status = match self.process.terminate(TERMINATE_GRACE) {
+            Ok(status) => status,
+            Err(err) => {
+                eprintln!("Could not confirm OMP exit: {err:#}");
+                return;
+            }
+        };
         if self.finished.swap(true, Ordering::SeqCst) {
             return;
         }
-        let status = self.process.terminate(TERMINATE_GRACE);
         // A stop we requested is not a crash; `session::exit` already reports it as stopped.
         let reason = reason.or_else(|| {
-            (!*self.requested.borrow() && status.is_some_and(|status| !status.success()))
+            (!*self.requested.borrow() && !status.success())
                 .then(|| "OMP process exited unexpectedly".to_string())
         });
         self.pending.lock().clear();
@@ -140,6 +166,15 @@ impl Runtime {
             .stderr(Stdio::null())
             .spawn()
             .with_context(|| format!("cannot start OMP at {executable} in {}", cwd.display()))?;
+        #[cfg(windows)]
+        let job = match crate::windows_job::Job::attach(&child) {
+            Ok(job) => job,
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+        };
         let stdin = child.stdin.take().context("OMP stdin unavailable")?;
         let stdout = child.stdout.take().context("OMP stdout unavailable")?;
         let (input, mut commands) = mpsc::channel::<(Value, oneshot::Sender<Result<()>>)>(32);
@@ -151,7 +186,8 @@ impl Runtime {
         let pending = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
         let process = Arc::new(Process {
             child: Mutex::new(child),
-            terminated: AtomicBool::new(false),
+            #[cfg(windows)]
+            job,
         });
         let shutdown = Arc::new(Shutdown {
             process: process.clone(),
@@ -312,7 +348,7 @@ impl Runtime {
         )
         .await
         .context("OMP termination did not finish")?
-        .context("OMP terminator failed")?;
+        .context("OMP terminator failed")??;
         let mut exited = self.exited.clone();
         tokio::time::timeout(Duration::from_secs(12), async {
             while !*exited.borrow() {
@@ -341,7 +377,9 @@ impl Drop for Runtime {
     /// Takes the place of tokio's `kill_on_drop`: the last handle must not leave an orphaned OMP.
     fn drop(&mut self) {
         let _ = self.stop.send(true);
-        self.process.terminate(Duration::ZERO);
+        if let Err(err) = self.process.terminate(Duration::ZERO) {
+            eprintln!("Could not confirm OMP exit during drop: {err:#}");
+        }
     }
 }
 

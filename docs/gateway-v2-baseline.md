@@ -34,10 +34,10 @@ The v1 SQLite `sessions.metadata` JSON contains both management and runtime fiel
 
 ## Implementation verification
 
-- `cargo test --all-targets --features test-fixtures`: 29 tests passed; the separate real OMP test is ignored by the default suite.
+- `cargo test --all-targets --features test-fixtures`: 31 tests passed; the separate real OMP test is ignored by the default suite. This includes concurrent Stop callers and a Windows child-process cleanup test.
 - `cargo test --test omp_smoke real_omp_rpc_ui_handshake -- --ignored`: passed with installed `omp/18.3.1`. It checks ready, state, model/thinking queries, session reload into a second process, and clean stop without invoking a provider. It does not verify a paid model prompt or every OMP error form.
 - `cargo clippy --all-targets --features test-fixtures -- -D warnings`: passed.
 - `cargo build --release`: passed.
-- Android `:app:testDebugUnitTest :app:assembleDebug`: passed. Physical-device reconnect and operating-system process-tree behavior have not been exercised here.
+- Android `:app:testDebugUnitTest :app:assembleDebug`: passed. Physical-device reconnect has not been exercised here. Windows process-tree cleanup was exercised with a fixture child; the Job Object is attached immediately after spawn, so a process created in that brief interval is outside the fixture's coverage.
 
 Boundaries in this implementation: OMP transport frames are capped at 1 MiB; a live session keeps at most 64 display items and 8 KiB of text per item; history reads allow two concurrent readers, up to 128 MiB per source file, 16 MiB per line, 100 items per page, and 8 MiB per response. The WebSocket broadcast ring has 32 entries and sends `resync_required` when a subscriber falls behind. These are configured limits, not measured performance gains. No comparable pre-v2 load benchmark was captured, so no CPU, memory, or latency improvement is claimed.

@@ -92,3 +92,50 @@ async fn a_requested_stop_is_not_reported_as_a_crash() {
         None
     );
 }
+
+#[tokio::test]
+async fn concurrent_stops_confirm_one_exit() {
+    let (_dir, runtime, mut output) = fixture(&["--stall-stdin"]);
+    runtime.wait_ready().await.unwrap();
+    let stops = (0..8)
+        .map(|_| {
+            let runtime = runtime.clone();
+            tokio::spawn(async move { runtime.stop_confirmed().await })
+        })
+        .collect::<Vec<_>>();
+    for stop in stops {
+        tokio::time::timeout(Duration::from_secs(20), stop)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+    assert!(!runtime.alive());
+    assert_eq!(next_exit(&mut output).await, None);
+    assert!(output.recv().await.is_none(), "exit must be reported once");
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn stop_reaps_the_omp_process_tree() {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
+
+    let (dir, runtime, mut output) = fixture(&["--spawn-child", "--stall-stdin"]);
+    std::fs::write(dir.path().join("job-ready"), "").unwrap();
+    runtime.wait_ready().await.unwrap();
+    let pid: u32 = std::fs::read_to_string(dir.path().join("child.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let raw = unsafe { OpenProcess(0x0010_0000, 0, pid) }; // SYNCHRONIZE
+    assert!(!raw.is_null(), "fixture child must be running");
+    let child = unsafe { OwnedHandle::from_raw_handle(raw) };
+    runtime.stop_confirmed().await.unwrap();
+    assert_eq!(
+        unsafe { WaitForSingleObject(child.as_raw_handle(), 0) },
+        WAIT_OBJECT_0
+    );
+    assert_eq!(next_exit(&mut output).await, None);
+}
