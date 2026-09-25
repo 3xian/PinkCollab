@@ -64,16 +64,21 @@ impl IntoResponse for V2Error {
         (self.0, Json(json!({"code":self.1,"message":self.2}))).into_response()
     }
 }
-fn v2_client(app: &App, headers: &HeaderMap) -> Result<String, V2Error> {
-    credential(headers)
-        .and_then(|token| app.store.client_id(token))
-        .ok_or_else(|| {
-            V2Error(
-                StatusCode::UNAUTHORIZED,
-                "authentication_required",
-                "Paired client credential required".into(),
-            )
-        })
+async fn v2_client(app: &App, headers: &HeaderMap) -> Result<String, V2Error> {
+    let token = credential(headers).unwrap_or_default().to_owned();
+    let client = app
+        .store
+        .run(move |store| Ok(store.client_id(&token)))
+        .await
+        .ok()
+        .flatten();
+    client.ok_or_else(|| {
+        V2Error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Paired client credential required".into(),
+        )
+    })
 }
 async fn v2_pair(
     State(app): State<App>,
@@ -86,13 +91,17 @@ async fn v2_pair(
             "Token and client name required".into(),
         ));
     }
-    let (client_id, credential) = app.store.pair(&body.token, &body.name).map_err(|_| {
-        V2Error(
-            StatusCode::UNAUTHORIZED,
-            "invalid_pairing_token",
-            "Invalid or expired pairing token".into(),
-        )
-    })?;
+    let (client_id, credential) = app
+        .store
+        .run(move |store| store.pair(&body.token, &body.name))
+        .await
+        .map_err(|_| {
+            V2Error(
+                StatusCode::UNAUTHORIZED,
+                "invalid_pairing_token",
+                "Invalid or expired pairing token".into(),
+            )
+        })?;
     Ok((
         StatusCode::CREATED,
         Json(
@@ -215,7 +224,7 @@ async fn v2_command(
     Path(id): Path<String>,
     Json(body): Json<V2CommandBody>,
 ) -> Result<(StatusCode, Json<Value>), V2Error> {
-    let client_id = v2_client(&app, &headers)?;
+    let client_id = v2_client(&app, &headers).await?;
     let submitted = app
         .v2
         .submit(client_id, id, body.command_id, body.command)
@@ -254,10 +263,11 @@ async fn v2_operation(
     headers: HeaderMap,
     Path((id, command_id)): Path<(String, String)>,
 ) -> Result<Json<Value>, V2Error> {
-    let client_id = v2_client(&app, &headers)?;
+    let client_id = v2_client(&app, &headers).await?;
     let operation = app
         .v2
         .operation(&client_id, &id, &command_id)
+        .await
         .map_err(|_| {
             V2Error(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -297,9 +307,11 @@ async fn v2_history(
     Path(id): Path<String>,
     Query(query): Query<V2HistoryQuery>,
 ) -> Result<Json<Value>, V2Error> {
+    let read_id = id.clone();
     let session = app
         .store
-        .v2_session(&id)
+        .run(move |store| store.v2_session(&read_id))
+        .await
         .map_err(|_| {
             V2Error(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -362,7 +374,7 @@ async fn v2_create(
     headers: HeaderMap,
     Json(body): Json<V2Create>,
 ) -> Result<(StatusCode, Json<Value>), V2Error> {
-    let client_id = v2_client(&app, &headers)?;
+    let client_id = v2_client(&app, &headers).await?;
     if body.host_id != app.host.id
         || body.command_id.is_empty()
         || body.command_id.len() > 128
@@ -410,9 +422,11 @@ async fn v2_create(
         archived_at: None,
         engine_session_ref: None,
     };
+    let command_id = body.command_id.clone();
     let (record, replayed) = app
         .store
-        .create_v2(&client_id, &body.command_id, &fingerprint, record)
+        .run(move |store| store.create_v2(&client_id, &command_id, &fingerprint, record))
+        .await
         .map_err(|err| {
             if err.to_string().contains("idempotency_conflict") {
                 V2Error(
@@ -455,7 +469,13 @@ async fn authenticate(
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    if !credential(request.headers()).is_some_and(|token| app.store.authenticate(token)) {
+    let token = credential(request.headers()).unwrap_or_default().to_owned();
+    if !app
+        .store
+        .run(move |store| Ok(store.authenticate(&token)))
+        .await
+        .unwrap_or(false)
+    {
         return V2Error(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
@@ -605,6 +625,12 @@ async fn events_v2(socket: WebSocket, app: App, token: String) {
                     break
                 }};
                 if event.kind=="gateway.shutdown" {break}
+                if event.kind=="resource_resync" {
+                    if let Some(resource)=event.payload["resource"].as_str()
+                        && let Some(subscription)=subscriptions.remove(resource)
+                        && !send_value(&mut tx,&json!({"type":"resync_required","subscriptionId":subscription.id,"resource":resource})).await {break}
+                    continue;
+                }
                 if event.kind!="change" {continue}
                 let Some(resource)=event.payload["resource"].as_str() else {continue};
                 let Some(subscription)=subscriptions.get_mut(resource) else {continue};
@@ -622,7 +648,8 @@ async fn events_v2(socket: WebSocket, app: App, token: String) {
                 subscription.cursor.revision=revision;
             }
             _=ticker.tick()=>{
-                if !app.store.authenticate(&token) || last_seen.elapsed()>Duration::from_secs(70){break}
+                let check_token = token.clone();
+                if !app.store.run(move |store| Ok(store.authenticate(&check_token))).await.unwrap_or(false) || last_seen.elapsed()>Duration::from_secs(70){break}
                 if !matches!(tokio::time::timeout(Duration::from_secs(10),tx.send(Message::Ping(vec![].into()))).await,Ok(Ok(()))){break}
             }
             message=rx.next()=>{

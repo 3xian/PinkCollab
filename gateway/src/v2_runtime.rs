@@ -20,6 +20,7 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
 const LIVE_ITEM_LIMIT: usize = 64;
 const LIVE_TEXT_LIMIT: usize = 8 * 1024;
+const LIVE_PATCH_LIMIT: usize = 128 * 1024;
 const PREVIEW_NOTICE: &str = "\n\n[Live preview truncated; full message remains in OMP history]";
 
 fn live_preview(value: &str) -> (String, bool) {
@@ -184,6 +185,9 @@ struct ControllerState {
     messages: Vec<TimelineItem>,
     finalized_messages: HashSet<String>,
     pending_prompt_results: HashMap<String, (String, String)>,
+    dirty_messages: HashSet<String>,
+    removed_messages: Vec<String>,
+    display_flush_scheduled: bool,
 }
 pub struct SessionController {
     state: Mutex<ControllerState>,
@@ -196,7 +200,7 @@ pub struct SessionController {
     args: Vec<String>,
 }
 pub struct SessionDirectory {
-    controllers: Mutex<HashMap<String, Arc<SessionController>>>,
+    controllers: Mutex<HashMap<String, std::sync::Weak<SessionController>>>,
     store: Arc<Store>,
     browser: Arc<Browser>,
     bus: Arc<Bus>,
@@ -205,228 +209,7 @@ pub struct SessionDirectory {
     args: Vec<String>,
 }
 
-impl SessionDirectory {
-    pub fn new(
-        store: Arc<Store>,
-        browser: Arc<Browser>,
-        bus: Arc<Bus>,
-        executable: String,
-        args: Vec<String>,
-        max: usize,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            controllers: Mutex::new(HashMap::new()),
-            store,
-            browser,
-            bus,
-            quota: Arc::new(Semaphore::new(max)),
-            executable,
-            args,
-        })
-    }
-    async fn controller(&self, id: &str) -> Result<Option<Arc<SessionController>>> {
-        let mut controllers = self.controllers.lock().await;
-        if let Some(existing) = controllers.get(id) {
-            return Ok(Some(existing.clone()));
-        }
-        let Some(session) = self.store.v2_session(id)? else {
-            return Ok(None);
-        };
-        let controller = Arc::new(SessionController {
-            state: Mutex::new(ControllerState {
-                session,
-                runtime: None,
-                projection: None,
-                messages: Vec::new(),
-                finalized_messages: HashSet::new(),
-                pending_prompt_results: HashMap::new(),
-            }),
-            ordinary_dispatch: Mutex::new(()),
-            store: self.store.clone(),
-            browser: self.browser.clone(),
-            bus: self.bus.clone(),
-            quota: self.quota.clone(),
-            executable: self.executable.clone(),
-            args: self.args.clone(),
-        });
-        controllers.insert(id.into(), controller.clone());
-        Ok(Some(controller))
-    }
-    pub async fn view(&self, id: &str) -> Result<Option<SessionView>> {
-        let Some(controller) = self.controller(id).await? else {
-            return Ok(None);
-        };
-        Ok(Some(controller.view().await?))
-    }
-    pub async fn list(&self) -> Result<Vec<Value>> {
-        let sessions = self.store.v2_sessions()?;
-        self.summaries(sessions).await
-    }
-    pub async fn list_page(
-        &self,
-        after: Option<(&str, &str)>,
-        limit: usize,
-    ) -> Result<(Vec<Value>, bool)> {
-        let (sessions, has_more) = self.store.v2_sessions_page(after, limit)?;
-        Ok((self.summaries(sessions).await?, has_more))
-    }
-    async fn summaries(&self, sessions: Vec<SessionRecord>) -> Result<Vec<Value>> {
-        let controllers = self.controllers.lock().await;
-        let mut result = Vec::with_capacity(sessions.len());
-        for session in sessions {
-            let runtime = if let Some(controller) = controllers.get(&session.id) {
-                controller.state.lock().await.projection.clone()
-            } else {
-                None
-            };
-            result.push(json!({"session":session,"runtime":runtime}));
-        }
-        Ok(result)
-    }
-    pub async fn submit(
-        self: &Arc<Self>,
-        client_id: String,
-        session_id: String,
-        command_id: String,
-        command: Command,
-    ) -> std::result::Result<Submitted, SubmitError> {
-        if command_id.is_empty()
-            || command_id.len() > 128
-            || !command_id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-        {
-            return Err(SubmitError::Invalid("Valid commandId required".into()));
-        }
-        command
-            .validate()
-            .map_err(|err| SubmitError::Invalid(err.to_string()))?;
-        let controller = self
-            .controller(&session_id)
-            .await
-            .map_err(|_| SubmitError::Persistence)?
-            .ok_or(SubmitError::NotFound)?;
-        let fingerprint = hex::encode(Sha256::digest(
-            serde_json::to_vec(&command)
-                .map_err(|_| SubmitError::Invalid("Invalid command".into()))?,
-        ));
-        let now = Utc::now();
-        let receipt = OperationRecord {
-            command_id: command_id.clone(),
-            client_id: client_id.clone(),
-            session_id: session_id.clone(),
-            command_type: command.name().into(),
-            request_fingerprint: fingerprint.clone(),
-            runtime_generation: None,
-            status: "accepted".into(),
-            result: None,
-            error: None,
-            created_at: now,
-            updated_at: now,
-        };
-        let inserted = self.store.insert_operation(&receipt);
-        match inserted {
-            Ok(false) => {
-                let previous = self
-                    .store
-                    .operation(&client_id, &session_id, &command_id)
-                    .map_err(|_| SubmitError::Persistence)?
-                    .ok_or(SubmitError::Persistence)?;
-                if previous.request_fingerprint != fingerprint {
-                    return Err(SubmitError::Conflict);
-                }
-                Ok(Submitted {
-                    receipt: previous,
-                    replayed: true,
-                    receipt_stored: true,
-                })
-            }
-            Ok(true) => {
-                let stop = matches!(command, Command::StopRuntime { .. });
-                tokio::spawn(async move {
-                    controller.execute(receipt.clone(), command, stop).await;
-                });
-                // Read from storage because the spawned task may already have advanced it.
-                let current = self
-                    .store
-                    .operation(&client_id, &session_id, &command_id)
-                    .map_err(|_| SubmitError::Persistence)?
-                    .ok_or(SubmitError::Persistence)?;
-                Ok(Submitted {
-                    receipt: current,
-                    replayed: false,
-                    receipt_stored: true,
-                })
-            }
-            Err(_) if matches!(command, Command::StopRuntime { .. }) => {
-                let copy = receipt.clone();
-                tokio::spawn(async move {
-                    controller.execute(copy, command, true).await;
-                });
-                Ok(Submitted {
-                    receipt,
-                    replayed: false,
-                    receipt_stored: false,
-                })
-            }
-            Err(_) => Err(SubmitError::Persistence),
-        }
-    }
-    pub fn operation(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        command_id: &str,
-    ) -> Result<Option<OperationRecord>> {
-        self.store.operation(client_id, session_id, command_id)
-    }
-    pub async fn models(&self, id: &str) -> Result<(Vec<ModelInfo>, Vec<String>)> {
-        let controller = self.controller(id).await?.context("session not found")?;
-        let runtime = {
-            controller
-                .state
-                .lock()
-                .await
-                .runtime
-                .as_ref()
-                .map(|r| r.process.clone())
-                .context("runtime required")?
-        };
-        let response = runtime
-            .request(json!({"type":"get_available_models"}))
-            .await?;
-        let models = response["data"]["models"]
-            .as_array()
-            .context("OMP returned no model list")?
-            .iter()
-            .map(|value| {
-                model_info(&json!({"model":value})).context("OMP returned an invalid model")
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let response = runtime
-            .request(json!({"type":"get_available_thinking_levels"}))
-            .await?;
-        let levels = response["data"]["levels"]
-            .as_array()
-            .context("OMP returned no thinking levels")?
-            .iter()
-            .filter_map(|value| value.as_str().map(str::to_owned))
-            .collect();
-        Ok((models, levels))
-    }
-    pub async fn close(&self) {
-        let controllers = self
-            .controllers
-            .lock()
-            .await
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        for controller in controllers {
-            controller.stop_on_shutdown().await;
-        }
-    }
-}
+mod directory;
 
 enum CommandResult {
     Running,
@@ -460,7 +243,11 @@ impl SessionController {
         let runtime = state.projection.clone();
         let messages = state.messages.clone();
         drop(state);
-        let recent_operations = self.store.recent_operations(&session.id, 20)?;
+        let session_id = session.id.clone();
+        let recent_operations = self
+            .store
+            .run(move |store| store.recent_operations(&session_id, 20))
+            .await?;
         let history_ref = session
             .engine_session_ref
             .as_ref()
@@ -478,19 +265,15 @@ impl SessionController {
             &format!("session/{id}"),
             json!([{"type":kind,"value":payload}]),
         );
-        if kind.starts_with("v2.runtime")
-            || kind == "v2.session.changed"
-            || kind == "v2.metadata.updated"
-        {
+        if kind.starts_with("v2.runtime") || kind == "v2.metadata.updated" {
             self.bus.publish_resource("host/sessions",json!([{"type":"summary.changed","changeKind":kind,"sessionId":id,"value":payload}]));
         }
     }
     async fn persist_receipt(&self, receipt: &OperationRecord) -> Result<bool> {
-        let store = self.store.clone();
         let receipt = receipt.clone();
-        tokio::task::spawn_blocking(move || store.update_operation(&receipt))
+        self.store
+            .run(move |store| store.update_operation(&receipt))
             .await
-            .context("receipt writer stopped")?
     }
     async fn advance(
         &self,
@@ -511,7 +294,8 @@ impl SessionController {
     async fn execute(self: Arc<Self>, mut receipt: OperationRecord, command: Command, stop: bool) {
         // Stop is deliberately outside the ordinary dispatch lock. A hung prompt write or RPC
         // response cannot prevent the process from being terminated.
-        let _guard = if stop {
+        let control = matches!(command, Command::Interrupt { .. } | Command::Respond { .. });
+        let _guard = if stop || control {
             None
         } else {
             Some(self.ordinary_dispatch.lock().await)
@@ -574,8 +358,10 @@ impl SessionController {
                 let (generation, runtime) = match delivery {
                     Delivery::Start => self.ensure_runtime().await.map_err(start_failure)?,
                     _ => {
-                        self.current_runtime(expected_generation.as_deref().unwrap_or_default())
-                            .await?
+                        self.dispatchable_runtime(
+                            expected_generation.as_deref().unwrap_or_default(),
+                        )
+                        .await?
                     }
                 };
                 self.bind_generation(receipt, &generation).await?;
@@ -647,14 +433,8 @@ impl SessionController {
             Command::StopRuntime {
                 expected_generation,
             } => {
-                let (_, runtime) = self.current_runtime(&expected_generation).await?;
+                let runtime = self.begin_stop(&expected_generation).await?;
                 receipt.runtime_generation = Some(expected_generation.clone());
-                {
-                    let mut state = self.state.lock().await;
-                    if let Some(snapshot) = state.projection.as_mut() {
-                        snapshot.phase = "stopping".into();
-                    }
-                }
                 {
                     let state = self.state.lock().await;
                     self.publish(
@@ -675,7 +455,7 @@ impl SessionController {
             Command::Interrupt {
                 expected_generation,
             } => {
-                let (_, runtime) = self.current_runtime(&expected_generation).await?;
+                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
                 self.bind_generation(receipt, &expected_generation).await?;
                 runtime
                     .request(json!({"type":"abort"}))
@@ -692,7 +472,7 @@ impl SessionController {
                 confirmed,
                 cancelled,
             } => {
-                let (_, runtime) = self.current_runtime(&expected_generation).await?;
+                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
                 self.bind_generation(receipt, &expected_generation).await?;
                 let attention = {
                     let mut state = self.state.lock().await;
@@ -759,7 +539,7 @@ impl SessionController {
                 provider,
                 model_id,
             } => {
-                let (_, runtime) = self.current_runtime(&expected_generation).await?;
+                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
                 self.bind_generation(receipt, &expected_generation).await?;
                 runtime
                     .request(json!({"type":"set_model","provider":provider,"modelId":model_id}))
@@ -778,7 +558,7 @@ impl SessionController {
                 expected_generation,
                 level,
             } => {
-                let (_, runtime) = self.current_runtime(&expected_generation).await?;
+                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
                 self.bind_generation(receipt, &expected_generation).await?;
                 let available = runtime
                     .request(json!({"type":"get_available_thinking_levels"}))
@@ -822,9 +602,12 @@ impl SessionController {
         generation: &str,
     ) -> std::result::Result<(), CommandFailure> {
         receipt.runtime_generation = Some(generation.into());
+        let bound_receipt = receipt.clone();
+        let bound_generation = generation.to_owned();
         if !self
             .store
-            .bind_operation_generation(receipt, generation)
+            .run(move |store| store.bind_operation_generation(&bound_receipt, &bound_generation))
+            .await
             .map_err(|_| {
                 CommandFailure::failed("persistence_unavailable", "Could not save runtime binding")
             })?
@@ -836,11 +619,10 @@ impl SessionController {
         }
         Ok(())
     }
-    async fn current_runtime(
-        &self,
+    fn matching_runtime(
+        state: &ControllerState,
         expected: &str,
     ) -> std::result::Result<(String, Arc<Runtime>), CommandFailure> {
-        let state = self.state.lock().await;
         let current = state
             .runtime
             .as_ref()
@@ -858,6 +640,31 @@ impl SessionController {
             ));
         }
         Ok((current.generation.clone(), current.process.clone()))
+    }
+    async fn dispatchable_runtime(
+        &self,
+        expected: &str,
+    ) -> std::result::Result<(String, Arc<Runtime>), CommandFailure> {
+        let state = self.state.lock().await;
+        let current = Self::matching_runtime(&state, expected)?;
+        if state.projection.as_ref().is_none_or(|p| p.phase != "ready") {
+            return Err(CommandFailure::failed(
+                "runtime_stopping",
+                "Runtime is not accepting commands",
+            ));
+        }
+        Ok(current)
+    }
+    async fn begin_stop(
+        &self,
+        expected: &str,
+    ) -> std::result::Result<Arc<Runtime>, CommandFailure> {
+        let mut state = self.state.lock().await;
+        let (_, runtime) = Self::matching_runtime(&state, expected)?;
+        if let Some(snapshot) = state.projection.as_mut() {
+            snapshot.phase = "stopping".into();
+        }
+        Ok(runtime)
     }
     async fn ensure_runtime(self: &Arc<Self>) -> Result<(String, Arc<Runtime>)> {
         {
@@ -885,14 +692,23 @@ impl SessionController {
         let session = { self.state.lock().await.session.clone() };
         let cwd = self.browser.validate(Path::new(&session.cwd))?;
         let generation = storage::id("run_");
+        let reserve_session = session.id.clone();
+        let reserve_generation = generation.clone();
         ensure!(
-            self.store.reserve_runtime(&session.id, &generation)?,
+            self.store
+                .run(move |store| store.reserve_runtime(&reserve_session, &reserve_generation))
+                .await?,
             "previous runtime exit is not confirmed"
         );
         let (runtime, mut output) = match Runtime::spawn(&self.executable, &self.args, &cwd) {
             Ok(started) => started,
             Err(err) => {
-                let _ = self.store.release_runtime(&session.id, &generation);
+                let release_session = session.id.clone();
+                let release_generation = generation.clone();
+                let _ = self
+                    .store
+                    .run(move |store| store.release_runtime(&release_session, &release_generation))
+                    .await;
                 return Err(err);
             }
         };
@@ -914,6 +730,9 @@ impl SessionController {
             });
             state.messages.clear();
             state.finalized_messages.clear();
+            state.dirty_messages.clear();
+            state.removed_messages.clear();
+            state.display_flush_scheduled = false;
         }
         {
             let state = self.state.lock().await;
@@ -922,6 +741,7 @@ impl SessionController {
                 "v2.runtime.updated",
                 json!({"runtime":state.projection}),
             );
+            self.publish(&session.id, "v2.timeline.reset", json!({}));
         }
         let controller = self.clone();
         let event_generation = generation.clone();
@@ -959,9 +779,17 @@ impl SessionController {
                 "OMP did not provide a session reference"
             );
             if session.engine_session_ref.is_none() {
+                let save_session = session.id.clone();
+                let save_reference = reference.to_owned();
+                let revision = session.metadata_revision;
                 ensure!(
                     self.store
-                        .set_engine_ref(&session.id, session.metadata_revision, reference)?,
+                        .run(move |store| store.set_engine_ref(
+                            &save_session,
+                            revision,
+                            &save_reference
+                        ))
+                        .await?,
                     "session mapping changed during startup"
                 );
             } else {
@@ -970,9 +798,11 @@ impl SessionController {
                     "OMP loaded a different session"
                 );
             }
+            let reload_session = session.id.clone();
             let saved = self
                 .store
-                .v2_session(&session.id)?
+                .run(move |store| store.v2_session(&reload_session))
+                .await?
                 .context("session disappeared during startup")?;
             let mut state = self.state.lock().await;
             ensure!(
@@ -1071,307 +901,9 @@ impl SessionController {
             );
         }
     }
-    async fn apply_frame(self: &Arc<Self>, generation: &str, frame: Value) {
-        let kind = omp::string(&frame, "type").to_owned();
-        if kind == "prompt_result" {
-            let (session_id, key, status, error, projection) = {
-                let mut state = self.state.lock().await;
-                if state
-                    .runtime
-                    .as_ref()
-                    .is_none_or(|r| r.generation != generation)
-                {
-                    return;
-                }
-                let key = state
-                    .pending_prompt_results
-                    .remove(omp::string(&frame, "id"));
-                if frame["sessionSettled"] == true
-                    && let Some(snapshot) = state.projection.as_mut()
-                {
-                    snapshot.execution = "quiescent".into();
-                }
-                let status = match omp::string(&frame, "status") {
-                    "completed" => "succeeded",
-                    "aborted" => "cancelled",
-                    "error" => "failed",
-                    _ => "outcome_unknown",
-                };
-                (
-                    state.session.id.clone(),
-                    key,
-                    status,
-                    frame.get("error").cloned(),
-                    state.projection.clone(),
-                )
-            };
-            self.publish(
-                &session_id,
-                "v2.runtime.updated",
-                json!({"runtime":projection}),
-            );
-            if let Some((client_id, command_id)) = key {
-                let controller = self.clone();
-                let generation = generation.to_owned();
-                tokio::spawn(async move {
-                    let Ok(Some(mut receipt)) =
-                        controller
-                            .store
-                            .operation(&client_id, &session_id, &command_id)
-                    else {
-                        return;
-                    };
-                    let _ = controller
-                        .advance(
-                            &mut receipt,
-                            status,
-                            Some(json!({"runtimeGeneration":generation})),
-                            error,
-                        )
-                        .await;
-                });
-            }
-            return;
-        }
-        let mut state = self.state.lock().await;
-        if state
-            .runtime
-            .as_ref()
-            .is_none_or(|r| r.generation != generation)
-        {
-            return;
-        }
-        let id = state.session.id.clone();
-        match kind.as_str() {
-            "agent_start" => {
-                if let Some(snapshot) = state.projection.as_mut() {
-                    snapshot.execution = "active".into();
-                }
-            }
-            "session_settled" => {
-                if let Some(snapshot) = state.projection.as_mut() {
-                    snapshot.execution = "quiescent".into();
-                }
-            }
-            "extension_ui_request" => {
-                let method = omp::string(&frame, "method");
-                if let Some(snapshot) = state.projection.as_mut() {
-                    if ["select", "confirm", "input", "editor"].contains(&method) {
-                        let request_id = omp::string(&frame, "id");
-                        if !snapshot.pending_inputs.iter().any(|a| a.id == request_id) {
-                            snapshot.pending_inputs.push(Attention {
-                                id: request_id.into(),
-                                kind: method.into(),
-                                text: omp::string(&frame, "title").into(),
-                                options: frame["options"]
-                                    .as_array()
-                                    .map(|items| {
-                                        items
-                                            .iter()
-                                            .filter_map(Value::as_str)
-                                            .map(str::to_owned)
-                                            .collect()
-                                    })
-                                    .unwrap_or_default(),
-                            });
-                        }
-                    } else if method == "cancel" {
-                        snapshot
-                            .pending_inputs
-                            .retain(|a| a.id != omp::string(&frame, "targetId"));
-                    }
-                }
-            }
-            "model_changed" => {
-                let controller = self.clone();
-                let generation = generation.to_owned();
-                if let Some(runtime) = state.runtime.as_ref().map(|r| r.process.clone()) {
-                    tokio::spawn(async move {
-                        let _ = controller.refresh_state(&generation, &runtime).await;
-                    });
-                }
-            }
-            "tool_execution_start" | "tool_execution_end" => {
-                let call_id = omp::string(&frame, "toolCallId");
-                if !call_id.is_empty() {
-                    let item_id = format!("{generation}:{call_id}");
-                    let name = omp::string(&frame, "toolName");
-                    let item = if kind == "tool_execution_start" {
-                        let args = frame.get("args").cloned().unwrap_or(Value::Null);
-                        let args = if serde_json::to_vec(&args)
-                            .is_ok_and(|bytes| bytes.len() <= LIVE_TEXT_LIMIT)
-                        {
-                            args
-                        } else {
-                            json!({"previewTruncated":true})
-                        };
-                        TimelineItem::tool_started(item_id.clone(), name, args, Utc::now())
-                    } else {
-                        let result = omp::text_content(&frame["result"]);
-                        let (preview, _) = live_preview(&result);
-                        TimelineItem::tool_completed(
-                            item_id.clone(),
-                            name,
-                            preview,
-                            frame["isError"] == true,
-                            Utc::now(),
-                        )
-                    };
-                    if let Some(previous) =
-                        state.messages.iter_mut().find(|entry| entry.id == item_id)
-                    {
-                        previous.merge_tool_update(item);
-                    } else {
-                        state.messages.push(item);
-                    }
-                }
-            }
-            "message_update" if frame["assistantMessageEvent"]["type"] == "text_delta" => {
-                let engine_id = omp::string(&frame, "messageId");
-                if !engine_id.is_empty() {
-                    let message_id = format!("{generation}:{engine_id}");
-                    if !state.finalized_messages.contains(&message_id) {
-                        let delta = omp::string(&frame["assistantMessageEvent"], "delta");
-                        if let Some(item) =
-                            state.messages.iter_mut().find(|item| item.id == message_id)
-                        {
-                            if item.detail != "preview_truncated" {
-                                let (preview, truncated) =
-                                    live_preview(&format!("{}{}", item.text, delta));
-                                item.text = preview;
-                                if truncated {
-                                    item.detail = "preview_truncated".into();
-                                }
-                            }
-                        } else {
-                            let (preview, truncated) = live_preview(delta);
-                            state.messages.push(TimelineItem {
-                                id: message_id,
-                                kind: "assistant".into(),
-                                text: preview,
-                                detail: if truncated {
-                                    "preview_truncated".into()
-                                } else {
-                                    String::new()
-                                },
-                                tool: None,
-                                timestamp: Utc::now(),
-                            });
-                        }
-                    }
-                }
-            }
-            "message_end"
-                if frame["message"]["role"] == "assistant"
-                    || frame["message"]["role"] == "user" =>
-            {
-                let engine_id = omp::string(&frame, "messageId");
-                if !engine_id.is_empty() {
-                    let message_id = format!("{generation}:{engine_id}");
-                    let text = omp::text_content(&frame["message"]);
-                    let kind = omp::string(&frame["message"], "role");
-                    state.finalized_messages.insert(message_id.clone());
-                    if !text.is_empty() {
-                        let (preview, truncated) = live_preview(&text);
-                        if let Some(item) =
-                            state.messages.iter_mut().find(|item| item.id == message_id)
-                        {
-                            item.text = preview;
-                            item.detail = if truncated {
-                                "preview_truncated".into()
-                            } else {
-                                String::new()
-                            };
-                        } else {
-                            state.messages.push(TimelineItem {
-                                id: message_id,
-                                kind: kind.into(),
-                                text: preview,
-                                detail: if truncated {
-                                    "preview_truncated".into()
-                                } else {
-                                    String::new()
-                                },
-                                tool: None,
-                                timestamp: Utc::now(),
-                            });
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-        let excess = state.messages.len().saturating_sub(LIVE_ITEM_LIMIT);
-        if excess > 0 {
-            let removed = state
-                .messages
-                .drain(..excess)
-                .map(|item| item.id)
-                .collect::<Vec<_>>();
-            for id in removed {
-                state.finalized_messages.remove(&id);
-            }
-        }
-        self.publish(
-            &id,
-            "v2.session.changed",
-            json!({"runtime":state.projection,"messages":state.messages}),
-        );
-    }
-    async fn apply_exit(&self, generation: &str, reason: Option<String>) {
-        let session_id = {
-            let mut state = self.state.lock().await;
-            if state
-                .runtime
-                .as_ref()
-                .is_none_or(|r| r.generation != generation)
-            {
-                return;
-            }
-            state.runtime = None;
-            state.projection = None;
-            state.messages.clear();
-            state.finalized_messages.clear();
-            state.pending_prompt_results.clear();
-            state.session.id.clone()
-        };
-        self.publish(
-            &session_id,
-            "v2.runtime.exited",
-            json!({"generation":generation,"reason":reason}),
-        );
-        let store = self.store.clone();
-        let cleanup_session = session_id.clone();
-        let cleanup_generation = generation.to_owned();
-        let cleanup = tokio::task::spawn_blocking(move || {
-            let unknown = store.mark_generation_unknown(&cleanup_session, &cleanup_generation);
-            let release = store.release_runtime(&cleanup_session, &cleanup_generation);
-            (unknown, release)
-        })
-        .await;
-        if let Ok((Err(err), _)) = &cleanup {
-            eprintln!("Could not mark exited runtime operations uncertain: {err}");
-        }
-        if let Ok((_, Err(err))) = cleanup {
-            eprintln!("Could not release confirmed runtime lease: {err}");
-        }
-    }
-    async fn stop_on_shutdown(&self) {
-        let current = {
-            self.state
-                .lock()
-                .await
-                .runtime
-                .as_ref()
-                .map(|r| (r.generation.clone(), r.process.clone()))
-        };
-        if let Some((generation, runtime)) = current
-            && runtime.stop_confirmed().await.is_ok()
-        {
-            self.apply_exit(&generation, None).await;
-        }
-    }
 }
+mod projection;
+
 fn rpc_id(receipt: &OperationRecord) -> String {
     let raw = format!(
         "{}:{}:{}",

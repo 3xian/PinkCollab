@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use tokio::sync::broadcast;
 
+const MAX_CHANGE_BYTES: usize = 256 * 1024;
+
 pub struct Bus {
     state: Mutex<(u64, broadcast::Sender<Event>)>,
     resources: Mutex<(String, HashMap<String, u64>)>,
@@ -40,12 +42,18 @@ impl Bus {
         }
     }
     pub fn publish_resource(&self, resource: &str, changes: Value) {
+        let oversized =
+            serde_json::to_vec(&changes).map_or(true, |encoded| encoded.len() > MAX_CHANGE_BYTES);
         let mut resources = self.resources.lock();
         let epoch = resources.0.clone();
         let current = resources.1.entry(resource.into()).or_insert(0);
         let base = *current;
         *current += 1;
-        let payload = json!({"resource":resource,"epoch":epoch,"baseRevision":base,"revision":*current,"changes":changes});
-        self.publish("change", payload);
+        if oversized {
+            self.publish("resource_resync", json!({"resource":resource}));
+        } else {
+            let payload = json!({"resource":resource,"epoch":epoch,"baseRevision":base,"revision":*current,"changes":changes});
+            self.publish("change", payload);
+        }
     }
 }

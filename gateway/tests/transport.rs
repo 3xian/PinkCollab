@@ -122,8 +122,7 @@ async fn stop_reaps_the_omp_process_tree() {
     use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
     use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
 
-    let (dir, runtime, mut output) = fixture(&["--spawn-child", "--stall-stdin"]);
-    std::fs::write(dir.path().join("job-ready"), "").unwrap();
+    let (dir, runtime, mut output) = fixture(&["--spawn-child-immediate", "--stall-stdin"]);
     runtime.wait_ready().await.unwrap();
     let pid: u32 = std::fs::read_to_string(dir.path().join("child.pid"))
         .unwrap()

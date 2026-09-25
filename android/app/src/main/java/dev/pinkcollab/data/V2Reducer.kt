@@ -111,6 +111,19 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                                 model = runtime?.optJSONObject("actualModel")?.modelInfo(),
                             )
                         }
+                        "v2.timeline.reset" -> updated = updated.copy(
+                            timeline = updated.historyItems,
+                            liveItems = emptyList(),
+                        )
+                        "v2.timeline.patch" -> {
+                            val removed = value.getJSONArray("removedIds").strings().toSet()
+                            val live = updated.liveItems.filterNot { it.id in removed }.toMutableList()
+                            value.getJSONArray("items").objects().map { it.item() }.forEach { item ->
+                                val index = live.indexOfFirst { it.id == item.id }
+                                if (index >= 0) live[index] = item else live.add(item)
+                            }
+                            updated = updated.copy(liveItems = live, timeline = updated.historyItems + live)
+                        }
                         "v2.runtime.updated" -> updated = updated.copy(
                             session = applyRuntimeChange(updated.session, "v2.runtime.updated", value),
                             model = value.optJSONObject("runtime")?.optJSONObject("actualModel")?.modelInfo(),

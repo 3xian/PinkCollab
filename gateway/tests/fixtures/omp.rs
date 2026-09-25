@@ -88,7 +88,9 @@ fn main() {
     if args.iter().any(|arg| arg == "--flood-stdout") {
         flood_stdout();
     }
-    if args.iter().any(|arg| arg == "--spawn-child") {
+    if args.iter().any(|arg| arg == "--spawn-child-immediate") {
+        spawn_lingering_child(&std::env::current_dir().unwrap());
+    } else if args.iter().any(|arg| arg == "--spawn-child") {
         let cwd = std::env::current_dir().unwrap();
         while !cwd.join("job-ready").exists() {
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -117,6 +119,7 @@ fn main() {
     let mut model_index = 0;
     let mut thinking_level = "medium".to_owned();
     let mut pending_prompt_id: Option<Value> = None;
+    let mut pending_prompt_ack: Option<Value> = None;
     emit(json!({"type":"ready","protocolVersion":1}));
     // `--stall-stdin` announces itself and then never drains its pipe, so a write larger than the
     // pipe buffer stays blocked exactly as a wedged OMP would leave it.
@@ -191,13 +194,17 @@ fn main() {
                 let id = pinkcollab_gateway::storage::id("message_");
                 writeln!(std::fs::OpenOptions::new().create(true).append(true).open(&log).unwrap(),"{}",json!({"id":id,"parentId":parent,"type":"message","timestamp":chrono::Utc::now(),"message":{"role":"user","content":[{"type":"text","text":message}]}})).unwrap();
                 parent = id.clone();
-                ack(json!({}));
+                if message == "need input before ack" {
+                    pending_prompt_ack = frame.get("id").cloned();
+                } else {
+                    ack(json!({}));
+                }
                 emit(
                     json!({"type":"message_end","messageId":id,"message":{"role":"user","content":[{"type":"text","text":message}]}}),
                 );
                 emit(json!({"type":"agent_start"}));
                 pending_prompt_id = frame.get("id").cloned();
-                if message == "need input" {
+                if message == "need input" || message == "need input before ack" {
                     emit(
                         json!({"type":"extension_ui_request","id":"question-1","method":"select","title":"Which API?","options":["compatibility","new"]}),
                     );
@@ -238,6 +245,11 @@ fn main() {
                 }
             }
             "extension_ui_response" => {
+                if let Some(id) = pending_prompt_ack.take() {
+                    emit(
+                        json!({"type":"response","id":id,"command":"prompt","success":true,"data":{}}),
+                    );
+                }
                 // OMP can also switch models on its own; announce it so the Gateway re-reads its state.
                 model_index = (model_index + 1) % models.len();
                 emit(json!({"type":"model_changed"}));
@@ -250,5 +262,8 @@ fn main() {
             }
             _ => ack(json!({})),
         }
+    }
+    if args.iter().any(|arg| arg == "--linger-on-eof") {
+        std::thread::sleep(std::time::Duration::from_secs(300));
     }
 }

@@ -67,4 +67,31 @@ class V2ReducerTest {
         assertEquals("run-one", updated.runtimeGeneration)
         assertEquals("running", updated.status)
     }
+
+    @Test fun stopping_phase_and_timeline_patches_are_applied_in_order() {
+        val hostState = reduceV2(app(), "host", hostSnapshot()).state
+        val runtime = JSONObject().put("generation", "run-one").put("phase", "stopping")
+            .put("execution", "active").put("pendingInputs", org.json.JSONArray())
+        val snapshot = JSONObject().put("type", "snapshot").put("resource", "session/session")
+            .put("subscriptionId", "session-sub")
+            .put("cursor", JSONObject().put("epoch", "epoch").put("revision", 0))
+            .put("payload", JSONObject().put("session", record).put("runtime", runtime)
+                .put("messages", org.json.JSONArray()).put("recentOperations", org.json.JSONArray()))
+        val baseline = reduceV2(hostState, "host", snapshot).state
+        assertEquals("stopping", baseline.details.getValue("session").session.status)
+
+        fun change(base: Long, kind: String, value: JSONObject) = JSONObject()
+            .put("type", "change").put("resource", "session/session").put("subscriptionId", "session-sub")
+            .put("epoch", "epoch").put("baseRevision", base).put("revision", base + 1)
+            .put("changes", org.json.JSONArray().put(JSONObject().put("type", kind).put("value", value)))
+        fun item(text: String) = JSONObject().put("id", "message-one").put("kind", "assistant")
+            .put("text", text).put("detail", "").put("timestamp", "2026-01-01T00:00:00Z")
+        val first = reduceV2(baseline, "host", change(0, "v2.timeline.patch",
+            JSONObject().put("items", org.json.JSONArray().put(item("a"))).put("removedIds", org.json.JSONArray()))).state
+        val updated = reduceV2(first, "host", change(1, "v2.timeline.patch",
+            JSONObject().put("items", org.json.JSONArray().put(item("abc"))).put("removedIds", org.json.JSONArray()))).state
+        assertEquals(listOf("abc"), updated.details.getValue("session").liveItems.map { it.text })
+        val reset = reduceV2(updated, "host", change(2, "v2.timeline.reset", JSONObject())).state
+        assertEquals(0, reset.details.getValue("session").liveItems.size)
+    }
 }

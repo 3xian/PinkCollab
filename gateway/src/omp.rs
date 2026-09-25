@@ -2,6 +2,8 @@ use crate::storage::id;
 use anyhow::{Context, Result, bail, ensure};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
@@ -152,7 +154,8 @@ impl Runtime {
         args: &[String],
         cwd: &Path,
     ) -> Result<(Arc<Self>, mpsc::Receiver<Output>)> {
-        let mut child = Command::new(executable)
+        let mut command = Command::new(executable);
+        command
             // `Stdio::piped()` is the only pipe path either `std` or tokio offers here: tokio's
             // process spawn extracts the very same `CreatePipe` handles `std` created, so an
             // explicit `CreatePipe` wrapper (removed in favour of this) would change nothing
@@ -163,11 +166,14 @@ impl Runtime {
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
+        let mut child = command
             .spawn()
             .with_context(|| format!("cannot start OMP at {executable} in {}", cwd.display()))?;
         #[cfg(windows)]
-        let job = match crate::windows_job::Job::attach(&child) {
+        let job = match crate::windows_job::Job::attach_and_resume(&child) {
             Ok(job) => job,
             Err(err) => {
                 let _ = child.kill();
@@ -226,7 +232,14 @@ impl Runtime {
                     let _ = responder.send(value);
                     continue;
                 }
-                if reader_output.blocking_send(Output::Frame(value)).is_err() {
+                let replaceable_delta = string(&value, "type") == "message_update"
+                    && string(&value["assistantMessageEvent"], "type") == "text_delta";
+                if replaceable_delta {
+                    match reader_output.try_send(Output::Frame(value)) {
+                        Ok(()) | Err(mpsc::error::TrySendError::Full(_)) => {}
+                        Err(mpsc::error::TrySendError::Closed(_)) => break None,
+                    }
+                } else if reader_output.blocking_send(Output::Frame(value)).is_err() {
                     break None;
                 }
             };

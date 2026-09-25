@@ -129,13 +129,14 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
     val execution = runtime?.optString("execution") ?: "unknown"
     val status = when {
         phase == "starting" -> "starting"
-        phase == "stopping" -> "stopped"
+        phase == "stopping" -> "stopping"
         a != null -> "needs_input"
         execution == "active" -> "running"
         else -> "idle"
     }
     val activity = runtime?.optString("activity")?.takeIf { it.isNotBlank() } ?: when (status) {
         "starting" -> "Starting OMP"
+        "stopping" -> "Stopping OMP"
         "running" -> "Working"
         "needs_input" -> "Waiting for input"
         else -> "Ready to continue"

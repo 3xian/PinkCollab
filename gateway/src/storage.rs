@@ -6,8 +6,11 @@ use rand::RngCore;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::{sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 pub struct Store {
     db: Mutex<Connection>,
+    blocking_slots: Arc<Semaphore>,
 }
 /// A device that completed pairing. `created_at` is a Unix timestamp, absent on rows written
 /// before the column existed.
@@ -90,7 +93,32 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         if schema_version < 2 {
             migrate_v2(&db)?;
         }
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self {
+            db: Mutex::new(db),
+            blocking_slots: Arc::new(Semaphore::new(4)),
+        })
+    }
+    /// Run SQLite work on a bounded blocking lane so a busy connection never parks a Tokio
+    /// worker. The permit is held until the blocking work actually finishes, even if its caller
+    /// is cancelled.
+    pub async fn run<T, F>(self: &Arc<Self>, work: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Store) -> Result<T> + Send + 'static,
+    {
+        let permit = tokio::time::timeout(
+            Duration::from_secs(8),
+            self.blocking_slots.clone().acquire_owned(),
+        )
+        .await
+        .context("database work queue timed out")??;
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            work(&store)
+        })
+        .await
+        .context("database worker stopped")?
     }
     pub fn host_id(&self) -> Result<String> {
         Ok(self

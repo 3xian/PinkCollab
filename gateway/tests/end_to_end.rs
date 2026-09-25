@@ -125,6 +125,171 @@ async fn wait_operation(
 }
 
 #[tokio::test]
+async fn response_reaches_omp_while_prompt_ack_is_pending() {
+    let h = Harness::new(1).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let sessions = format!("{}/api/v2/sessions", h.url);
+    let record: Value = client
+        .post(&sessions)
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"create","hostId":h.host.id,"cwd":h.cwd("pending-input")}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session = format!("{sessions}/{}", record["id"].as_str().unwrap());
+    let commands = format!("{session}/commands");
+    assert_eq!(client.post(&commands).bearer_auth(&credential)
+        .json(&json!({"commandId":"prompt","type":"prompt","delivery":"start","message":"need input before ack"}))
+        .send().await.unwrap().status(), 202);
+    let generation = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let detail: Value = client
+                .get(&session)
+                .bearer_auth(&credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if detail["runtime"]["pendingInputs"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+            {
+                break detail["runtime"]["generation"].as_str().unwrap().to_owned();
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(client.post(&commands).bearer_auth(&credential)
+        .json(&json!({"commandId":"answer","type":"respond","expectedGeneration":generation,"inputRequestId":"question-1","value":"new"}))
+        .send().await.unwrap().status(), 202);
+    let answer = wait_operation(
+        &client,
+        &format!("{session}/operations/answer"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    assert_eq!(answer["status"], "succeeded");
+    let prompt = wait_operation(
+        &client,
+        &format!("{session}/operations/prompt"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    assert_eq!(prompt["status"], "succeeded");
+}
+
+#[tokio::test]
+async fn stopping_runtime_rejects_new_work_until_exit_is_confirmed() {
+    let h = Harness::with_args(1, vec!["--linger-on-eof".into()]).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let sessions = format!("{}/api/v2/sessions", h.url);
+    let record: Value = client
+        .post(&sessions)
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"create","hostId":h.host.id,"cwd":h.cwd("stopping-gate")}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session = format!("{sessions}/{}", record["id"].as_str().unwrap());
+    let commands = format!("{session}/commands");
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&json!({"commandId":"start","type":"start_runtime"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    let start = wait_operation(
+        &client,
+        &format!("{session}/operations/start"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    let generation = start["runtimeGeneration"].as_str().unwrap();
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(
+                &json!({"commandId":"stop","type":"stop_runtime","expectedGeneration":generation})
+            )
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let detail: Value = client
+                .get(&session)
+                .bearer_auth(&credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if detail["runtime"]["phase"] == "stopping" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(client.post(&commands).bearer_auth(&credential)
+        .json(&json!({"commandId":"model","type":"select_model","expectedGeneration":generation,"provider":"fixture","modelId":"fast"}))
+        .send().await.unwrap().status(), 202);
+    let failure = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let receipt: Value = client
+                .get(format!("{session}/operations/model"))
+                .bearer_auth(&credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if receipt["status"] == "failed" {
+                break receipt;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(failure["error"]["code"], "runtime_stopping");
+    wait_operation(
+        &client,
+        &format!("{session}/operations/stop"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn v2_session_list_pages_by_stable_creation_order() {
     let h = Harness::new(1).await;
     let client = reqwest::Client::new();
@@ -413,6 +578,39 @@ async fn v2_websocket_snapshot_precedes_versioned_changes() {
     assert_eq!(detail["resource"], resource);
     assert_eq!(detail["payload"]["session"]["id"], id);
     assert!(detail["payload"]["runtime"].is_null());
+    assert_eq!(client.post(format!("{}/api/v2/sessions/{id}/commands", h.url))
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"prompt-ws","type":"prompt","delivery":"start","message":"hello"}))
+        .send().await.unwrap().status(), 202);
+    let patch = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let frame = next_json(&mut socket).await;
+            if frame["resource"] != resource {
+                continue;
+            }
+            let Some(changes) = frame["changes"].as_array() else {
+                continue;
+            };
+            assert!(
+                !changes
+                    .iter()
+                    .any(|change| change["type"] == "v2.session.changed")
+            );
+            if let Some(change) = changes
+                .iter()
+                .find(|change| change["type"] == "v2.timeline.patch")
+            {
+                break change.clone();
+            }
+        }
+    })
+    .await
+    .expect("live timeline patch");
+    assert!(
+        patch["value"]["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
 }
 
 #[tokio::test]

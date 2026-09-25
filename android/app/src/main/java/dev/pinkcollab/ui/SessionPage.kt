@@ -90,7 +90,7 @@ internal fun SessionPage(
     val timelineState = rememberLazyListState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
-    val inputEnabled = host?.connected == true && !busy && session.attention == null && session.status != "starting" && (!session.runtimeAttached || session.runtimeExecution != "unknown")
+    val inputEnabled = host?.connected == true && !busy && session.attention == null && session.status != "starting" && session.status != "stopping" && (!session.runtimeAttached || session.runtimeExecution != "unknown")
     val canSend = prompt.isNotBlank() && inputEnabled
     var inputFocused by remember { mutableStateOf(false) }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }

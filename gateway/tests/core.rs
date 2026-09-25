@@ -184,6 +184,19 @@ async fn slow_event_clients_must_resynchronize() {
         Err(tokio::sync::broadcast::error::RecvError::Lagged(_))
     ));
 }
+#[tokio::test]
+async fn oversized_resource_change_requests_resynchronization() {
+    let bus = Bus::default();
+    let mut client = bus.subscribe();
+    bus.publish_resource(
+        "session/example",
+        json!([{"type":"large","value":"x".repeat(300 * 1024)}]),
+    );
+    let event = client.recv().await.unwrap();
+    assert_eq!(event.kind, "resource_resync");
+    assert_eq!(event.payload["resource"], "session/example");
+    assert_eq!(bus.cursor("session/example").revision, 1);
+}
 #[test]
 fn config_rejects_non_loopback_listeners() {
     let dir = tempfile::tempdir().unwrap();

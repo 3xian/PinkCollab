@@ -7,17 +7,22 @@ use std::{
     process::Child,
     time::{Duration, Instant},
 };
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
+use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
 
 pub(crate) struct Job(OwnedHandle);
 
 impl Job {
-    pub(crate) fn attach(child: &Child) -> Result<Self> {
+    pub(crate) fn attach_and_resume(child: &Child) -> Result<Self> {
         // SAFETY: A null name creates a private job; the returned owned handle is closed exactly
         // once by OwnedHandle. Every Win32 call below receives a valid handle and initialized data.
         let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
@@ -43,6 +48,7 @@ impl Job {
         if assigned == 0 {
             return Err(std::io::Error::last_os_error()).context("cannot assign OMP to job");
         }
+        resume_initial_thread(child.id())?;
         Ok(job)
     }
 
@@ -86,4 +92,34 @@ impl Job {
             std::thread::sleep(Duration::from_millis(20));
         }
     }
+}
+
+/// `Command` only exposes the process handle. A suspended process has exactly its initial
+/// thread, which ToolHelp can locate by owner PID before any child code is allowed to run.
+fn resume_initial_thread(pid: u32) -> Result<()> {
+    let raw = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error()).context("cannot enumerate OMP initial thread");
+    }
+    let snapshot = unsafe { OwnedHandle::from_raw_handle(raw) };
+    let mut entry: THREADENTRY32 = unsafe { zeroed() };
+    entry.dwSize = size_of::<THREADENTRY32>() as u32;
+    let mut found = unsafe { Thread32First(snapshot.as_raw_handle(), &raw mut entry) } != 0;
+    while found {
+        if entry.th32OwnerProcessID == pid {
+            let raw_thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if raw_thread.is_null() {
+                return Err(std::io::Error::last_os_error())
+                    .context("cannot open OMP initial thread");
+            }
+            let thread = unsafe { OwnedHandle::from_raw_handle(raw_thread) };
+            if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
+                return Err(std::io::Error::last_os_error())
+                    .context("cannot resume OMP initial thread");
+            }
+            return Ok(());
+        }
+        found = unsafe { Thread32Next(snapshot.as_raw_handle(), &raw mut entry) } != 0;
+    }
+    bail!("OMP initial thread missing before job assignment")
 }
