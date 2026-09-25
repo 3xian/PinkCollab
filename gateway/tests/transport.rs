@@ -61,6 +61,29 @@ async fn stop_completes_while_a_stdin_write_is_blocked() {
     );
 }
 
+#[tokio::test]
+async fn write_timeout_terminates_runtime_without_an_explicit_stop() {
+    let (_dir, runtime, mut output) = fixture(&["--stall-stdin"]);
+    runtime.wait_ready().await.unwrap();
+    let failed = tokio::time::timeout(
+        Duration::from_secs(20),
+        runtime.write(json!({"type":"prompt","message":"x".repeat(512 * 1024)})),
+    )
+    .await
+    .expect("the blocked write must time out");
+    assert!(failed.is_err());
+    let reason = tokio::time::timeout(Duration::from_secs(10), next_exit(&mut output))
+        .await
+        .expect("a write timeout must clean up OMP without Stop");
+    assert!(
+        reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("write timed out")),
+        "unexpected exit reason: {reason:?}"
+    );
+    assert!(!runtime.alive());
+}
+
 /// A frame that never ends must fail the transport instead of being buffered without a bound.
 #[tokio::test]
 async fn unterminated_stdout_fails_the_transport_instead_of_buffering() {
@@ -137,4 +160,43 @@ async fn stop_reaps_the_omp_process_tree() {
         WAIT_OBJECT_0
     );
     assert_eq!(next_exit(&mut output).await, None);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stop_reaps_the_unix_omp_process_group() {
+    let (dir, runtime, mut output) = fixture(&["--spawn-child-immediate", "--stall-stdin"]);
+    runtime.wait_ready().await.unwrap();
+    let pid: i32 = std::fs::read_to_string(dir.path().join("child.pid"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(unix_child_running(pid), "fixture child must be running");
+    runtime.stop_confirmed().await.unwrap();
+    assert!(
+        !unix_child_running(pid),
+        "Stop left a child process running"
+    );
+    assert_eq!(next_exit(&mut output).await, None);
+}
+
+#[cfg(unix)]
+fn unix_child_running(pid: i32) -> bool {
+    if unsafe { libc::kill(pid, 0) } != 0 {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        return stat
+            .rsplit_once(") ")
+            .and_then(|(_, fields)| fields.split_whitespace().next())
+            .is_some_and(|state| state != "Z" && state != "X");
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        true
+    }
 }

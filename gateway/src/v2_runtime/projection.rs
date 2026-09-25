@@ -20,6 +20,7 @@ impl SessionController {
                     && let Some(snapshot) = state.projection.as_mut()
                 {
                     snapshot.execution = "quiescent".into();
+                    state.settled_revision = state.settled_revision.wrapping_add(1);
                 }
                 let status = match omp::string(&frame, "status") {
                     "completed" => "succeeded",
@@ -87,6 +88,7 @@ impl SessionController {
                     snapshot.execution = "quiescent".into();
                     changed_runtime = true;
                 }
+                state.settled_revision = state.settled_revision.wrapping_add(1);
             }
             "extension_ui_request" => {
                 let method = omp::string(&frame, "method");

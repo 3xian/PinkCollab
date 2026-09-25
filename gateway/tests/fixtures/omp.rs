@@ -196,7 +196,7 @@ fn main() {
                 parent = id.clone();
                 if message == "need input before ack" {
                     pending_prompt_ack = frame.get("id").cloned();
-                } else {
+                } else if message != "settle before ack" {
                     ack(json!({}));
                 }
                 emit(
@@ -233,6 +233,12 @@ fn main() {
                         json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),
                     );
                     pending_prompt_id = None;
+                    if message == "settle before ack" {
+                        // Let the Gateway consume the terminal event before the command's
+                        // response waiter resumes, reproducing the late-ack ordering.
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        ack(json!({}));
+                    }
                 }
             }
             "abort" => {

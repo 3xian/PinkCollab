@@ -2,6 +2,8 @@ use crate::storage::id;
 use anyhow::{Context, Result, bail, ensure};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::{
@@ -58,6 +60,8 @@ struct Process {
     child: Mutex<Child>,
     #[cfg(windows)]
     job: crate::windows_job::Job,
+    #[cfg(unix)]
+    group_id: i32,
 }
 
 impl Process {
@@ -66,12 +70,18 @@ impl Process {
     fn terminate(&self, grace: Duration) -> Result<ExitStatus> {
         let mut child = self.child.lock();
         let deadline = Instant::now() + grace;
+        let mut exited = None;
         loop {
-            if let Some(status) = child.try_wait().context("cannot inspect OMP process")? {
-                #[cfg(not(windows))]
-                return Ok(status);
+            if exited.is_none() {
+                exited = child.try_wait().context("cannot inspect OMP process")?;
+            }
+            if let Some(status) = exited {
                 #[cfg(windows)]
                 if self.job.empty()? {
+                    return Ok(status);
+                }
+                #[cfg(unix)]
+                if !unix_group_has_live_members(self.group_id)? {
                     return Ok(status);
                 }
             }
@@ -85,20 +95,67 @@ impl Process {
             self.job.terminate_and_wait()?;
             child.wait().context("cannot reap OMP process")
         }
-        #[cfg(not(windows))]
+        #[cfg(unix)]
         {
-            if let Err(err) = child.kill() {
-                // The child may have exited between the final poll and the kill request.
-                if let Some(status) = child
-                    .try_wait()
-                    .context("cannot inspect OMP after kill failed")?
-                {
-                    return Ok(status);
+            // The group is created with OMP as leader and contains its descendants even if
+            // the leader has already exited. Killing only `child` would leave them running.
+            if unsafe { libc::killpg(self.group_id, libc::SIGKILL) } != 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(err).context("cannot kill OMP process group");
                 }
-                return Err(err).context("cannot kill OMP process");
             }
-            child.wait().context("cannot reap OMP process")
+            let status = match exited {
+                Some(status) => status,
+                None => child.wait().context("cannot reap OMP process")?,
+            };
+            let deadline = Instant::now() + TERMINATE_GRACE;
+            while unix_group_has_live_members(self.group_id)? {
+                ensure!(Instant::now() < deadline, "OMP process group did not exit");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Ok(status)
         }
+    }
+}
+
+#[cfg(unix)]
+fn unix_group_has_live_members(group_id: i32) -> Result<bool> {
+    if unsafe { libc::killpg(group_id, 0) } != 0 {
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            return Ok(false);
+        }
+        return Err(err).context("cannot inspect OMP process group");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Linux can retain adopted zombie grandchildren when PID 1 does not reap promptly.
+        // Zombies cannot execute, so they must not keep a stopped runtime lease occupied.
+        for entry in std::fs::read_dir("/proc").context("cannot inspect OMP process group")? {
+            let entry = entry?;
+            if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+                continue;
+            }
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+                continue;
+            };
+            let Some((_, fields)) = stat.rsplit_once(") ") else {
+                continue;
+            };
+            let mut fields = fields.split_whitespace();
+            let state = fields.next();
+            let _parent = fields.next();
+            let process_group = fields.next().and_then(|value| value.parse::<i32>().ok());
+            if process_group == Some(group_id) && state != Some("Z") && state != Some("X") {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(true)
     }
 }
 
@@ -169,6 +226,8 @@ impl Runtime {
             .stderr(Stdio::null());
         #[cfg(windows)]
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
+        #[cfg(unix)]
+        command.process_group(0);
         let mut child = command
             .spawn()
             .with_context(|| format!("cannot start OMP at {executable} in {}", cwd.display()))?;
@@ -191,6 +250,8 @@ impl Runtime {
         let (stop, mut stopping) = watch::channel(false);
         let pending = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
         let process = Arc::new(Process {
+            #[cfg(unix)]
+            group_id: child.id() as i32,
             child: Mutex::new(child),
             #[cfg(windows)]
             job,
@@ -251,7 +312,7 @@ impl Runtime {
         // inside the spawned thread panics and silently kills the writer.
         let runtime = tokio::runtime::Handle::current();
         std::thread::spawn(move || {
-            let reason: Option<String> = runtime.block_on(async move {
+            let (reason, stdin) = runtime.block_on(async move {
                 let stdin: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
                     Arc::new(Mutex::new(Some(Box::new(stdin))));
                 let reason = loop {
@@ -272,10 +333,15 @@ impl Runtime {
                         break failure;
                     }
                 };
-                // Releasing the last stdin handle asks OMP to exit on its own.
-                let _ = stdin.lock().take();
-                reason
+                (reason, stdin)
             });
+            if reason.is_some() {
+                // A timed-out spawn_blocking write can still own `stdin`'s mutex.
+                // Terminating OMP first releases that blocked write.
+                writer.finish(reason.clone());
+            }
+            // Releasing the last stdin handle asks OMP to exit on its own.
+            let _ = stdin.lock().take();
             writer.finish(reason);
         });
         Ok((

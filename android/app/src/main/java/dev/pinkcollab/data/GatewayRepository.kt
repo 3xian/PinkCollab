@@ -22,7 +22,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     private val listings = DirectoryListingCache(scope)
     private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()
     private val pendingCreateIds = ConcurrentHashMap<String, String>()
-    private val pendingCommandIds = ConcurrentHashMap<String, String>()
+    private val pendingCommands = PendingCommandStore()
 
     init {
         runCatching { credentials.read() }.onSuccess { saved ->
@@ -78,10 +78,9 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     }
 
     private fun event(hostId: String, frame: JSONObject) {
-        val reduction = synchronized(this) {
-            val reduced = reduceV2(state.value, hostId, frame)
-            mutable.value = reduced.state
-            reduced
+        val reduction = updateAtomically(mutable) { app ->
+            val reduced = reduceV2(app, hostId, frame)
+            reduced.state to reduced
         }
         if (frame.optString("type") == "snapshot" && frame.optString("resource") == "host/sessions") {
             initialSyncTimeouts.remove(hostId)?.cancel()
@@ -162,7 +161,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                 historyItems = items,
                 liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
                 historySourceId = source,
-                nextHistoryCursor = page.optString("nextCursor").takeIf { it.isNotBlank() },
+                nextHistoryCursor = historyCursor(page),
             )))
         }
     }
@@ -194,7 +193,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             app.copy(details = app.details + (id to current.copy(
                 timeline = if (current.session.runtimeAttached) current.timeline else history,
                 historyItems = history,
-                nextHistoryCursor = page.optString("nextCursor").takeIf { it.isNotBlank() },
+                nextHistoryCursor = historyCursor(page),
             )))
         }
     }
@@ -206,71 +205,130 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     }
 
     suspend fun selectModel(hostId: String, id: String, model: ModelInfo) {
-        val generation = requireNotNull(state.value.details[id]?.session?.runtimeGeneration) { "Runtime required" }
-        sendCommand(hostId, id, "select_model", JSONObject().put("expectedGeneration", generation).put("provider", model.provider).put("modelId", model.id))
+        sendCommand(hostId, id, "select_model:${model.provider}:${model.id}", "select_model") {
+            val generation = requireNotNull(state.value.details[id]?.session?.runtimeGeneration) { "Runtime required" }
+            JSONObject().put("expectedGeneration", generation).put("provider", model.provider).put("modelId", model.id)
+        }
     }
 
     suspend fun setThinkingLevel(hostId: String, id: String, level: String) {
-        val generation = requireNotNull(state.value.details[id]?.session?.runtimeGeneration) { "Runtime required" }
-        sendCommand(hostId, id, "set_thinking_level", JSONObject().put("expectedGeneration", generation).put("level", level))
+        sendCommand(hostId, id, "set_thinking_level:$level", "set_thinking_level") {
+            val generation = requireNotNull(state.value.details[id]?.session?.runtimeGeneration) { "Runtime required" }
+            JSONObject().put("expectedGeneration", generation).put("level", level)
+        }
     }
 
     suspend fun command(hostId: String, id: String, command: String, body: JSONObject = JSONObject()) {
-        val session = state.value.details[id]?.session ?: state.value.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
-        val generation = session?.runtimeGeneration
-        val fields = when (command) {
-            "prompt" -> {
-                val delivery = if (session?.runtimeExecution == "active") "steer" else "start"
-                JSONObject().put("delivery", delivery).put("message", body.getString("message"))
-                    .also { if (delivery == "steer") it.put("expectedGeneration", requireNotNull(generation) { "Runtime required" }) }
-            }
-            "start" -> JSONObject()
-            "interrupt", "stop" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
-            "respond" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
-                .put("inputRequestId", body.getString("id"))
-                .also {
-                    if (body.has("value")) it.put("value", body.getString("value"))
-                    if (body.has("confirmed")) it.put("confirmed", body.getBoolean("confirmed"))
-                    if (body.has("cancelled")) it.put("cancelled", body.getBoolean("cancelled"))
-                }
-            else -> throw IllegalArgumentException("Unknown command")
-        }
-        sendCommand(hostId, id, when (command) {
+        val requested = body.toString()
+        sendCommand(hostId, id, "$command:$requested", when (command) {
             "stop" -> "stop_runtime"
             "start" -> "start_runtime"
             else -> command
-        }, fields)
+        }) {
+            val input = JSONObject(requested)
+            val session = state.value.details[id]?.session ?: state.value.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
+            val generation = session?.runtimeGeneration
+            when (command) {
+                "prompt" -> {
+                    val delivery = if (session?.runtimeExecution == "active") "steer" else "start"
+                    JSONObject().put("delivery", delivery).put("message", input.getString("message"))
+                        .also { if (delivery == "steer") it.put("expectedGeneration", requireNotNull(generation) { "Runtime required" }) }
+                }
+                "start" -> JSONObject()
+                "interrupt", "stop" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
+                "respond" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
+                    .put("inputRequestId", input.getString("id"))
+                    .also {
+                        if (input.has("value")) it.put("value", input.getString("value"))
+                        if (input.has("confirmed")) it.put("confirmed", input.getBoolean("confirmed"))
+                        if (input.has("cancelled")) it.put("cancelled", input.getBoolean("cancelled"))
+                    }
+                else -> throw IllegalArgumentException("Unknown command")
+            }
+        }
     }
 
-    private suspend fun sendCommand(hostId: String, id: String, type: String, fields: JSONObject) {
+    private suspend fun sendCommand(hostId: String, id: String, action: String, type: String, fields: () -> JSONObject) {
         val p = paired(hostId)
-        val key = "$hostId:$id:$type:${fields}"
-        val commandId = pendingCommandIds.computeIfAbsent(key) { UUID.randomUUID().toString() }
-        val body = JSONObject(fields.toString()).put("type", type).put("commandId", commandId)
-        val response = try {
-            JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/commands", "POST", body))
-        } catch (error: IOException) {
-            if (error is GatewayHttpException) {
-                pendingCommandIds.remove(key, commandId)
-                throw error
-            }
-            val known = runCatching { JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/operations/$commandId")) }.getOrNull()
-            if (known == null) throw IOException("Command outcome unconfirmed. Retry the same action to query command $commandId.", error)
-            pendingCommandIds.remove(key, commandId)
+        submitPendingCommand(
+            pendingCommands, "$hostId:$id:$action", type, fields,
+            post = { body -> JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/commands", "POST", body)) },
+            lookup = { commandId -> JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/operations/$commandId")) },
+        )
+    }
+}
+
+internal fun historyCursor(page: JSONObject): String? = (page.opt("nextCursor") as? String)?.takeIf { it.isNotBlank() }
+
+internal data class PendingCommand(val id: String, val payload: String) {
+    @Volatile var attempted = false
+    @Volatile var lookupOnly = false
+}
+
+internal class PendingCommandStore {
+    private val values = ConcurrentHashMap<String, PendingCommand>()
+    fun getOrCreate(key: String, create: () -> PendingCommand): PendingCommand = values.computeIfAbsent(key) { create() }
+    fun remove(key: String, pending: PendingCommand) { values.remove(key, pending) }
+}
+
+internal suspend fun submitPendingCommand(
+    commands: PendingCommandStore,
+    key: String,
+    type: String,
+    fields: () -> JSONObject,
+    post: suspend (JSONObject) -> JSONObject,
+    lookup: suspend (String) -> JSONObject,
+) {
+    val pending = commands.getOrCreate(key) {
+        val commandId = UUID.randomUUID().toString()
+        PendingCommand(commandId, JSONObject(fields().toString()).put("type", type).put("commandId", commandId).toString())
+    }
+    val commandId = pending.id
+    if (pending.attempted) {
+        val known = runCatching { lookup(commandId) }.getOrNull()
+        if (known != null) {
+            if (known.optString("status") != "outcome_unknown") commands.remove(key, pending)
             checkReceipt(known)
             return
         }
-        require(response.optBoolean("receiptStored", true)) { "Stop sent, but its receipt could not be saved; verify the runtime state" }
-        pendingCommandIds.remove(key, commandId)
-        checkReceipt(response.getJSONObject("operation"))
+        if (pending.lookupOnly) throw IOException("Command outcome unconfirmed; inspect the session before retrying command $commandId")
     }
-
-    private fun checkReceipt(receipt: JSONObject) {
-        val status = receipt.optString("status")
-        if (status == "outcome_unknown") throw IOException("Command ${receipt.optString("commandId")} has an unconfirmed outcome; inspect the session before sending another command")
-        if (status == "failed" || status == "cancelled") {
-            val error = receipt.optJSONObject("error")
-            throw IOException(error?.optString("message")?.takeIf { it.isNotBlank() } ?: "Command $status")
+    pending.attempted = true
+    val response = try {
+        post(JSONObject(pending.payload))
+    } catch (error: IOException) {
+        if (error is GatewayHttpException && error.statusCode in 400..499 && error.statusCode != 408 && error.statusCode != 429) {
+            commands.remove(key, pending)
+            throw error
         }
+        val known = runCatching { lookup(commandId) }.getOrNull()
+        if (known == null) throw IOException("Command outcome unconfirmed. Retry the same action to query command $commandId.", error)
+        if (known.optString("status") != "outcome_unknown") commands.remove(key, pending)
+        checkReceipt(known)
+        return
+    }
+    if (!response.optBoolean("receiptStored", true)) {
+        pending.lookupOnly = true
+        throw IOException("Stop sent, but its receipt could not be saved; verify the runtime state")
+    }
+    val receipt = response.getJSONObject("operation")
+    if (receipt.optString("status") != "outcome_unknown") commands.remove(key, pending)
+    checkReceipt(receipt)
+}
+
+private fun checkReceipt(receipt: JSONObject) {
+    val status = receipt.optString("status")
+    if (status == "outcome_unknown") throw IOException("Command ${receipt.optString("commandId")} has an unconfirmed outcome; inspect the session before sending another command")
+    if (status == "failed" || status == "cancelled") {
+        val error = receipt.optJSONObject("error")
+        throw IOException(error?.optString("message")?.takeIf { it.isNotBlank() } ?: "Command $status")
+    }
+}
+
+internal fun <S, R> updateAtomically(state: MutableStateFlow<S>, reduce: (S) -> Pair<S, R>): R {
+    while (true) {
+        val current = state.value
+        val (updated, result) = reduce(current)
+        if (state.compareAndSet(current, updated)) return result
     }
 }

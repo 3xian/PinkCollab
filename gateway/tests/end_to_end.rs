@@ -463,6 +463,50 @@ async fn v2_lazy_session_prompt_receipt_and_generation_bound_stop() {
     assert_eq!(tool["tool"]["name"], "bash");
     assert_eq!(tool["tool"]["arguments"]["command"], "cargo test");
     assert_eq!(tool["tool"]["result"], "tests passed");
+    let early_settled = json!({"commandId":"prompt-settled-first","type":"prompt","delivery":"start","message":"settle before ack"});
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&early_settled)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    let settled_url = format!("{endpoint}/{id}/operations/prompt-settled-first");
+    tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let receipt: Value = client
+                .get(&settled_url)
+                .bearer_auth(&credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if receipt["status"] == "succeeded" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    // The fixture intentionally sends the acknowledgement after its terminal event.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let settled_view: Value = client
+        .get(format!("{endpoint}/{id}"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(settled_view["runtime"]["execution"], "quiescent");
     let stop =
         json!({"commandId":"stop-one","type":"stop_runtime","expectedGeneration":generation});
     assert_eq!(

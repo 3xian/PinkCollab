@@ -44,6 +44,7 @@ impl SessionDirectory {
                 messages: Vec::new(),
                 finalized_messages: HashSet::new(),
                 pending_prompt_results: HashMap::new(),
+                settled_revision: 0,
                 dirty_messages: HashSet::new(),
                 removed_messages: Vec::new(),
                 display_flush_scheduled: false,

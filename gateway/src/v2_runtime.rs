@@ -185,6 +185,7 @@ struct ControllerState {
     messages: Vec<TimelineItem>,
     finalized_messages: HashSet<String>,
     pending_prompt_results: HashMap<String, (String, String)>,
+    settled_revision: u64,
     dirty_messages: HashSet<String>,
     removed_messages: Vec<String>,
     display_flush_scheduled: bool,
@@ -390,13 +391,14 @@ impl SessionController {
                     }
                 }
                 let rpc_id = rpc_id(receipt);
-                {
+                let settled_revision = {
                     let mut state = self.state.lock().await;
                     state.pending_prompt_results.insert(
                         rpc_id.clone(),
                         (receipt.client_id.clone(), receipt.command_id.clone()),
                     );
-                }
+                    state.settled_revision
+                };
                 let mut frame = json!({"type":"prompt","message":message});
                 match delivery {
                     Delivery::Start => {}
@@ -416,7 +418,8 @@ impl SessionController {
                                 json!({"runtimeGeneration":generation,"agentInvoked":false}),
                             ));
                         }
-                        self.set_execution(&generation, "active", None).await;
+                        self.set_prompt_active(&generation, &rpc_id, settled_revision)
+                            .await;
                         Ok(CommandResult::Running)
                     }
                     Err(err) if err.to_string().starts_with("OMP rejected command") => {
@@ -728,6 +731,7 @@ impl SessionController {
                 actual_model: None,
                 pending_inputs: Vec::new(),
             });
+            state.settled_revision = 0;
             state.messages.clear();
             state.finalized_messages.clear();
             state.dirty_messages.clear();
@@ -882,16 +886,18 @@ impl SessionController {
         );
         Ok(())
     }
-    async fn set_execution(&self, generation: &str, execution: &str, activity: Option<String>) {
+    async fn set_prompt_active(&self, generation: &str, rpc_id: &str, settled_revision: u64) {
         let mut state = self.state.lock().await;
         if state
             .runtime
             .as_ref()
             .is_some_and(|r| r.generation == generation)
+            && state.settled_revision == settled_revision
+            && state.pending_prompt_results.contains_key(rpc_id)
         {
             if let Some(snapshot) = state.projection.as_mut() {
-                snapshot.execution = execution.into();
-                snapshot.activity = activity;
+                snapshot.execution = "active".into();
+                snapshot.activity = None;
             }
             let id = state.session.id.clone();
             self.publish(
