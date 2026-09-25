@@ -40,7 +40,7 @@ function cardHtml(phone) {
 <title>PinkCollab social card</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400..700&family=Manrope:wght@400..800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700&family=DM+Sans:wght@400..700&family=Manrope:wght@400..800&display=swap">
 <link rel="stylesheet" href="styles.css">
 <style>
 html,body{width:${WIDTH}px;height:${HEIGHT}px;margin:0;overflow:hidden}
@@ -50,7 +50,7 @@ body{background:var(--dots),var(--page);color:var(--text-primary);font-family:va
 .card-brand{position:absolute;left:76px;top:52px;display:flex;align-items:center;gap:14px;font-family:var(--display);font-weight:800;font-size:31px;letter-spacing:-1.4px}
 .card-brand img{width:52px;height:52px;border-radius:13px}
 .card-eyebrow{font-size:13px;letter-spacing:2.4px;font-weight:700;color:#c2a7dc}
-.card h1{font-family:var(--display);font-size:72px;line-height:1.04;letter-spacing:-3.4px;font-weight:800;margin:20px 0 0;max-width:600px}
+.card h1{font-family:'Big Shoulders Display',Impact,sans-serif;font-weight:700;font-size:68px;line-height:0.95;letter-spacing:-0.02em;margin:12px 0 0;max-width:560px}
 .card h1 span{color:var(--purple);background:linear-gradient(105deg,#8360dd 8%,#c069c9 75%);background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .card-sub{font-size:21px;line-height:1.6;color:var(--text-secondary);margin:26px 0 0;max-width:520px}
 .card-url{font-size:18px;color:#c6a9e0;margin-top:32px}
@@ -63,8 +63,7 @@ body{background:var(--dots),var(--page);color:var(--text-primary);font-family:va
   <div class="card-brand"><img src="assets/logo-96.png" width="52" height="52" alt="">PinkCollab<span class="brand-dot">.</span></div>
   <div class="card-copy">
     <p class="card-eyebrow">RUNS ON HOSTS YOU OWN · OPEN SOURCE</p>
-    <h1>Start and steer <span>Oh My Pi</span> from your phone.</h1>
-    <p class="card-sub">Spawn, prompt, steer, and stop OMP coding sessions over a gateway that only your phone can reach.</p>
+    <h1>Android client for<br><span>Oh My Pi (OMP).</span></h1>
     <p class="card-url">3xian.github.io/PinkCollab</p>
   </div>
   <div class="card-scene">${phone}</div>

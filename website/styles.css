@@ -88,3 +88,5 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 .not-found-copy{font-size:17px;line-height:1.75;color:var(--text-secondary);max-width:520px}
 .not-found .hero-actions{margin-top:34px}
 @media(max-width:480px){.not-found{padding:70px 0 62px}.not-found .hero-actions{flex-direction:column;align-items:stretch}}
+
+.hero h1{max-width:16em;font-family:'Big Shoulders Display',Impact,sans-serif;font-weight:700;font-size:clamp(42px,4.8vw,64px);line-height:0.95;letter-spacing:-0.02em;margin:8px 0 28px}

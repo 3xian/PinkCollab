@@ -2,9 +2,9 @@
 
 <h1 align="center">PinkCollab</h1>
 
-<p align="center"><strong>Spawn and steer OMP sessions from Android.</strong></p>
+<p align="center"><strong>An Awesome Android client for Oh My Pi (OMP).</strong></p>
 
-[Oh My Pi (OMP)](https://omp.sh/) runs on a host you own. Your phone launches the work, follows it live, and answers when OMP needs you.
+[OMP](https://omp.sh/) runs on a host you own. Start a session from your phone, follow it live, and answer when it needs you.
 
 ```mermaid
 flowchart TD
