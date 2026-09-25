@@ -121,42 +121,121 @@ impl Process {
 
 #[cfg(unix)]
 fn unix_group_has_live_members(group_id: i32) -> Result<bool> {
-    if unsafe { libc::killpg(group_id, 0) } != 0 {
-        let err = std::io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::ESRCH) {
-            return Ok(false);
-        }
-        return Err(err).context("cannot inspect OMP process group");
-    }
-    #[cfg(target_os = "linux")]
+    #[cfg(target_os = "macos")]
     {
-        // Linux can retain adopted zombie grandchildren when PID 1 does not reap promptly.
-        // Zombies cannot execute, so they must not keep a stopped runtime lease occupied.
-        for entry in std::fs::read_dir("/proc").context("cannot inspect OMP process group")? {
-            let entry = entry?;
-            if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
-                continue;
+        // Darwin can return EPERM for killpg(group, 0) while only zombies remain.
+        // Inspect members instead, so a dead descendant does not retain the lease.
+        mac_group_has_live_members(group_id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if unsafe { libc::killpg(group_id, 0) } != 0 {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(false);
             }
-            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-                continue;
+            return Err(err).context("cannot inspect OMP process group");
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // Linux can retain adopted zombie grandchildren when PID 1 does not reap promptly.
+            // Zombies cannot execute, so they must not keep a stopped runtime lease occupied.
+            for entry in std::fs::read_dir("/proc").context("cannot inspect OMP process group")? {
+                let entry = entry?;
+                if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+                    continue;
+                }
+                let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+                    continue;
+                };
+                let Some((_, fields)) = stat.rsplit_once(") ") else {
+                    continue;
+                };
+                let mut fields = fields.split_whitespace();
+                let state = fields.next();
+                let _parent = fields.next();
+                let process_group = fields.next().and_then(|value| value.parse::<i32>().ok());
+                if process_group == Some(group_id) && state != Some("Z") && state != Some("X") {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Ok(true)
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn mac_group_has_live_members(group_id: i32) -> Result<bool> {
+    use std::{mem::MaybeUninit, ptr};
+
+    let count = unsafe {
+        *libc::__error() = 0;
+        libc::proc_listpgrppids(group_id, ptr::null_mut(), 0)
+    };
+    check_mac_process_list(count)?;
+    let mut pids = vec![0_i32; count as usize + 32];
+    loop {
+        let bytes = (pids.len() * std::mem::size_of::<i32>()) as i32;
+        let count = unsafe {
+            *libc::__error() = 0;
+            libc::proc_listpgrppids(group_id, pids.as_mut_ptr().cast(), bytes)
+        };
+        check_mac_process_list(count)?;
+        if count as usize >= pids.len() {
+            ensure!(
+                pids.len() < 100_000,
+                "OMP process group grew too large to inspect"
+            );
+            pids.resize(pids.len() * 2, 0);
+            continue;
+        }
+        for &pid in pids.iter().take(count as usize).filter(|&&pid| pid > 0) {
+            let mut info = MaybeUninit::<libc::proc_bsdshortinfo>::uninit();
+            let size = std::mem::size_of::<libc::proc_bsdshortinfo>() as i32;
+            let read = unsafe {
+                *libc::__error() = 0;
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDT_SHORTBSDINFO,
+                    0,
+                    info.as_mut_ptr().cast(),
+                    size,
+                )
             };
-            let Some((_, fields)) = stat.rsplit_once(") ") else {
-                continue;
-            };
-            let mut fields = fields.split_whitespace();
-            let state = fields.next();
-            let _parent = fields.next();
-            let process_group = fields.next().and_then(|value| value.parse::<i32>().ok());
-            if process_group == Some(group_id) && state != Some("Z") && state != Some("X") {
+            if read == 0 {
+                let err = std::io::Error::last_os_error();
+                if matches!(err.raw_os_error(), Some(0) | Some(libc::ESRCH)) {
+                    continue;
+                }
+                return Err(err).context("cannot inspect OMP process group member");
+            }
+            ensure!(
+                read == size,
+                "cannot inspect OMP process group member {pid}"
+            );
+            let info = unsafe { info.assume_init() };
+            if info.pbsi_pgid == group_id as u32 && info.pbsi_status != libc::SZOMB {
                 return Ok(true);
             }
         }
-        Ok(false)
+        return Ok(false);
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        Ok(true)
+}
+
+#[cfg(target_os = "macos")]
+fn check_mac_process_list(count: i32) -> Result<()> {
+    ensure!(count >= 0, "cannot list OMP process group");
+    if count == 0 {
+        let err = std::io::Error::last_os_error();
+        if !matches!(err.raw_os_error(), Some(0) | Some(libc::ESRCH)) {
+            return Err(err).context("cannot list OMP process group");
+        }
     }
+    Ok(())
 }
 
 /// Single termination point shared by the reader thread, the writer thread and [`Runtime::stop`].

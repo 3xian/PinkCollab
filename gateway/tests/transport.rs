@@ -194,7 +194,31 @@ fn unix_child_running(pid: i32) -> bool {
             .and_then(|(_, fields)| fields.split_whitespace().next())
             .is_some_and(|state| state != "Z" && state != "X")
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdshortinfo>::uninit();
+        let size = std::mem::size_of::<libc::proc_bsdshortinfo>() as i32;
+        let read = unsafe {
+            *libc::__error() = 0;
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDT_SHORTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        };
+        if read == 0 {
+            let err = std::io::Error::last_os_error();
+            if matches!(err.raw_os_error(), Some(0) | Some(libc::ESRCH)) {
+                return false;
+            }
+            panic!("cannot inspect fixture child {pid}: {err}");
+        }
+        assert_eq!(read, size, "cannot inspect fixture child {pid}");
+        unsafe { info.assume_init() }.pbsi_status != libc::SZOMB
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         true
     }
