@@ -14,20 +14,24 @@ internal class CommandDispatcher(
     private val hostGate: HostCommandGate,
 ) {
     private val pendingCommands = DurableCommandOutbox(storage)
+    private data class RuntimeTarget(val generation: String) {
+        fun action(requested: String) = "$requested:generation:$generation"
+        fun fields() = JSONObject().put("expectedGeneration", generation)
+    }
 
     suspend fun removeHost(hostId: String) = pendingCommands.removeHost(hostId)
 
     suspend fun selectModel(hostId: String, id: String, model: ModelInfo) {
-        sendCommand(hostId, id, "select_model:${model.provider}:${model.id}", "select_model") {
-            val generation = requireNotNull(state.value.details[SessionKey(hostId, id)]?.session?.runtimeGeneration) { "Runtime required" }
-            JSONObject().put("expectedGeneration", generation).put("provider", model.provider).put("modelId", model.id)
+        val target = runtimeTarget(hostId, id)
+        sendCommand(hostId, id, target.action("select_model:${model.provider}:${model.id}"), "select_model") {
+            target.fields().put("provider", model.provider).put("modelId", model.id)
         }
     }
 
     suspend fun setThinkingLevel(hostId: String, id: String, level: String) {
-        sendCommand(hostId, id, "set_thinking_level:$level", "set_thinking_level") {
-            val generation = requireNotNull(state.value.details[SessionKey(hostId, id)]?.session?.runtimeGeneration) { "Runtime required" }
-            JSONObject().put("expectedGeneration", generation).put("level", level)
+        val target = runtimeTarget(hostId, id)
+        sendCommand(hostId, id, target.action("set_thinking_level:$level"), "set_thinking_level") {
+            target.fields().put("level", level)
         }
     }
 
@@ -40,24 +44,25 @@ internal class CommandDispatcher(
     suspend fun command(hostId: String, id: String, command: String, body: JSONObject = JSONObject(), intentId: String? = null) {
         if (command == "prompt") require(!intentId.isNullOrBlank()) { "Prompt intent ID required" }
         val requested = body.toString()
-        sendCommand(hostId, id, intentId?.let { "$command:intent:$it" } ?: "$command:$requested", when (command) {
+        val target = if (command == "interrupt" || command == "stop" || command == "respond") runtimeTarget(hostId, id) else null
+        val action = intentId?.let { "$command:intent:$it" } ?: "$command:$requested"
+        sendCommand(hostId, id, target?.action(action) ?: action, when (command) {
             "stop" -> "stop_runtime"
             "start" -> "start_runtime"
             else -> command
         }, intentId) {
             val input = JSONObject(requested)
-            val session = state.value.details[SessionKey(hostId, id)]?.session ?: state.value.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
-            val generation = session?.runtimeGeneration
             when (command) {
                 "prompt" -> {
+                    val session = currentSession(hostId, id)
                     val delivery = if (session?.runtimeExecution == RuntimeExecution.Active) "steer" else "start"
                     JSONObject().put("delivery", delivery).put("message", input.getString("message"))
                         .also { if (input.has("fileIds")) it.put("fileIds", input.getJSONArray("fileIds")) }
-                        .also { if (session?.runtimeAttached == true) it.put("expectedGeneration", requireNotNull(generation) { "Runtime required" }) }
+                        .also { if (session?.runtimeAttached == true) it.put("expectedGeneration", requireNotNull(session.runtimeGeneration) { "Runtime required" }) }
                 }
                 "start" -> JSONObject()
-                "interrupt", "stop" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
-                "respond" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
+                "interrupt", "stop" -> requireNotNull(target).fields()
+                "respond" -> requireNotNull(target).fields()
                     .put("inputRequestId", input.getString("id"))
                     .also {
                         if (input.has("value")) it.put("value", input.getString("value"))
@@ -68,6 +73,14 @@ internal class CommandDispatcher(
             }
         }
     }
+
+    private fun currentSession(hostId: String, id: String): Session? {
+        val snapshot = state.value
+        return snapshot.details[SessionKey(hostId, id)]?.session ?: snapshot.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
+    }
+
+    private fun runtimeTarget(hostId: String, id: String) =
+        RuntimeTarget(requireNotNull(currentSession(hostId, id)?.runtimeGeneration) { "Runtime required" })
 
     private suspend fun sendCommand(hostId: String, id: String, action: String, type: String, intentId: String? = null, fields: () -> JSONObject) {
         hostGate.withHost(hostId) {

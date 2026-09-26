@@ -7,6 +7,63 @@ use support::{Harness, wait_operation};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 #[tokio::test]
+async fn interrupt_is_admitted_after_an_accepted_prompt_reaches_omp() {
+    let h = Harness::new(1, vec!["--record-prompt-frame".into()]).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let cwd = h.cwd("interrupt-order");
+    let sessions = format!("{}/api/v2/sessions", h.url);
+    let record: Value = client
+        .post(&sessions)
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"create","hostId":h.host.id,"cwd":cwd}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session = format!("{sessions}/{}", record["id"].as_str().unwrap());
+    let commands = format!("{session}/commands");
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&json!({"commandId":"start","type":"start_runtime"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    let start = wait_operation(
+        &client,
+        &format!("{session}/operations/start"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    let generation = start["runtimeGeneration"].as_str().unwrap();
+
+    assert_eq!(client.post(&commands).bearer_auth(&credential)
+        .json(&json!({"commandId":"prompt","type":"prompt","delivery":"start","message":"need input before ack","expectedGeneration":generation}))
+        .send().await.unwrap().status(), 202);
+    // The prompt's OMP acknowledgement stays pending, but admission must wait only for its write.
+    let interrupt = tokio::time::timeout(Duration::from_secs(5), client.post(&commands).bearer_auth(&credential)
+        .json(&json!({"commandId":"interrupt","type":"interrupt","expectedGeneration":generation}))
+        .send()).await.unwrap().unwrap();
+    assert_eq!(interrupt.status(), 202);
+    wait_operation(
+        &client,
+        &format!("{session}/operations/interrupt"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    assert!(std::path::Path::new(&cwd).join("last-prompt.json").exists());
+}
+
+#[tokio::test]
 async fn response_reaches_omp_while_prompt_ack_is_pending() {
     let h = Harness::new(1, vec![]).await;
     let client = reqwest::Client::new();

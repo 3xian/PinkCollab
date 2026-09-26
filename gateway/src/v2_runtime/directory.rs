@@ -50,6 +50,7 @@ impl SessionDirectory {
                 display_flush_scheduled: false,
             }),
             ordinary_dispatch: Mutex::new(()),
+            prompt_interrupt_admission: Arc::new(Mutex::new(())),
             store: self.store.clone(),
             browser: self.browser.clone(),
             bus: self.bus.clone(),
@@ -159,6 +160,19 @@ impl SessionDirectory {
             .await
             .map_err(|_| SubmitError::Persistence)?
             .ok_or(SubmitError::NotFound)?;
+        // Preserve admission order until a prompt or abort has reached OMP's input pipe.
+        // Stop bypasses this gate so a blocked prompt write cannot delay termination.
+        let admission = if matches!(command, Command::Prompt { .. } | Command::Interrupt { .. }) {
+            Some(
+                controller
+                    .prompt_interrupt_admission
+                    .clone()
+                    .lock_owned()
+                    .await,
+            )
+        } else {
+            None
+        };
         let fingerprint = hex::encode(Sha256::digest(
             serde_json::to_vec(&command)
                 .map_err(|_| SubmitError::Invalid("Invalid command".into()))?,
@@ -201,7 +215,9 @@ impl SessionDirectory {
             Ok(true) => {
                 let stop = matches!(command, Command::StopRuntime { .. });
                 tokio::spawn(async move {
-                    controller.execute(receipt.clone(), command, stop).await;
+                    controller
+                        .execute(receipt.clone(), command, stop, admission)
+                        .await;
                 });
                 // Read from storage because the spawned task may already have advanced it.
                 let current = self
@@ -218,7 +234,7 @@ impl SessionDirectory {
             Err(_) if matches!(command, Command::StopRuntime { .. }) => {
                 let copy = receipt.clone();
                 tokio::spawn(async move {
-                    controller.execute(copy, command, true).await;
+                    controller.execute(copy, command, true, admission).await;
                 });
                 Ok(Submitted {
                     receipt,

@@ -17,7 +17,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Mutex, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore};
 
 const LIVE_ITEM_LIMIT: usize = 64;
 const LIVE_TEXT_LIMIT: usize = 8 * 1024;
@@ -202,6 +202,7 @@ struct ControllerState {
 pub struct SessionController {
     state: Mutex<ControllerState>,
     ordinary_dispatch: Mutex<()>,
+    prompt_interrupt_admission: Arc<Mutex<()>>,
     store: Arc<Store>,
     browser: Arc<Browser>,
     bus: Arc<Bus>,
@@ -301,7 +302,13 @@ impl SessionController {
         }
         Ok(())
     }
-    async fn execute(self: Arc<Self>, mut receipt: OperationRecord, command: Command, stop: bool) {
+    async fn execute(
+        self: Arc<Self>,
+        mut receipt: OperationRecord,
+        command: Command,
+        stop: bool,
+        mut admission: Option<OwnedMutexGuard<()>>,
+    ) {
         // Stop is deliberately outside the ordinary dispatch lock. A hung prompt write or RPC
         // response cannot prevent the process from being terminated.
         let control = matches!(command, Command::Interrupt { .. } | Command::Respond { .. });
@@ -317,7 +324,7 @@ impl SessionController {
         if !stored && !stop {
             return;
         }
-        let result = self.run(&mut receipt, command).await;
+        let result = self.run(&mut receipt, command, &mut admission).await;
         if !stored {
             return;
         }
@@ -351,6 +358,7 @@ impl SessionController {
         self: &Arc<Self>,
         receipt: &mut OperationRecord,
         command: Command,
+        admission: &mut Option<OwnedMutexGuard<()>>,
     ) -> std::result::Result<CommandResult, CommandFailure> {
         match command {
             Command::StartRuntime => {
@@ -443,7 +451,9 @@ impl SessionController {
                     );
                     state.settled_revision
                 };
-                let response = runtime.request_with_id(rpc_id.clone(), frame).await;
+                let response = runtime
+                    .request_with_id_after_write(rpc_id.clone(), frame, || drop(admission.take()))
+                    .await;
                 match response {
                     Ok(response) => {
                         if response["data"]["agentInvoked"] == false {
@@ -499,7 +509,7 @@ impl SessionController {
                 let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
                 self.bind_generation(receipt, &expected_generation).await?;
                 runtime
-                    .request(json!({"type":"abort"}))
+                    .request_after_write(json!({"type":"abort"}), || drop(admission.take()))
                     .await
                     .map_err(rpc_failure)?;
                 Ok(CommandResult::Succeeded(

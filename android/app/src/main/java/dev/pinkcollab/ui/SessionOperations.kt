@@ -115,6 +115,10 @@ internal class SessionOperations(
         val key = SessionKey(session.hostId, session.id)
         if (command.lane == SessionLane.Control) cancelSend(key)
         launch(key, command.lane) {
+            // Gateway orders accepted prompts before Interrupt and fences Stop by runtime generation.
+            // Cancellation cannot prove an in-flight POST was not delivered; its durable outbox
+            // row remains for receipt reconciliation before the next prompt.
+            // Waiting for the local Send job could strand Stop behind a blocked content provider.
             actions.command(session, command)
         }
     }

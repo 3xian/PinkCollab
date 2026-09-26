@@ -13,6 +13,7 @@ import okhttp3.OkHttpClient
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,6 +23,31 @@ import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 class GatewayRepositorySafetyTest {
+    private class RecordingTransport(private val post: (JSONObject) -> JSONObject) : GatewayTransport {
+        override val client = OkHttpClient()
+        val posts = mutableListOf<JSONObject>()
+        override fun validateURL(value: String) = value
+        override suspend fun request(url: String, credential: String?, path: String, method: String,
+            body: JSONObject?, query: Pair<String, String>?): String {
+            if (method == "GET") throw GatewayHttpException(404, "operation_not_found", "missing")
+            check(path.endsWith("/commands"))
+            val command = JSONObject(body.toString())
+            posts += command
+            return post(command).toString()
+        }
+        override suspend fun upload(url: String, credential: String, path: String, name: String,
+            bytes: ByteArray): String = error("unexpected upload")
+    }
+
+    private fun accepted(body: JSONObject) = JSONObject().put("operation", receipt(body.getString("commandId"), "accepted"))
+
+    private fun runtimeState(host: PairedHost, generation: String): AppState {
+        val session = Session("session", "host", "/tmp", "Work", SessionStatus.Running, "Working", false, null,
+            "2026-01-01", "2026-01-01", true, generation, RuntimeExecution.Active)
+        return AppState(hosts = mapOf("host" to HostState(host, sessions = listOf(session))),
+            details = mapOf(SessionKey("host", "session") to SessionDetail(session)))
+    }
+
     private class MemoryOutbox : CommandOutboxStorage {
         private val values = mutableMapOf<String, PendingCommand>()
         var rejectWrites = false
@@ -266,6 +292,82 @@ class GatewayRepositorySafetyTest {
         }
         assertEquals(1, posts)
         assertEquals(CommandState.LOOKUP_ONLY, storage.records().single().state)
+    }
+
+    @Test fun stale_lookup_only_stop_does_not_block_a_new_runtime() = runBlocking {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        val state = MutableStateFlow(runtimeState(host, "run-a"))
+        val storage = MemoryOutbox()
+        val transport = RecordingTransport { body ->
+            if (body.getString("expectedGeneration") == "run-a") throw IOException("response lost")
+            accepted(body)
+        }
+        val dispatcher = CommandDispatcher(state, { host }, transport, storage, HostCommandGate())
+
+        repeat(2) {
+            try { dispatcher.command("host", "session", "stop"); throw AssertionError() } catch (_: IOException) { }
+        }
+        assertEquals(1, transport.posts.size)
+        assertEquals(CommandState.LOOKUP_ONLY, storage.records().single().state)
+
+        state.value = runtimeState(host, "run-b")
+        dispatcher.command("host", "session", "stop")
+
+        assertEquals(listOf("run-a", "run-b"), transport.posts.map { it.getString("expectedGeneration") })
+        val records = storage.records()
+        assertEquals(2, records.size)
+        assertNotEquals(records[0].key, records[1].key)
+        assertTrue(records.all { it.state == CommandState.LOOKUP_ONLY })
+    }
+
+    @Test fun runtime_specific_actions_use_their_payload_generation_in_the_key() = runBlocking {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        suspend fun checkScoped(action: suspend (CommandDispatcher) -> Unit) {
+            val state = MutableStateFlow(runtimeState(host, "run-a"))
+            val storage = MemoryOutbox()
+            val transport = RecordingTransport(::accepted)
+            val dispatcher = CommandDispatcher(state, { host }, transport, storage, HostCommandGate())
+            action(dispatcher)
+            state.value = runtimeState(host, "run-b")
+            action(dispatcher)
+            assertEquals(listOf("run-a", "run-b"), transport.posts.map { it.getString("expectedGeneration") })
+            assertEquals(2, storage.records().map { it.key }.toSet().size)
+        }
+
+        checkScoped { it.command("host", "session", "interrupt") }
+        checkScoped { it.respond("host", "session", AttentionResponse.Value("input-1", "answer")) }
+        checkScoped { it.selectModel("host", "session", ModelInfo("provider", "model", "Model")) }
+        checkScoped { it.setThinkingLevel("host", "session", "high") }
+    }
+
+    @Test fun runtime_commands_use_the_same_host_summary_fallback() = runBlocking {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        val state = MutableStateFlow(runtimeState(host, "run-a").copy(details = emptyMap()))
+        val transport = RecordingTransport(::accepted)
+        val dispatcher = CommandDispatcher(state, { host }, transport, MemoryOutbox(), HostCommandGate())
+
+        dispatcher.selectModel("host", "session", ModelInfo("provider", "model", "Model"))
+        dispatcher.setThinkingLevel("host", "session", "high")
+        dispatcher.command("host", "session", "stop")
+
+        assertEquals(listOf("run-a", "run-a", "run-a"), transport.posts.map { it.getString("expectedGeneration") })
+    }
+
+    @Test fun stop_key_and_payload_capture_the_same_generation() = runBlocking {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        val state = MutableStateFlow(runtimeState(host, "run-a"))
+        val storage = MemoryOutbox()
+        val transport = RecordingTransport(::accepted)
+        val dispatcher = CommandDispatcher(state, { state.value = runtimeState(host, "run-b"); host },
+            transport, storage, HostCommandGate())
+
+        dispatcher.command("host", "session", "stop")
+
+        assertEquals("run-a", transport.posts.single().getString("expectedGeneration"))
+        val oldKey = storage.records().single().key
+        dispatcher.command("host", "session", "stop")
+        assertEquals("run-b", transport.posts.last().getString("expectedGeneration"))
+        assertNotEquals(oldKey, storage.records().last().key)
     }
 
     @Test fun failed_persistence_prevents_post() = runBlocking {

@@ -470,15 +470,36 @@ impl Runtime {
         self.request_with_id(id("req_"), frame).await
     }
 
+    pub async fn request_after_write(
+        &self,
+        frame: Value,
+        after_write: impl FnOnce(),
+    ) -> Result<Value> {
+        self.request_with_id_after_write(id("req_"), frame, after_write)
+            .await
+    }
+
     /// A caller-supplied id lets the session controller correlate a later `prompt_result` with
     /// the durable command receipt. OMP echoes this id in the immediate response and terminal
     /// result; it is scoped to this process and never accepted from a client as a raw RPC frame.
-    pub async fn request_with_id(&self, request_id: String, mut frame: Value) -> Result<Value> {
+    pub async fn request_with_id(&self, request_id: String, frame: Value) -> Result<Value> {
+        self.request_with_id_after_write(request_id, frame, || {})
+            .await
+    }
+
+    /// Reports when the frame reaches OMP, before waiting for its RPC reply.
+    pub async fn request_with_id_after_write(
+        &self,
+        request_id: String,
+        mut frame: Value,
+        after_write: impl FnOnce(),
+    ) -> Result<Value> {
         frame["id"] = json!(request_id);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().insert(request_id.clone(), tx);
         let result = async {
             self.write(frame).await?;
+            after_write();
             let response = tokio::time::timeout(Duration::from_secs(15), rx)
                 .await
                 .context("OMP response timed out")?
