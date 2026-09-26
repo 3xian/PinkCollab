@@ -218,7 +218,7 @@ private fun MarkdownBody(markdown: String, color: Color, markwon: Markwon) {
         factory = {
             TextView(it).apply {
                 includeFontPadding = false
-                typeface = ResourcesCompat.getFont(it, dev.pinkcollab.R.font.maple_mono_cn) ?: Typeface.MONOSPACE
+                typeface = ResourcesCompat.getFont(it, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.MONOSPACE
                 setTextIsSelectable(true)
                 movementMethod = LinkMovementMethod.getInstance()
                 setLineSpacing(0f, 1.18f)

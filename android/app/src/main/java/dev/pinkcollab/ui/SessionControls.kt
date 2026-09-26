@@ -103,7 +103,7 @@ internal fun composerRailActions(
 /** Leading/trailing inset for composer content; the composer card itself stays unpadded. */
 internal val ComposerContentInset = 14.dp
 
-private val ComposerRailWidth = 72.dp
+private val ComposerRailMinWidth = 72.dp
 
 /** Each rail action keeps a 48 dp touch target even when the composer card is short. */
 private val ComposerRailActionMinHeight = 48.dp
@@ -113,7 +113,9 @@ internal fun ComposerRail(actions: List<ComposerRailAction>, modifier: Modifier 
     Column(
         Modifier
             .fillMaxHeight()
-            .width(ComposerRailWidth)
+            // Expand with scaled labels rather than clipping them inside a fixed-width rail.
+            .widthIn(min = ComposerRailMinWidth)
+            .width(IntrinsicSize.Max)
             .heightIn(min = ComposerRailActionMinHeight * actions.size)
             .then(modifier),
     ) {
@@ -152,7 +154,7 @@ private fun ComposerRailButton(
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick)),
         contentAlignment = Alignment.Center,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
             Spacer(Modifier.width(4.dp))
             Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium, color = color)

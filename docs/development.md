@@ -38,9 +38,9 @@ On Windows use `gradlew.bat` instead; set `sdk.dir` in `android/local.properties
 
 The session pager's page keys must be Bundle-saveable. `SessionKey.pagerKey()` keeps both host and session IDs in one stable `String`; using the `SessionKey` data class directly crashes Android when a session page is composed. Smoke-test startup with at least one saved session, not only an empty session list.
 
-The session timeline bundles one Maple Mono CN Regular font. Compose synthesizes heavier weights; the Markdown `TextView` uses the same face through `res/font/maple_mono_cn.xml`. Keep both declarations aligned rather than bundling a second full CJK font (about 9 MB compressed in the APK). `SessionTypography` reduces the timeline's Compose text by 0.5 sp, and the Markdown view reads that theme's body size; the composer input and placeholder share a separate 15 sp style.
+The session timeline bundles one Maple Mono CN Regular font (about 9 MB compressed in the APK). Compose synthesizes heavier weights; the Markdown `TextView` loads the same `res/font/maple_mono_cn_regular.ttf` directly. `SessionTypography` reduces the timeline's Compose text by 0.5 sp, and the Markdown view reads that theme's body size; the composer input and placeholder share a separate 15 sp style.
 
-The composer card keeps one 14 dp horizontal inset and no vertical inset: the 48 dp attachment target and the 48 dp model row already inset their own content, so the first input line sits 14 dp from the top edge and the model label 16 dp from the bottom. The card is filled to the rail's height and spreads its content, so extra height lands between the input line and the model row instead of growing the top and bottom edges. `ComposerRail` keeps each action at 48 dp.
+The composer card keeps one 14 dp horizontal inset and no vertical inset: the 48 dp attachment target and the 48 dp model row already inset their own content, so the first input line sits 14 dp from the top edge and the model label 16 dp from the bottom. The card is filled to the rail's height and spreads its content, so extra height lands between the input line and the model row instead of growing the top and bottom edges. `ComposerRail` keeps each action at 48 dp and grows beyond its 72 dp minimum width when scaled labels need more room.
 
 ## Validation
 
