@@ -614,22 +614,25 @@ async fn v2_resume_keeps_transcript_and_uses_new_generation() {
     let id = create["id"].as_str().unwrap();
     let session_url = format!("{}/api/v2/sessions/{id}", h.url);
     let commands = format!("{session_url}/commands");
-    let first = client
-        .post(&commands)
-        .bearer_auth(&credential)
-        .json(&json!({"commandId":"first","type":"prompt","delivery":"start","message":"hello"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(first.status(), 202);
-    let first = wait_operation(
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&json!({"commandId":"start","type":"start_runtime"}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    let started = wait_operation(
         &client,
-        &format!("{session_url}/operations/first"),
+        &format!("{session_url}/operations/start"),
         &credential,
         "succeeded",
     )
     .await;
-    let old_generation = first["runtimeGeneration"].as_str().unwrap().to_owned();
+    let old_generation = started["runtimeGeneration"].as_str().unwrap().to_owned();
     let catalog: Value = client
         .get(format!("{session_url}/models"))
         .bearer_auth(&credential)
@@ -677,6 +680,21 @@ async fn v2_resume_keeps_transcript_and_uses_new_generation() {
         )
         .await;
     }
+    let first = client
+        .post(&commands)
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"first","type":"prompt","delivery":"start","message":"hello","expectedGeneration":old_generation}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(first.status(), 202);
+    wait_operation(
+        &client,
+        &format!("{session_url}/operations/first"),
+        &credential,
+        "succeeded",
+    )
+    .await;
     let detail: Value = client
         .get(&session_url)
         .bearer_auth(&credential)

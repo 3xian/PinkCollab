@@ -7,12 +7,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.outlined.StopCircle
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -23,17 +31,17 @@ import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.ui.theme.*
 
 @Composable
-internal fun StopConfirmationDialog(
+internal fun ExitConfirmationDialog(
     dismiss: () -> Unit,
     confirm: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = dismiss,
-        icon = { Icon(Icons.Outlined.StopCircle, null, tint = TextMid) },
-        title = { Text("Stop this session?") },
+        icon = { Icon(Icons.AutoMirrored.Outlined.Logout, null, tint = TextMid) },
+        title = { Text("Exit this runtime?") },
         text = {
             Text(
-                "This ends the current OMP process. The conversation will remain visible, but the action cannot be undone.",
+                "This ends the current OMP process. The conversation stays, but this cannot be undone.",
                 color = TextMid,
             )
         },
@@ -41,7 +49,7 @@ internal fun StopConfirmationDialog(
             TextButton(
                 onClick = rememberHapticOnClick(confirm),
                 colors = ButtonDefaults.textButtonColors(contentColor = TextHigh),
-            ) { Text("Stop session", fontWeight = FontWeight.SemiBold) }
+            ) { Text("Exit", fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
             TextButton(
@@ -55,65 +63,142 @@ internal fun StopConfirmationDialog(
     )
 }
 
+internal data class ComposerRailAction(
+    val icon: ImageVector,
+    val label: String,
+    val enabled: Boolean,
+    val contentColor: Color,
+    val fill: Brush? = null,
+    val onClick: () -> Unit,
+)
+
+/**
+ * Visible labels are not wire names. Stop sends interrupt and aborts the turn.
+ * Exit only opens confirmation; the caller sends stop after that.
+ */
+internal fun composerRailActions(
+    showStart: Boolean,
+    canStart: Boolean,
+    canInterrupt: Boolean,
+    canExit: Boolean,
+    canSend: Boolean,
+    sendContentColor: Color,
+    sendFill: Brush,
+    onCommand: (SessionUserCommand) -> Unit,
+    onExit: () -> Unit,
+    onSend: () -> Unit,
+): List<ComposerRailAction> = buildList {
+    if (showStart) {
+        add(ComposerRailAction(Icons.Outlined.PlayArrow, "Start", canStart, Purple200) {
+            onCommand(SessionUserCommand.Start)
+        })
+    }
+    add(ComposerRailAction(Icons.Outlined.Stop, "Stop", canInterrupt, TextMid) {
+        onCommand(SessionUserCommand.Interrupt)
+    })
+    add(ComposerRailAction(Icons.AutoMirrored.Outlined.Logout, "Exit", canExit, TextMid, onClick = onExit))
+    add(ComposerRailAction(Icons.AutoMirrored.Outlined.Send, "Send", canSend, sendContentColor, sendFill, onSend))
+}
+
+private val ComposerRailWidth = 88.dp
+
 @Composable
-internal fun ComposerActionButton(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    enabled: Boolean,
-    color: Color,
-) {
-    TextButton(
-        onClick = rememberHapticOnClick(onClick),
-        enabled = enabled,
-        modifier = Modifier.height(40.dp),
-        contentPadding = PaddingValues(horizontal = 5.dp),
-        colors = ButtonDefaults.textButtonColors(
-            contentColor = color,
-            disabledContentColor = Gray400.copy(alpha = 0.34f),
-        ),
-    ) {
-        Icon(icon, null, Modifier.size(17.dp))
-        Spacer(Modifier.width(5.dp))
-        Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium)
+internal fun ComposerRail(actions: List<ComposerRailAction>, modifier: Modifier = Modifier) {
+    Column(Modifier.fillMaxHeight().width(ComposerRailWidth).then(modifier)) {
+        actions.forEachIndexed { index, action ->
+            if (index > 0 && action.fill == null) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+            }
+            ComposerRailButton(
+                icon = action.icon,
+                label = action.label,
+                onClick = action.onClick,
+                enabled = action.enabled,
+                contentColor = action.contentColor,
+                modifier = Modifier.weight(1f),
+                fill = action.fill ?: SolidColor(Color.Transparent),
+            )
+        }
     }
 }
 
 @Composable
-internal fun ComposerSendButton(
+private fun ComposerRailButton(
+    icon: ImageVector,
+    label: String,
     onClick: () -> Unit,
     enabled: Boolean,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+    fill: Brush = SolidColor(Color.Transparent),
 ) {
-    // Keep the visual pill compact without shrinking or overlapping its 48dp touch target.
-    val shape = RoundedCornerShape(percent = 50)
-    val fill = if (enabled) BrandGradient else SolidColor(Gray400.copy(alpha = 0.16f))
-    val contentColor = if (enabled) MaterialTheme.colorScheme.onPrimary else Gray400.copy(alpha = 0.58f)
-    Surface(
-        onClick = rememberHapticOnClick(onClick),
-        enabled = enabled,
-        modifier = Modifier.height(48.dp),
-        shape = shape,
-        color = Color.Transparent,
-        contentColor = contentColor,
+    val color = if (enabled) contentColor else Gray400.copy(alpha = 0.34f)
+    Box(
+        modifier
+            .fillMaxWidth()
+            .background(fill)
+            .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick)),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .padding(vertical = 9.dp)
-                .height(30.dp)
-                .background(fill, shape)
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Outlined.Send, null, Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    "Send",
-                    maxLines = 1,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
+            Spacer(Modifier.width(4.dp))
+            Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium, color = color)
         }
+    }
+}
+
+/** Visible composer copy is the selected model name, never the word "Model". */
+internal fun composerModelLabel(model: ModelInfo?): String {
+    model ?: return "Not selected"
+    return model.name.takeIf { it.isNotBlank() } ?: model.id.takeIf { it.isNotBlank() } ?: "Not selected"
+}
+
+internal fun composerThinkingLabel(model: ModelInfo?): String? =
+    model?.thinkingLevel?.takeIf { it.isNotBlank() }
+
+@Composable
+internal fun ComposerModelButton(
+    label: String,
+    thinkingLevel: String?,
+    onClick: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val description = if (thinkingLevel == null) "Choose model: $label" else "Choose model: $label, thinking $thinkingLevel"
+    val color = if (enabled) Purple200 else Gray400.copy(alpha = 0.34f)
+    val thinkingColor = if (enabled) TextMid else Gray400.copy(alpha = 0.34f)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 36.dp)
+            .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick))
+            .semantics { contentDescription = description }
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Tune, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+        )
+        if (thinkingLevel != null) {
+            Spacer(Modifier.width(8.dp))
+            Text(
+                thinkingLevel,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium,
+                color = thinkingColor,
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
     }
 }
 

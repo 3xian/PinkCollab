@@ -15,17 +15,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.PauseCircleOutline
-import androidx.compose.material.icons.outlined.StopCircle
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -35,6 +32,10 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
@@ -96,7 +97,7 @@ internal fun SessionPage(
         }
     }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
-    var showStopConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
+    var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     var showSavedHistory by rememberSaveable(session.id) { mutableStateOf(false) }
     LaunchedEffect(session.runtimeGeneration) { showSavedHistory = false }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity, showSavedHistory)
@@ -143,12 +144,30 @@ internal fun SessionPage(
     // raw IME inset would lift the composer by a whole navigation bar too much.
     val imeOverlap = WindowInsets.ime.getBottom(density) - WindowInsets.navigationBars.getBottom(density)
     val composerImePadding = with(density) { imeOverlap.coerceAtLeast(0).toDp() }
-    val composerShape = RoundedCornerShape(24.dp)
+    val composerShape = RoundedCornerShape(16.dp)
+    val composerFill = Brush.verticalGradient(
+        listOf(
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    )
+    val idleBorder = Brush.linearGradient(listOf(Color.White.copy(alpha = 0.16f), Purple400.copy(alpha = 0.14f)))
     val composerBorder = if (inputFocused) {
         Brush.linearGradient(listOf(Purple400.copy(alpha = 0.74f), Violet400.copy(alpha = 0.54f)))
     } else {
-        Brush.linearGradient(listOf(Color.White.copy(alpha = 0.16f), Purple400.copy(alpha = 0.14f)))
+        idleBorder
     }
+    fun Modifier.composerCard(border: Brush) = this
+        .shadow(
+            elevation = 18.dp,
+            shape = composerShape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = 0.62f),
+            spotColor = Purple400.copy(alpha = 0.18f),
+        )
+        .border(width = 1.dp, brush = border, shape = composerShape)
+        .clip(composerShape)
+        .background(composerFill)
     val placeholder = controls.placeholder
 
     Box(Modifier.fillMaxSize()) {
@@ -235,113 +254,104 @@ internal fun SessionPage(
                 .fillMaxWidth()
                 .padding(bottom = composerImePadding)
                 .padding(horizontal = 12.dp, vertical = 10.dp)
-                .onSizeChanged { composerHeightPx = it.height }
-                .shadow(
-                    elevation = 18.dp,
-                    shape = composerShape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = 0.62f),
-                    spotColor = Purple400.copy(alpha = 0.18f),
-                )
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.surfaceContainerHigh,
-                            MaterialTheme.colorScheme.surfaceContainer,
-                        ),
-                    ),
-                    composerShape,
-                )
-                .border(width = 1.dp, brush = composerBorder, shape = composerShape)
-                .padding(start = 16.dp, end = 8.dp, top = 15.dp, bottom = 8.dp),
+                .onSizeChanged { composerHeightPx = it.height },
         ) {
-            Row(verticalAlignment = Alignment.Top) {
-                BasicTextField(
-                    value = prompt,
-                    onValueChange = onDraftTextChange,
-                    modifier = Modifier
+            Row(
+                Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(
+                    Modifier
                         .weight(1f)
-                        .heightIn(min = 58.dp, max = 144.dp)
-                        .onFocusChanged { inputFocused = it.isFocused },
-                    enabled = inputEnabled,
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
-                    ),
-                    cursorBrush = SolidColor(Purple400),
-                    maxLines = 5,
-                    decorationBox = { innerTextField ->
-                        Box(Modifier.fillMaxWidth()) {
-                            if (prompt.isEmpty()) {
-                                Text(
-                                    placeholder,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
+                        .composerCard(composerBorder)
+                        .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        BasicTextField(
+                            value = prompt,
+                            onValueChange = onDraftTextChange,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 72.dp, max = 180.dp)
+                                .onFocusChanged { inputFocused = it.isFocused },
+                            enabled = inputEnabled,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
+                            ),
+                            cursorBrush = SolidColor(Purple400),
+                            maxLines = 5,
+                            decorationBox = { innerTextField ->
+                                Box(Modifier.fillMaxWidth()) {
+                                    if (prompt.isEmpty()) {
+                                        Text(
+                                            placeholder,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            },
+                        )
+                        IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = controls.canAttach) {
+                            Icon(Icons.Outlined.AttachFile, contentDescription = "Attach files")
+                        }
+                    }
+                    if (selectedFiles.isNotEmpty()) {
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            selectedFiles.forEach { file ->
+                                InputChip(
+                                    selected = true,
+                                    enabled = inputEnabled,
+                                    onClick = { onFileRemoved(file.id) },
+                                    label = { Text(file.name, maxLines = 1) },
+                                    trailingIcon = { Icon(Icons.Outlined.Close, contentDescription = "Remove ${file.name}", modifier = Modifier.size(14.dp)) },
                                 )
                             }
-                            innerTextField()
                         }
-                    },
-                )
-                IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = controls.canAttach) {
-                    Icon(Icons.Outlined.AttachFile, contentDescription = "Attach files")
-                }
-            }
-            if (selectedFiles.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    selectedFiles.forEach { file ->
-                        InputChip(
-                            selected = true,
-                            enabled = inputEnabled,
-                            onClick = { onFileRemoved(file.id) },
-                            label = { Text(file.name, maxLines = 1) },
-                            trailingIcon = { Icon(Icons.Outlined.Close, contentDescription = "Remove ${file.name}", modifier = Modifier.size(14.dp)) },
-                        )
                     }
+                    fileError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    state.sendProgress?.let { progress ->
+                        val status = when (progress) {
+                            is SendProgress.Uploading -> "Sending file ${progress.fileIndex} of ${progress.fileCount} · ${progress.fileName}"
+                            SendProgress.Submitting -> "Sending message…"
+                        }
+                        Column(Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) {
+                            Text(status, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = TextMid, style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(6.dp))
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth().height(3.dp),
+                                color = Purple400,
+                                trackColor = Color.White.copy(alpha = 0.08f),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    ComposerModelButton(
+                        label = composerModelLabel(detail.model),
+                        thinkingLevel = composerThinkingLabel(detail.model),
+                        onClick = {
+                            showModels = true
+                            onLoadModels(true)
+                        },
+                        enabled = controls.canChooseModel,
+                    )
                 }
-            }
-            fileError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            // The composer keeps the divider's clearance as plain spacing: the text field and the
-            // action row read as one surface without a line cutting through the pill and buttons.
-            Spacer(Modifier.height(11.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ComposerActionButton(
-                    icon = Icons.Outlined.Tune,
-                    label = "Model",
-                    onClick = {
-                        showModels = true
-                        onLoadModels(true)
-                    },
-                    enabled = controls.canChooseModel,
-                    color = Purple200,
-                )
-                if (!session.runtimeAttached) ComposerActionButton(
-                    icon = Icons.Outlined.Tune,
-                    label = "Start",
-                    onClick = { onCommand(SessionUserCommand.Start) },
-                    enabled = controls.canStart,
-                    color = Purple200,
-                )
-                ComposerActionButton(
-                    icon = Icons.Outlined.PauseCircleOutline,
-                    label = "Interrupt",
-                    onClick = { onCommand(SessionUserCommand.Interrupt) },
-                    enabled = controls.canInterrupt,
-                    color = TextMid,
-                )
-                ComposerActionButton(
-                    icon = Icons.Outlined.StopCircle,
-                    label = "Stop",
-                    onClick = { showStopConfirmation = true },
-                    enabled = controls.canStop,
-                    color = TextMid,
-                )
-                Spacer(Modifier.weight(1f))
-                ComposerSendButton(
-                    onClick = { fileError = null; onPrompt() },
-                    enabled = canSend,
+                ComposerRail(
+                    actions = composerRailActions(
+                        showStart = !session.runtimeAttached,
+                        canStart = controls.canStart,
+                        canInterrupt = controls.canInterrupt,
+                        canExit = controls.canStop,
+                        canSend = canSend,
+                        sendContentColor = if (canSend) MaterialTheme.colorScheme.onPrimary else Gray400.copy(alpha = 0.58f),
+                        sendFill = if (canSend) BrandGradient else SolidColor(Gray400.copy(alpha = 0.16f)),
+                        onCommand = onCommand,
+                        onExit = { showExitConfirmation = true },
+                        onSend = { fileError = null; onPrompt() },
+                    ),
+                    modifier = Modifier.composerCard(idleBorder),
                 )
             }
         }
@@ -363,11 +373,11 @@ internal fun SessionPage(
             },
         )
     }
-    if (showStopConfirmation) {
-        StopConfirmationDialog(
-            dismiss = { showStopConfirmation = false },
+    if (showExitConfirmation) {
+        ExitConfirmationDialog(
+            dismiss = { showExitConfirmation = false },
             confirm = {
-                showStopConfirmation = false
+                showExitConfirmation = false
                 onCommand(SessionUserCommand.Stop)
             },
         )

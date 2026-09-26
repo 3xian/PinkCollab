@@ -36,6 +36,7 @@ internal data class TasksScreenState(
     val detailLoads: Map<SessionKey, LoadState<Unit>>,
     val modelLoads: Map<SessionKey, LoadState<ModelCatalog>>,
     val sessionOperations: Set<SessionOperationKey>,
+    val sendProgress: Map<SessionKey, SendProgress>,
     val drafts: Map<SessionKey, SessionDraft>,
     val fileSelections: Map<SessionKey, Int>,
     val selectedSession: SessionKey?,
@@ -54,6 +55,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
     val detailLoads = state.detailLoads
     val modelLoads = state.modelLoads
     val sessionOperations = state.sessionOperations
+    val sendProgress = state.sendProgress
     val drafts = state.drafts
     val fileSelections = state.fileSelections
     val selectedSession = state.selectedSession
@@ -67,6 +69,8 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
     val initialPage = sessions.indexOfFirst { SessionKey(it.hostId, it.id) == selectedSession }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
     val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }
+    val pagerKeys = remember(sessionKeys) { sessionKeys.map { it.pagerKey() } }
+
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(selectedSession, sessionKeys) {
@@ -120,7 +124,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                 modifier = Modifier.weight(1f),
                 beyondViewportPageCount = 1,
                 pageSpacing = 8.dp,
-                key = { sessionKeys[it] },
+                key = { pagerKeys[it] },
             ) { pageIndex ->
                 val session = sessions[pageIndex]
                 val key = SessionKey(session.hostId, session.id)
@@ -140,6 +144,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                         draft = drafts[key] ?: SessionDraft(),
                         selectingFiles = fileSelections[key] ?: 0,
                         activity = sessionOperations.activity(key),
+                        sendProgress = sendProgress[key],
                         model = modelLoads[key],
                     ),
                     onAction = { action -> actions.session(session, action) },

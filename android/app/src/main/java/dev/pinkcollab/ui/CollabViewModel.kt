@@ -58,7 +58,10 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             resourceLoader.removeHost(hostId)
             mutableFileSelections.update { it.filterKeys { key -> key.hostId != hostId } }
         },
-        { session -> loadDetail(session) },
+        { session ->
+            loadDetail(session)
+            sessionCoordinator.command(session, SessionUserCommand.Start)
+        },
     )
     internal val operations = hostOperations.operations
     internal val directory = hostOperations.directory
@@ -70,6 +73,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         ::showError,
     )
     internal val sessionOperations = sessionCoordinator.operations
+    internal val sendProgress = sessionCoordinator.sendProgress
     private val mutableFileSelections = MutableStateFlow<Map<SessionKey, Int>>(emptyMap())
     internal val fileSelections = mutableFileSelections.asStateFlow()
 

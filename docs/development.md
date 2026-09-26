@@ -36,6 +36,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 On Windows use `gradlew.bat` instead; set `sdk.dir` in `android/local.properties` or `ANDROID_HOME`. The debug APK uses a different signing key than the release APK: switching between them requires uninstalling the existing app, which removes phone-side pairings. Revoke old device credentials on the host separately. Release signing is described in [Releases](npm-release.md).
 
+The session pager's page keys must be Bundle-saveable. `SessionKey.pagerKey()` keeps both host and session IDs in one stable `String`; using the `SessionKey` data class directly crashes Android when a session page is composed. Smoke-test startup with at least one saved session, not only an empty session list.
+
 ## Validation
 
 Run from `gateway/`:

@@ -29,6 +29,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val operations by vm.operations.collectAsStateWithLifecycle()
     val directory by vm.directory.collectAsStateWithLifecycle()
     val sessionOperations by vm.sessionOperations.collectAsStateWithLifecycle()
+    val sendProgress by vm.sendProgress.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
     val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
     val drafts by vm.drafts.collectAsStateWithLifecycle()
@@ -134,7 +135,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                     when (val current = route) {
                         AppRoute.Tasks -> TasksScreen(
                             state = TasksScreenState(app, detailLoads, modelLoads, sessionOperations,
-                                drafts, fileSelections, selectedSession),
+                                sendProgress, drafts, fileSelections, selectedSession),
                             actions = TasksScreenActions(
                                 selectSession = { selectedSession = it },
                                 openResources = { route = AppRoute.Resources },

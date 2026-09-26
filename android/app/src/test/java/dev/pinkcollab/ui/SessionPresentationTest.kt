@@ -54,6 +54,8 @@ class SessionPresentationTest {
         assertFalse(attention.inputEnabled)
         assertTrue(attention.canInterrupt)
         assertFalse(controls(session = session.copy(status = SessionStatus.Starting)).inputEnabled)
+        assertFalse(controls(session = session.copy(status = SessionStatus.Starting)).canChooseModel)
+        assertFalse(controls(session = session.copy(status = SessionStatus.Stopping)).canChooseModel)
         assertFalse(controls(session = session.copy(status = SessionStatus.Stopping)).inputEnabled)
         assertFalse(controls(session = session.copy(runtimeExecution = RuntimeExecution.Unknown)).inputEnabled)
     }

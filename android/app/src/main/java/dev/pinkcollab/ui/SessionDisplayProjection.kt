@@ -25,6 +25,7 @@ sealed interface SessionDisplayItem {
         override val id: String,
         val role: String,
         val text: String,
+        val timestamp: String,
     ) : SessionDisplayItem
 
     data class ActivityGroup(
@@ -94,7 +95,7 @@ fun projectSessionTimeline(
             "user", "assistant" -> if (item.text.isNotBlank()) {
                 // A new user-readable message is a hard boundary between work phases.
                 flushGroup()
-                output += SessionDisplayItem.Message(item.id, item.kind, item.text.trim())
+                output += SessionDisplayItem.Message(item.id, item.kind, item.text.trim(), item.timestamp)
             }
             "error" -> {
                 flushGroup()

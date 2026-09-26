@@ -24,6 +24,7 @@ class SessionOperationsTest {
     private class FakeActions(
         private val onPrompt: suspend () -> Unit = {},
         private val uncancellableUpload: Boolean = false,
+        private val onUpload: (suspend (SelectedFile) -> Unit)? = null,
     ) : SessionActions {
         val uploadStarted = CompletableDeferred<Unit>()
         val finishUpload = CompletableDeferred<Unit>()
@@ -34,7 +35,8 @@ class SessionOperationsTest {
 
         override suspend fun upload(session: Session, file: SelectedFile) {
             uploadStarted.complete(Unit)
-            if (uncancellableUpload) withContext(NonCancellable) { finishUpload.await() }
+            if (onUpload != null) onUpload.invoke(file)
+            else if (uncancellableUpload) withContext(NonCancellable) { finishUpload.await() }
             else finishUpload.await()
         }
 
@@ -70,6 +72,52 @@ class SessionOperationsTest {
         assertEquals(listOf("stop"), actions.commands)
         assertEquals("send me", drafts.state.value.getValue(key).text)
         assertTrue(!coordinator.operations.value.activity(key).send)
+        assertTrue(coordinator.sendProgress.value.isEmpty())
+    }
+
+    @Test fun send_feedback_tracks_each_file_then_submission_and_clears_on_completion() = runTest {
+        val drafts = SessionDraftStore()
+        drafts.setText(key, "send me")
+        drafts.addFile(key, SelectedFile("content://first", "first.txt", "file_one"))
+        drafts.addFile(key, SelectedFile("content://second", "second.txt", "file_two"))
+        val first = CompletableDeferred<Unit>()
+        val second = CompletableDeferred<Unit>()
+        val submit = CompletableDeferred<Unit>()
+        val actions = FakeActions(
+            onPrompt = { submit.await() },
+            onUpload = { file -> if (file.id == "file_one") first.await() else second.await() },
+        )
+        val coordinator = SessionOperations(backgroundScope, actions, drafts, drafts::clearIfVersion) {}
+
+        coordinator.send(session)
+        runCurrent()
+        assertEquals(SendProgress.Uploading(1, 2, "first.txt"), coordinator.sendProgress.value[key])
+        first.complete(Unit)
+        runCurrent()
+        assertEquals(SendProgress.Uploading(2, 2, "second.txt"), coordinator.sendProgress.value[key])
+        second.complete(Unit)
+        runCurrent()
+        assertEquals(SendProgress.Submitting, coordinator.sendProgress.value[key])
+        submit.complete(Unit)
+        runCurrent()
+        assertTrue(coordinator.sendProgress.value.isEmpty())
+        assertTrue(key !in drafts.state.value)
+    }
+
+    @Test fun failed_upload_clears_feedback_and_preserves_the_draft() = runTest {
+        val drafts = SessionDraftStore()
+        drafts.addFile(key, SelectedFile("content://broken", "broken.txt", "file_one"))
+        val errors = mutableListOf<String>()
+        val actions = FakeActions(onUpload = { throw IllegalStateException("Upload failed") })
+        val coordinator = SessionOperations(backgroundScope, actions, drafts, drafts::clearIfVersion, errors::add)
+
+        coordinator.send(session)
+        runCurrent()
+
+        assertTrue(coordinator.sendProgress.value.isEmpty())
+        assertEquals(listOf("Upload failed"), errors)
+        assertEquals("broken.txt", drafts.state.value.getValue(key).files.single().name)
+        assertTrue(actions.commands.isEmpty())
     }
 
     @Test fun stop_runs_while_history_request_is_pending() = runTest {

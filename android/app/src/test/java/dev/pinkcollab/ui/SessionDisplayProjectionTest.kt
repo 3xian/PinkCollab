@@ -65,7 +65,7 @@ class SessionDisplayProjectionTest {
         assertTrue(change.details.contains("+b"))
         // A diff and a full write in one group have no single detail kind, so they fall back.
         assertEquals(ActivityDetailKind.Changes, change.detailKind)
-        assertTrue(projected[3] is SessionDisplayItem.Message)
+        assertEquals("2026-09-20T00:00:00Z", (projected[3] as SessionDisplayItem.Message).timestamp)
         val execute = projected[4] as SessionDisplayItem.ActivityGroup
         assertEquals(ActivityStatus.Succeeded, execute.status)
         assertEquals("3 tests passed", execute.summary)

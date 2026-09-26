@@ -16,6 +16,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 
 internal interface SessionActions {
     suspend fun upload(session: Session, file: SelectedFile)
@@ -62,6 +63,11 @@ internal enum class SessionUserCommand(val wire: String, val lane: SessionLane) 
     Stop("stop", SessionLane.Control),
 }
 
+internal sealed interface SendProgress {
+    data class Uploading(val fileIndex: Int, val fileCount: Int, val fileName: String) : SendProgress
+    data object Submitting : SendProgress
+}
+
 internal data class SessionOperationKey(val session: SessionKey, val lane: SessionLane)
 
 internal data class SessionActivity(
@@ -92,6 +98,8 @@ internal class SessionOperations(
     private val jobs = mutableMapOf<SessionOperationKey, Job>()
     private val mutableOperations = MutableStateFlow<Set<SessionOperationKey>>(emptySet())
     val operations = mutableOperations.asStateFlow()
+    private val mutableSendProgress = MutableStateFlow<Map<SessionKey, SendProgress>>(emptyMap())
+    val sendProgress = mutableSendProgress.asStateFlow()
 
     fun send(session: Session) {
         val key = SessionKey(session.hostId, session.id)
@@ -99,15 +107,25 @@ internal class SessionOperations(
         if (draft.text.isBlank() && draft.files.isEmpty()) return
         drafts.markSendStarted(key, draft.version)
         launch(key, SessionLane.Send) {
-            draft.files.forEach { actions.upload(session, it) }
-            currentCoroutineContext().ensureActive()
             try {
-                actions.prompt(session, draft.text, draft.files.map { it.id }, draft.intentId)
-            } catch (failure: TerminalCommandFailure) {
-                drafts.rotateFailedIntent(key, draft.version, draft.intentId)
-                throw failure
+                draft.files.forEachIndexed { index, file ->
+                    mutableSendProgress.update {
+                        it + (key to SendProgress.Uploading(index + 1, draft.files.size, file.name))
+                    }
+                    actions.upload(session, file)
+                }
+                currentCoroutineContext().ensureActive()
+                mutableSendProgress.update { it + (key to SendProgress.Submitting) }
+                try {
+                    actions.prompt(session, draft.text, draft.files.map { it.id }, draft.intentId)
+                } catch (failure: TerminalCommandFailure) {
+                    drafts.rotateFailedIntent(key, draft.version, draft.intentId)
+                    throw failure
+                }
+                clearSentDraft(key, draft.version)
+            } finally {
+                mutableSendProgress.update { it - key }
             }
-            clearSentDraft(key, draft.version)
         }
     }
 

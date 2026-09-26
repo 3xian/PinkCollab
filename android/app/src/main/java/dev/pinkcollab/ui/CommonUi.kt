@@ -1,20 +1,17 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import dev.pinkcollab.R
 import dev.pinkcollab.ui.theme.PrimaryButton
-import dev.pinkcollab.ui.theme.Purple400
 
 @Composable
 internal fun EmptyState(
@@ -29,14 +26,11 @@ internal fun EmptyState(
             modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Box(
-                Modifier.size(96.dp).drawBehind {
-                    drawCircle(Brush.radialGradient(listOf(Purple400.copy(alpha = 0.30f), Color.Transparent)))
-                },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Outlined.Hub, null, Modifier.size(52.dp), tint = Purple400)
-            }
+            Image(
+                painter = painterResource(R.drawable.moon_robot),
+                contentDescription = null,
+                modifier = Modifier.size(120.dp),
+            )
             Spacer(Modifier.height(24.dp))
             Text(
                 title,

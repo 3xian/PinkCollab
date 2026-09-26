@@ -26,6 +26,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import io.noties.markwon.Markwon
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 internal val TimelineBandBase = Color(0xFF0D0A10)
 
@@ -117,18 +120,39 @@ private fun MessageCard(item: SessionDisplayItem.Message, markwon: Markwon) {
             .padding(horizontal = 20.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
+        val time = messageTimeLabel(item.timestamp)
+        SpeakerLine(time) {
+            if (isUser) YouLabel() else AgentHeader()
+        }
         if (isUser) {
             Text(item.text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
         } else {
-            AgentHeader()
             MarkdownBody(item.text, color = contentColor, markwon)
         }
     }
 }
 
 @Composable
-internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun YouLabel() {
+    Text(
+        "You",
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = TextHigh,
+    )
+}
+
+@Composable
+private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { title() }
+        if (time.isNotEmpty()) MessageTime(time)
+    }
+}
+
+@Composable
+internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         Text(
             if (replying) "Agent · replying" else "Agent",
             style = MaterialTheme.typography.labelMedium,
@@ -153,6 +177,35 @@ internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false) {
             }
         }
     }
+}
+
+/** Local clock time; a short date is added only when the message is not from today. */
+internal fun messageTimeLabel(
+    timestamp: String,
+    now: Instant = Instant.now(),
+    zone: ZoneId = ZoneId.systemDefault(),
+): String {
+    val instant = runCatching { Instant.parse(timestamp) }.getOrNull() ?: return ""
+    val local = instant.atZone(zone)
+    val today = now.atZone(zone).toLocalDate()
+    val date = local.toLocalDate()
+    val clock = DateTimeFormatter.ofPattern("HH:mm").format(local)
+    return when {
+        date == today -> clock
+        date.year == today.year -> DateTimeFormatter.ofPattern("M/d HH:mm").format(local)
+        else -> DateTimeFormatter.ofPattern("yyyy/M/d HH:mm").format(local)
+    }
+}
+
+@Composable
+private fun MessageTime(label: String, modifier: Modifier = Modifier) {
+    Text(
+        label,
+        modifier = modifier,
+        maxLines = 1,
+        style = MaterialTheme.typography.labelSmall,
+        color = TextMid,
+    )
 }
 
 @Composable
@@ -296,9 +349,10 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        val time = messageTimeLabel(item.timestamp)
         if (!isUser) {
             if (item.kind == "assistant") {
-                AgentHeader()
+                SpeakerLine(time) { AgentHeader() }
             } else {
                 Text(
                     when (item.kind) {
@@ -312,6 +366,8 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
                     color = if (item.kind == "error") Red400 else TextMid,
                 )
             }
+        } else {
+            SpeakerLine(time) { YouLabel() }
         }
         if (item.kind == "assistant") {
             MarkdownBody(item.text, color = contentColor, markwon)

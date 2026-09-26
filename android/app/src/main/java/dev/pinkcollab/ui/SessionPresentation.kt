@@ -17,6 +17,7 @@ internal data class SessionPageState(
     val draft: SessionDraft,
     val selectingFiles: Int,
     val activity: SessionActivity,
+    val sendProgress: SendProgress?,
     val model: LoadState<ModelCatalog>?,
 )
 
@@ -74,7 +75,8 @@ internal fun sessionControls(
         inputEnabled = inputEnabled,
         canSend = (draft.text.isNotBlank() || draft.files.isNotEmpty()) && inputEnabled && selectingFiles == 0,
         canAttach = inputEnabled && draft.files.size + selectingFiles < 5,
-        canChooseModel = attached && !activity.inputBusy,
+        canChooseModel = attached && session.status != SessionStatus.Starting &&
+            session.status != SessionStatus.Stopping && !activity.inputBusy,
         canStart = !session.runtimeAttached && connected && !activity.inputBusy,
         canInterrupt = attached && !activity.control && session.status in setOf(SessionStatus.Running, SessionStatus.NeedsInput),
         canStop = attached && !activity.control,
