@@ -116,7 +116,7 @@ fn existing_file(dir: &Path) -> Result<Option<PathBuf>> {
         metadata.is_dir() && !metadata.is_symlink(),
         "File directory is invalid"
     );
-    let mut entries = fs::read_dir(&dir)?;
+    let mut entries = fs::read_dir(dir)?;
     let path = entries
         .next()
         .ok_or_else(|| anyhow::anyhow!("File is missing"))??
