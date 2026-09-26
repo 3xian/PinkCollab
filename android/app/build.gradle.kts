@@ -57,6 +57,7 @@ android {
         applicationId = "dev.pinkcollab"
         minSdk = 26
         targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 2000
         versionName = "0.2.0"
     }
@@ -97,6 +98,8 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     // The unit tests exercise the wire parsing, and `android.jar` only ships an org.json stub.
     testImplementation("org.json:json:20250517")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
 
 // An unsigned release artifact installs but cannot upgrade an installed one.
