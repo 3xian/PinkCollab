@@ -4,14 +4,19 @@ import org.json.JSONObject
 
 internal data class V2Reduction(
     val state: AppState,
-    val resyncResource: String? = null,
-    val historySessionId: String? = null,
+    val effects: List<GatewayEffect> = emptyList(),
 )
 
+internal sealed interface GatewayEffect {
+    data class ResyncResource(val hostId: String, val resource: String) : GatewayEffect
+    data class LoadHistory(val session: SessionKey) : GatewayEffect
+}
+
 /** Only cursor-valid snapshots and changes may modify a live resource. */
-internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpochMillis: Long = System.currentTimeMillis()): V2Reduction {
+internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpochMillis: Long): V2Reduction {
     val host = app.hosts[hostId] ?: return V2Reduction(app)
     val resource = frame.optString("resource")
+    fun resync(target: String) = V2Reduction(app, listOf(GatewayEffect.ResyncResource(hostId, target)))
     return when (frame.optString("type")) {
         "snapshot" -> {
             val payload = frame.getJSONObject("payload")
@@ -59,8 +64,11 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                     liveItems = live,
                 )
                 val updatedHost = host.copy(sessions = host.sessions.filterNot { it.id == sessionId } + session, revision = host.revision + 1)
-                V2Reduction(app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to detail)),
-                    historySessionId = if (runtime == null && payload.optString("historyRef").isNotBlank()) sessionId else null)
+                V2Reduction(
+                    app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to detail)),
+                    if (runtime == null && payload.optString("historyRef").isNotBlank())
+                        listOf(GatewayEffect.LoadHistory(SessionKey(hostId, sessionId))) else emptyList(),
+                )
             }
         }
         "change" -> {
@@ -69,10 +77,10 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
             val revision = frame.getLong("revision")
             val subscriptionId = frame.getString("subscriptionId")
             if (resource == "host/sessions") {
-                val cursor = host.cursor ?: return V2Reduction(app, resource)
-                if (host.subscriptionId != subscriptionId || cursor.epoch != epoch) return V2Reduction(app, resource)
+                val cursor = host.cursor ?: return resync(resource)
+                if (host.subscriptionId != subscriptionId || cursor.epoch != epoch) return resync(resource)
                 if (revision <= cursor.revision) return V2Reduction(app)
-                if (!cursor.accepts(epoch, base, revision)) return V2Reduction(app, resource)
+                if (!cursor.accepts(epoch, base, revision)) return resync(resource)
                 var sessions = host.sessions
                 frame.getJSONArray("changes").objects().forEach { change ->
                     when (change.optString("type")) {
@@ -82,7 +90,7 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                         }
                         "summary.changed" -> {
                             val id = change.getString("sessionId")
-                            val current = sessions.firstOrNull { it.id == id } ?: return V2Reduction(app, resource)
+                            val current = sessions.firstOrNull { it.id == id } ?: return resync(resource)
                             val updated = applyRuntimeChange(current, change.optString("changeKind"), change.getJSONObject("value"))
                             sessions = sessions.filterNot { it.id == id } + updated
                         }
@@ -91,11 +99,11 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                 V2Reduction(app.copy(hosts = app.hosts + (hostId to host.copy(sessions = sessions, cursor = cursor.copy(revision = revision), revision = host.revision + 1))))
             } else {
                 val sessionId = resource.removePrefix("session/")
-                val detail = app.details[SessionKey(hostId, sessionId)] ?: return V2Reduction(app, resource)
-                val cursor = detail.cursor ?: return V2Reduction(app, resource)
-                if (detail.subscriptionId != subscriptionId || cursor.epoch != epoch) return V2Reduction(app, resource)
+                val detail = app.details[SessionKey(hostId, sessionId)] ?: return resync(resource)
+                val cursor = detail.cursor ?: return resync(resource)
+                if (detail.subscriptionId != subscriptionId || cursor.epoch != epoch) return resync(resource)
                 if (revision <= cursor.revision) return V2Reduction(app)
-                if (!cursor.accepts(epoch, base, revision)) return V2Reduction(app, resource)
+                if (!cursor.accepts(epoch, base, revision)) return resync(resource)
                 var updated = detail
                 var loadHistory = false
                 frame.getJSONArray("changes").objects().forEach { change ->
@@ -142,10 +150,13 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                 }
                 updated = updated.copy(cursor = cursor.copy(revision = revision))
                 val updatedHost = host.copy(sessions = host.sessions.filterNot { it.id == sessionId } + updated.session, revision = host.revision + 1)
-                V2Reduction(app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to updated)), historySessionId = if (loadHistory) sessionId else null)
+                V2Reduction(
+                    app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to updated)),
+                    if (loadHistory) listOf(GatewayEffect.LoadHistory(SessionKey(hostId, sessionId))) else emptyList(),
+                )
             }
         }
-        "resync_required" -> V2Reduction(app, resource.ifBlank { "host/sessions" })
+        "resync_required" -> resync(resource.ifBlank { "host/sessions" })
         else -> V2Reduction(app)
     }
 }
@@ -164,7 +175,7 @@ private fun applyRuntimeChange(session: Session, kind: String, value: JSONObject
     val runtime = value.optJSONObject("runtime") ?: JSONObject()
         .put("generation", value.optString("generation", session.runtimeGeneration ?: ""))
         .put("phase", value.optString("phase", if (session.runtimeAttached) "ready" else "starting"))
-        .put("execution", value.optString("execution", session.runtimeExecution))
+        .put("execution", value.optString("execution", session.runtimeExecution.wire))
         .put("pendingInputs", value.optJSONArray("pendingInputs"))
     return session.withRuntime(runtime)
 }

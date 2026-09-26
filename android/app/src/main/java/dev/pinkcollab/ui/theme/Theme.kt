@@ -5,6 +5,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import dev.pinkcollab.data.SessionStatus
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
@@ -75,16 +76,16 @@ fun PinkCollabTheme(content: @Composable () -> Unit) {
 
 // ── Status semantics ─────────────────────────────────────────────────────────
 /** Semantic session-status colors, kept separate from decorative brand accents. */
-fun statusColor(status: String): Color = when (status) {
-    "needs_input" -> Amber300
-    "starting", "running", "stopping" -> Violet400
-    "completed" -> Teal300
-    "failed" -> Red400
-    else -> Gray400 // idle / stopped / offline / unknown
+fun statusColor(status: SessionStatus): Color = when (status) {
+    SessionStatus.NeedsInput -> Amber300
+    SessionStatus.Starting, SessionStatus.Running, SessionStatus.Stopping -> Violet400
+    SessionStatus.Idle -> Gray400
 }
 
-fun statusLabel(status: String): String = when (status) {
-    "starting" -> "Starting"; "stopping" -> "Stopping"; "running" -> "Running"; "needs_input" -> "Needs you"; "idle" -> "Paused"
-    "completed" -> "Completed"; "failed" -> "Failed"; "stopped" -> "Stopped"; "offline" -> "Offline"
-    else -> status
+fun statusLabel(status: SessionStatus): String = when (status) {
+    SessionStatus.Starting -> "Starting"
+    SessionStatus.Stopping -> "Stopping"
+    SessionStatus.Running -> "Running"
+    SessionStatus.NeedsInput -> "Needs you"
+    SessionStatus.Idle -> "Paused"
 }

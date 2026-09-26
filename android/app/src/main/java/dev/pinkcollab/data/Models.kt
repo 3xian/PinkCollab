@@ -6,7 +6,23 @@ import org.json.JSONObject
 data class Host(val id: String, val name: String, val os: String, val ompVersion: String, val gatewayVersion: String)
 data class PairedHost(val host: Host, val url: String, val credential: String, val clientId: String)
 data class SessionKey(val hostId: String, val sessionId: String)
-data class Attention(val id: String, val type: String, val text: String, val options: List<String>)
+sealed interface AttentionType {
+    data object Select : AttentionType
+    data object Confirm : AttentionType
+    data object Editor : AttentionType
+    data class Other(val wire: String) : AttentionType
+
+    companion object {
+        fun fromWire(raw: String): AttentionType = when (raw) {
+            "select" -> Select
+            "confirm" -> Confirm
+            "editor" -> Editor
+            else -> Other(raw)
+        }
+    }
+}
+
+data class Attention(val id: String, val type: AttentionType, val text: String, val options: List<String>)
 data class ModelInfo(
     val provider: String,
     val id: String,
@@ -14,9 +30,19 @@ data class ModelInfo(
     val thinkingLevel: String? = null,
 )
 data class ModelCatalog(val models: List<ModelInfo>, val thinkingLevels: List<String>)
-data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: String, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val runtimeGeneration: String? = null, val runtimeExecution: String = "unknown") {
+enum class SessionStatus { Starting, Running, NeedsInput, Stopping, Idle }
+
+enum class RuntimeExecution(val wire: String) {
+    Active("active"), Quiescent("quiescent"), Unknown("unknown");
+
+    companion object {
+        fun fromWire(raw: String): RuntimeExecution = entries.firstOrNull { it.wire == raw } ?: Unknown
+    }
+}
+
+data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val runtimeGeneration: String? = null, val runtimeExecution: RuntimeExecution = RuntimeExecution.Unknown) {
     /** A session is active while its OMP runtime is live, including the startup hand-off. */
-    val isActive: Boolean get() = status == "starting" || runtimeAttached
+    val isActive: Boolean get() = status == SessionStatus.Starting || runtimeAttached
 }
 data class ToolArguments(
     val raw: String = "",
@@ -52,7 +78,31 @@ data class ToolArguments(
 }
 data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean)
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
-data class OperationReceipt(val commandId: String, val status: String, val commandType: String, val errorCode: String? = null)
+sealed interface OperationStatus {
+    data object Accepted : OperationStatus
+    data object Dispatching : OperationStatus
+    data object Running : OperationStatus
+    data object Succeeded : OperationStatus
+    data object OutcomeUnknown : OperationStatus
+    data object Failed : OperationStatus
+    data object Cancelled : OperationStatus
+    data class Unknown(val wire: String) : OperationStatus
+
+    companion object {
+        fun fromWire(raw: String): OperationStatus = when (raw) {
+            "accepted" -> Accepted
+            "dispatching" -> Dispatching
+            "running" -> Running
+            "succeeded" -> Succeeded
+            "outcome_unknown" -> OutcomeUnknown
+            "failed" -> Failed
+            "cancelled" -> Cancelled
+            else -> Unknown(raw)
+        }
+    }
+}
+
+data class OperationReceipt(val commandId: String, val status: OperationStatus, val commandType: String, val errorCode: String? = null)
 data class SessionDetail(
     val session: Session,
     val streaming: String = "",
@@ -97,7 +147,6 @@ data class HostState(
 data class AppState(
     val hosts: Map<String, HostState> = emptyMap(),
     val details: Map<SessionKey, SessionDetail> = emptyMap(),
-    val error: String? = null,
     val loadingCredentials: Boolean = false,
 ) {
     val taskListLoadState: TaskListLoadState
@@ -127,28 +176,28 @@ fun JSONObject.host() = Host(getString("id"), getString("name"), getString("os")
 fun Host.json() = JSONObject().put("id", id).put("name", name).put("os", os).put("ompVersion", ompVersion).put("gatewayVersion", gatewayVersion)
 fun JSONObject.session(runtime: JSONObject? = null): Session {
     val pending = runtime?.optJSONArray("pendingInputs")?.objects().orEmpty()
-    val a = pending.firstOrNull()?.let { Attention(it.getString("id"), it.getString("type"), it.optString("text"), it.optJSONArray("options")?.strings().orEmpty()) }
+    val a = pending.firstOrNull()?.let { Attention(it.getString("id"), AttentionType.fromWire(it.getString("type")), it.optString("text"), it.optJSONArray("options")?.strings().orEmpty()) }
     val phase = runtime?.optString("phase") ?: ""
-    val execution = runtime?.optString("execution") ?: "unknown"
+    val execution = RuntimeExecution.fromWire(runtime?.optString("execution") ?: "unknown")
     val status = when {
-        phase == "starting" -> "starting"
-        phase == "stopping" -> "stopping"
-        a != null -> "needs_input"
-        execution == "active" -> "running"
-        else -> "idle"
+        phase == "starting" -> SessionStatus.Starting
+        phase == "stopping" -> SessionStatus.Stopping
+        a != null -> SessionStatus.NeedsInput
+        execution == RuntimeExecution.Active -> SessionStatus.Running
+        else -> SessionStatus.Idle
     }
     val activity = runtime?.optString("activity")?.takeIf { it.isNotBlank() } ?: when (status) {
-        "starting" -> "Starting OMP"
-        "stopping" -> "Stopping OMP"
-        "running" -> "Working"
-        "needs_input" -> "Waiting for input"
-        else -> "Ready to continue"
+        SessionStatus.Starting -> "Starting OMP"
+        SessionStatus.Stopping -> "Stopping OMP"
+        SessionStatus.Running -> "Working"
+        SessionStatus.NeedsInput -> "Waiting for input"
+        SessionStatus.Idle -> "Ready to continue"
     }
     return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() }, execution)
 }
 fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))
 fun JSONObject.cursor() = Cursor(getString("epoch"), getLong("revision"))
-fun JSONObject.receipt() = OperationReceipt(getString("commandId"), getString("status"), getString("commandType"), optJSONObject("error")?.optString("code"))
+fun JSONObject.receipt() = OperationReceipt(getString("commandId"), OperationStatus.fromWire(getString("status")), getString("commandType"), optJSONObject("error")?.optString("code"))
 fun Session.withRuntime(runtime: JSONObject?): Session = JSONObject()
     .put("id", id).put("hostId", hostId).put("cwd", cwd).put("title", title)
     .put("createdAt", createdAt).put("updatedAt", updatedAt).session(runtime)

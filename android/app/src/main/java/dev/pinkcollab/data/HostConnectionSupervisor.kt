@@ -18,7 +18,7 @@ import kotlin.random.Random
 
 internal class HostConnectionSupervisor(
     private val scope: CoroutineScope,
-    private val api: GatewayApi,
+    private val api: GatewayTransport,
     private val onState: (String, ConnectionState) -> Unit,
     private val onFrame: (String, JSONObject) -> Unit,
 ) {

@@ -230,7 +230,7 @@ fun GlowDot(color: Color, pulse: Boolean = false, modifier: Modifier = Modifier,
 
 /** Pill with a glowing dot + localized status text, colored by [statusColor]. */
 @Composable
-fun StatusChip(status: String, modifier: Modifier = Modifier) {
+fun StatusChip(status: dev.pinkcollab.data.SessionStatus, modifier: Modifier = Modifier) {
     val color = statusColor(status)
     Row(
         modifier
@@ -238,7 +238,7 @@ fun StatusChip(status: String, modifier: Modifier = Modifier) {
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GlowDot(color, pulse = status == "needs_input", size = 7.dp)
+        GlowDot(color, pulse = status == dev.pinkcollab.data.SessionStatus.NeedsInput, size = 7.dp)
         Spacer(Modifier.width(6.dp))
         Text(statusLabel(status), color = color, style = MaterialTheme.typography.labelMedium)
     }

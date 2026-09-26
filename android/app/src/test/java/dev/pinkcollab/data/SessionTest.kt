@@ -7,14 +7,13 @@ import org.junit.Test
 class SessionTest {
     @Test
     fun `active follows runtime lifecycle including startup`() {
-        assertTrue(session(status = "starting", runtimeAttached = false).isActive)
-        assertTrue(session(status = "idle", runtimeAttached = true).isActive)
-        assertTrue(session(status = "completed", runtimeAttached = true).isActive)
-        assertFalse(session(status = "running", runtimeAttached = false).isActive)
-        assertFalse(session(status = "completed", runtimeAttached = false).isActive)
+        assertTrue(session(status = SessionStatus.Starting, runtimeAttached = false).isActive)
+        assertTrue(session(status = SessionStatus.Idle, runtimeAttached = true).isActive)
+        assertFalse(session(status = SessionStatus.Running, runtimeAttached = false).isActive)
+        assertFalse(session(status = SessionStatus.Idle, runtimeAttached = false).isActive)
     }
 
-    private fun session(status: String, runtimeAttached: Boolean) = Session(
+    private fun session(status: SessionStatus, runtimeAttached: Boolean) = Session(
         id = "session",
         hostId = "host",
         cwd = "workspace",

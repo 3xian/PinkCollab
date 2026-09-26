@@ -27,38 +27,39 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import android.net.Uri
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import kotlinx.coroutines.launch
-import org.json.JSONObject
+
+internal data class TasksScreenState(
+    val app: AppState,
+    val detailLoads: Map<SessionKey, LoadState<Unit>>,
+    val modelLoads: Map<SessionKey, LoadState<ModelCatalog>>,
+    val sessionOperations: Set<SessionOperationKey>,
+    val drafts: Map<SessionKey, SessionDraft>,
+    val fileSelections: Map<SessionKey, Int>,
+    val selectedSession: SessionKey?,
+)
+
+internal data class TasksScreenActions(
+    val selectSession: (SessionKey) -> Unit,
+    val openResources: () -> Unit,
+    val connectHost: () -> Unit,
+    val session: (Session, SessionAction) -> Unit,
+)
 
 @Composable
-internal fun TasksScreen(
-    app: AppState,
-    detailLoads: Map<SessionKey, LoadState<Unit>>,
-    modelLoads: Map<SessionKey, LoadState<ModelCatalog>>,
-    operations: Set<OperationKey>,
-    sessionOperations: Set<SessionOperationKey>,
-    drafts: Map<SessionKey, SessionDraft>,
-    fileSelections: Map<SessionKey, Int>,
-    selectedSession: SessionKey?,
-    onSessionSelected: (SessionKey) -> Unit,
-    openResources: () -> Unit,
-    connectHost: () -> Unit,
-    loadSession: (Session, Boolean) -> Unit,
-    loadModels: (Session, Boolean) -> Unit,
-    onPrompt: (Session) -> Unit,
-    onDraftTextChange: (SessionKey, String) -> Unit,
-    onFileSelected: (SessionKey, Uri) -> Unit,
-    onFileRemoved: (SessionKey, String) -> Unit,
-    onCommand: (Session, SessionUserCommand) -> Unit,
-    onRespond: (Session, JSONObject) -> Unit,
-    onSelectModel: (Session, ModelInfo) -> Unit,
-    onSetThinkingLevel: (Session, String) -> Unit,
-    onLoadSavedHistory: (Session) -> Unit,
-    onLoadEarlier: (Session) -> Unit,
-) {
+internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
+    val app = state.app
+    val detailLoads = state.detailLoads
+    val modelLoads = state.modelLoads
+    val sessionOperations = state.sessionOperations
+    val drafts = state.drafts
+    val fileSelections = state.fileSelections
+    val selectedSession = state.selectedSession
+    val onSessionSelected = actions.selectSession
+    val openResources = actions.openResources
+    val connectHost = actions.connectHost
     // updatedAt changes continuously while an agent works; createdAt keeps the pager stable.
     val sessions = app.hosts.values
         .flatMap { it.sessions }
@@ -125,7 +126,7 @@ internal fun TasksScreen(
                 val key = SessionKey(session.hostId, session.id)
                 val detail = app.details[key]
                 LaunchedEffect(key, pagerState.currentPage, app.hosts[session.hostId]?.subscriptionId) {
-                    if (pageIndex == pagerState.currentPage) loadSession(session, true)
+                    if (pageIndex == pagerState.currentPage) actions.session(session, SessionAction.Retry)
                 }
                 val detailState = detail?.let { LoadState.Ready(it) }
                     ?: when (val request = detailLoads[key]) {
@@ -133,24 +134,15 @@ internal fun TasksScreen(
                         else -> LoadState.Loading
                     }
                 SessionPage(
-                    state = detailState,
-                    host = app.hosts[session.hostId],
-                    draft = drafts[key] ?: SessionDraft(),
-                    selectingFiles = fileSelections[key] ?: 0,
-                    activity = sessionOperations.activity(key),
-                    onRetry = { loadSession(session, true) },
-                    onPrompt = { onPrompt(session) },
-                    onDraftTextChange = { onDraftTextChange(key, it) },
-                    onFileSelected = { onFileSelected(key, it) },
-                    onFileRemoved = { onFileRemoved(key, it) },
-                    onCommand = { command -> onCommand(session, command) },
-                    onRespond = { body -> onRespond(session, body) },
-                    modelState = modelLoads[key],
-                    onLoadModels = { force -> loadModels(session, force) },
-                    onSelectModel = { model -> onSelectModel(session, model) },
-                    onSetThinkingLevel = { level -> onSetThinkingLevel(session, level) },
-                    onLoadSavedHistory = { onLoadSavedHistory(session) },
-                    onLoadEarlier = { onLoadEarlier(session) },
+                    state = SessionPageState(
+                        detail = detailState,
+                        host = app.hosts[session.hostId],
+                        draft = drafts[key] ?: SessionDraft(),
+                        selectingFiles = fileSelections[key] ?: 0,
+                        activity = sessionOperations.activity(key),
+                        model = modelLoads[key],
+                    ),
+                    onAction = { action -> actions.session(session, action) },
                 )
             }
         }

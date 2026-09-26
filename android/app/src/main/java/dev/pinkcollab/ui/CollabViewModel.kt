@@ -13,20 +13,25 @@ import androidx.lifecycle.viewModelScope
 import dev.pinkcollab.data.CredentialStore
 import dev.pinkcollab.data.GatewayRepository
 import dev.pinkcollab.data.ModelInfo
-import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.Session
+import dev.pinkcollab.data.AttentionResponse
+import dev.pinkcollab.data.ConnectionState
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.concurrent.ConcurrentHashMap
 
 class CollabViewModel(application: Application, savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
-    val repository = GatewayRepository(viewModelScope, CredentialStore(application), application)
+    private val repository = GatewayRepository(viewModelScope, CredentialStore(application), application)
+    internal val appState = repository.state
+    private val effectChannel = Channel<UiEffect>(Channel.BUFFERED)
+    internal val effects = effectChannel.receiveAsFlow()
+    private fun showError(message: String) { effectChannel.trySend(UiEffect.ShowSnackbar(message)) }
     private val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -38,34 +43,38 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         }
     }
 
-    private val mutableOperations = MutableStateFlow<Set<OperationKey>>(emptySet())
-    internal val operations = mutableOperations.asStateFlow()
-    private val operationLock = Any()
     private val draftStore = SessionDraftStore(decodeDrafts(
         savedStateHandle.get<Bundle>("sessionDraftsV2")?.getString("value")
             ?: savedStateHandle.get<String>("sessionDrafts"),
     ))
     internal val drafts = draftStore.state
+    private val hostOperations = HostOperations(
+        viewModelScope,
+        RepositoryHostActions(repository),
+        { effectChannel.trySend(it) },
+        ::removeHostDrafts,
+        { session -> loadDetail(session) },
+    )
+    internal val operations = hostOperations.operations
+    internal val directories = hostOperations.directories
     private val sessionCoordinator = SessionOperations(
         viewModelScope,
         RepositorySessionActions(application, repository),
         draftStore,
         ::clearDraftIfVersion,
-        repository::error,
+        ::showError,
     )
     internal val sessionOperations = sessionCoordinator.operations
     private val mutableFileSelections = MutableStateFlow<Map<SessionKey, Int>>(emptyMap())
     internal val fileSelections = mutableFileSelections.asStateFlow()
 
-    private val mutableDetailLoads = MutableStateFlow<Map<SessionKey, LoadState<Unit>>>(emptyMap())
-    internal val detailLoads = mutableDetailLoads.asStateFlow()
-    private val detailLoadLock = Any()
-    private val detailJobs = mutableMapOf<SessionKey, Job>()
-    private val detailVersions = ConcurrentHashMap<SessionKey, Long>()
-
-    private val mutableModelLoads = MutableStateFlow<Map<SessionKey, LoadState<ModelCatalog>>>(emptyMap())
-    internal val modelLoads = mutableModelLoads.asStateFlow()
-    private val modelLoadLock = Any()
+    private val resourceLoader = SessionResourceLoader(viewModelScope, object : SessionResourceActions {
+        override fun hasDetail(key: SessionKey) = key in repository.state.value.details
+        override suspend fun detail(session: Session) = repository.detail(session.hostId, session.id)
+        override suspend fun models(session: Session) = repository.models(session.hostId, session.id)
+    }, ::showError)
+    internal val detailLoads = resourceLoader.detailLoads
+    internal val modelLoads = resourceLoader.modelLoads
 
     init {
         savedStateHandle.remove<String>("sessionDrafts")
@@ -73,6 +82,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             Bundle().apply { putString("value", encodeDrafts(draftStore.state.value)) }
         }
         connectivity.registerDefaultNetworkCallback(networkCallback)
+        viewModelScope.launch { repository.errors.collect(::showError) }
     }
 
     override fun onCleared() {
@@ -80,43 +90,40 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         super.onCleared()
     }
 
-    internal fun run(
-        key: OperationKey,
-        errorMessage: String = "Action failed",
-        onError: ((String) -> Unit)? = null,
-        action: suspend () -> Unit,
-    ) {
-        val started = synchronized(operationLock) {
-            if (key in mutableOperations.value) {
-                false
-            } else {
-                mutableOperations.value += key
-                true
-            }
-        }
-        if (!started) return
-        viewModelScope.launch {
-            if (onError == null) repository.error(null)
-            try {
-                action()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                val message = e.message ?: errorMessage
-                if (onError == null) repository.error(message) else onError(message)
-            } finally {
-                synchronized(operationLock) { mutableOperations.value -= key }
-            }
-        }
-    }
+    internal fun pairHost(url: String, token: String, attemptId: Long) = hostOperations.pair(url, token, attemptId)
+    internal fun refreshHost(hostId: String) = hostOperations.refresh(
+        hostId, repository.state.value.hosts[hostId]?.connection is ConnectionState.Online,
+    )
+    internal fun forgetHost(hostId: String) = hostOperations.forget(hostId)
+    internal fun reconnectUnavailableHosts() = hostOperations.reconnectUnavailableHosts()
+    internal fun loadDirectory(key: BrowserKey, forceRefresh: Boolean = false) = hostOperations.loadDirectory(key, forceRefresh)
+    internal fun createSession(hostId: String, path: String) = hostOperations.create(hostId, path)
 
     internal fun sendPrompt(session: Session) = sessionCoordinator.send(session)
     internal fun sessionCommand(session: Session, command: SessionUserCommand) = sessionCoordinator.command(session, command)
-    internal fun respond(session: Session, body: org.json.JSONObject) = sessionCoordinator.respond(session, body)
+    internal fun respond(session: Session, response: AttentionResponse) = sessionCoordinator.respond(session, response)
     internal fun selectModel(session: Session, model: ModelInfo) = sessionCoordinator.selectModel(session, model)
     internal fun setThinkingLevel(session: Session, level: String) = sessionCoordinator.setThinkingLevel(session, level)
     internal fun loadSavedHistory(session: Session) = sessionCoordinator.loadSavedHistory(session)
     internal fun loadEarlierHistory(session: Session) = sessionCoordinator.loadEarlierHistory(session)
+
+    internal fun onSessionAction(session: Session, action: SessionAction) {
+        val key = SessionKey(session.hostId, session.id)
+        when (action) {
+            SessionAction.Retry -> loadDetail(session, force = true)
+            SessionAction.Send -> sendPrompt(session)
+            is SessionAction.DraftChanged -> setDraftText(key, action.text)
+            is SessionAction.FileSelected -> selectDraftFile(key, action.uri)
+            is SessionAction.FileRemoved -> removeDraftFile(key, action.id)
+            is SessionAction.Command -> sessionCommand(session, action.command)
+            is SessionAction.Respond -> respond(session, action.response)
+            is SessionAction.LoadModels -> loadModels(session, action.force)
+            is SessionAction.SelectModel -> selectModel(session, action.model)
+            is SessionAction.SetThinkingLevel -> setThinkingLevel(session, action.level)
+            SessionAction.LoadSavedHistory -> loadSavedHistory(session)
+            SessionAction.LoadEarlierHistory -> loadEarlierHistory(session)
+        }
+    }
 
     internal fun setDraftText(key: SessionKey, text: String) = draftStore.setText(key, text)
     internal fun selectDraftFile(key: SessionKey, uri: Uri) {
@@ -129,7 +136,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                repository.error(error.message ?: "Cannot read selected file")
+                showError(error.message ?: "Cannot read selected file")
             } finally {
                 mutableFileSelections.update { current ->
                     val remaining = (current[key] ?: 1) - 1
@@ -176,61 +183,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         }
     }
 
-    internal fun loadDetail(session: Session, force: Boolean = false) {
-        val key = SessionKey(session.hostId, session.id)
-        val version = synchronized(detailLoadLock) {
-            if (!force && (repository.state.value.details.containsKey(key) || mutableDetailLoads.value[key] == LoadState.Loading)) {
-                null
-            } else {
-                mutableDetailLoads.value += key to LoadState.Loading
-                ((detailVersions[key] ?: 0L) + 1L).also { detailVersions[key] = it }
-            }
-        }
-        if (version == null) return
-        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
-            try {
-                repository.detail(session.hostId, session.id)
-                if (detailVersions[key] == version) mutableDetailLoads.update { it + (key to LoadState.Ready(Unit)) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                val message = e.message ?: "Unable to load session"
-                if (detailVersions[key] == version) {
-                    mutableDetailLoads.update { it + (key to LoadState.Failed(message)) }
-                    repository.error(message)
-                }
-            }
-        }
-        synchronized(detailLoadLock) {
-            if (detailVersions[key] == version) detailJobs.put(key, job)?.cancel() else job.cancel()
-        }
-        job.invokeOnCompletion { synchronized(detailLoadLock) { if (detailJobs[key] === job) detailJobs.remove(key) } }
-        job.start()
-    }
-
-    internal fun loadModels(session: Session, force: Boolean = true) {
-        val key = SessionKey(session.hostId, session.id)
-        val shouldLoad = synchronized(modelLoadLock) {
-            val current = mutableModelLoads.value[key]
-            if (current == LoadState.Loading || (!force && current is LoadState.Ready)) {
-                false
-            } else {
-                mutableModelLoads.value += key to LoadState.Loading
-                true
-            }
-        }
-        if (!shouldLoad) return
-        viewModelScope.launch {
-            try {
-                val models = repository.models(session.hostId, session.id)
-                mutableModelLoads.update { it + (key to LoadState.Ready(models)) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                mutableModelLoads.update {
-                    it + (key to LoadState.Failed(e.message ?: "Unable to load models"))
-                }
-            }
-        }
-    }
+    internal fun loadDetail(session: Session, force: Boolean = false) = resourceLoader.loadDetail(session, force)
+    internal fun loadModels(session: Session, force: Boolean = true) = resourceLoader.loadModels(session, force)
 }

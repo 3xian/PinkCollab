@@ -2,19 +2,21 @@ package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
+import dev.pinkcollab.data.SessionStatus
+import dev.pinkcollab.data.RuntimeExecution
+import dev.pinkcollab.data.AttentionResponse
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SessionOperationsTest {
-    private val session = Session("session", "host", "/tmp", "Work", "running", "Working", false, null,
-        "2026-01-01", "2026-01-01", true, "generation", "active")
+    private val session = Session("session", "host", "/tmp", "Work", SessionStatus.Running, "Working", false, null,
+        "2026-01-01", "2026-01-01", true, "generation", RuntimeExecution.Active)
     private val key = SessionKey("host", "session")
 
     private class FakeActions : SessionActions {
@@ -29,9 +31,11 @@ class SessionOperationsTest {
             finishUpload.await()
         }
 
-        override suspend fun command(session: Session, command: String, body: JSONObject, intentId: String?) {
-            commands += command
+        override suspend fun prompt(session: Session, message: String, fileIds: List<String>, intentId: String) {
+            commands += "prompt"
         }
+        override suspend fun command(session: Session, command: SessionUserCommand) { commands += command.wire }
+        override suspend fun respond(session: Session, response: AttentionResponse) { commands += "respond" }
 
         override suspend fun selectModel(session: Session, model: ModelInfo) = Unit
         override suspend fun setThinkingLevel(session: Session, level: String) = Unit

@@ -2,32 +2,39 @@ package dev.pinkcollab.data
 
 import android.content.Context
 import android.net.Uri
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.IOException
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-class GatewayRepository(private val scope: CoroutineScope, private val credentials: PairedHostStore, context: Context) {
-    private val api = GatewayApi()
+internal class GatewayRepository(
+    private val scope: CoroutineScope,
+    private val credentials: PairedHostStore,
+    context: Context,
+    private val api: GatewayTransport = GatewayApi(),
+    outboxStorage: CommandOutboxStorage? = null,
+) {
     private val mutable = MutableStateFlow(AppState(loadingCredentials = true))
     val state = mutable.asStateFlow()
+    private val errorChannel = Channel<String>(Channel.BUFFERED)
+    val errors = errorChannel.receiveAsFlow()
     private val connections = HostConnectionSupervisor(scope, api, ::connectionState, ::event)
-    private val listings = DirectoryListingCache(scope)
+    private val directories = DirectoryGateway(scope, api, ::paired)
+    private val attachments = AttachmentUploader(api, ::paired)
     private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()
-    private val pendingCreateIds = ConcurrentHashMap<String, String>()
-    private val pendingCommands = DurableCommandOutbox(SqliteCommandOutboxStorage(context))
+    private val sessions = SessionGateway(mutable, api, ::paired, connections::focus)
+    private val commandDispatcher = CommandDispatcher(state, ::paired, api, outboxStorage ?: SqliteCommandOutboxStorage(context))
     private val pairedHosts = PairedHostRegistry(credentials, mutable, ::connect, ::disconnect)
 
     init {
@@ -37,47 +44,25 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
-                mutable.update { it.copy(loadingCredentials = false, error = "Pairing data could not be loaded; pair again: ${failure.message}") }
+                mutable.update { it.copy(loadingCredentials = false) }
+                reportError("Pairing data could not be loaded; pair again: ${failure.message}")
                 return@launch
             }
             try {
-                recoverPendingCommands()
+                commandDispatcher.recoverPendingCommands()
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
-                mutable.update { it.copy(error = "Pending commands could not be recovered: ${failure.message}") }
+                reportError("Pending commands could not be recovered: ${failure.message}")
             }
         }
     }
 
-    fun error(message: String?) { mutable.update { it.copy(error = message) } }
+    fun reportError(message: String) { errorChannel.trySend(message) }
     private fun paired(id: String) = state.value.hosts[id]?.paired ?: throw IllegalStateException("Host removed")
 
-    suspend fun uploadFile(context: Context, hostId: String, sessionId: String, fileId: String, name: String, uri: Uri) {
-        val bytes = withContext(Dispatchers.IO) {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                val output = java.io.ByteArrayOutputStream()
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    val count = input.read(buffer)
-                    if (count < 0) break
-                    if (output.size() + count > 10 * 1024 * 1024) throw IOException("File exceeds the 10 MiB limit")
-                    output.write(buffer, 0, count)
-                }
-                output.toByteArray()
-            } ?: throw IOException("Cannot open selected file")
-        }
-        require(bytes.isNotEmpty()) { "Empty files cannot be sent" }
-        val host = paired(hostId)
-        val response = try {
-            api.upload(host.url, host.credential, "/api/v2/sessions/$sessionId/files/$fileId", name, bytes)
-        } catch (error: GatewayHttpException) {
-            if (error.statusCode == 404 && error.errorCode.isNullOrBlank()) throw IOException("Update the Gateway to send files", error)
-            throw error
-        }
-        val result = JSONObject(response)
-        require(result.getString("fileId") == fileId) { "Gateway returned a different file ID" }
-    }
+    suspend fun uploadFile(context: Context, hostId: String, sessionId: String, fileId: String, name: String, uri: Uri) =
+        attachments.upload(context, hostId, sessionId, fileId, name, uri)
 
     suspend fun pair(url: String, token: String) {
         val base = api.validateURL(url)
@@ -89,13 +74,13 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
 
     suspend fun forget(id: String) {
         pairedHosts.forget(id)
-        pendingCommands.removeHost(id)
+        commandDispatcher.removeHost(id)
     }
 
     private fun disconnect(id: String) {
         connections.forget(id)
         initialSyncTimeouts.remove(id)?.cancel()
-        listings.removeHost(id)
+        directories.removeHost(id)
     }
 
     private fun connect(paired: PairedHost) {
@@ -129,17 +114,22 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         if (frame.optString("type") == "snapshot" && frame.optString("resource") == "host/sessions") {
             initialSyncTimeouts.remove(hostId)?.cancel()
         }
-        reduction.resyncResource?.let { resource ->
-            if (resource == "host/sessions") state.value.hosts[hostId]?.paired?.let(::connect)
-            else if (resource.startsWith("session/")) {
-                val sessionId = resource.removePrefix("session/")
-                if (connections.isDesired(hostId, sessionId)) connections.subscribe(hostId, sessionId)
-            }
-        }
-        reduction.historySessionId?.let { sessionId ->
-            val subscriptionId = state.value.details[SessionKey(hostId, sessionId)]?.subscriptionId
-            if (subscriptionId != null) scope.launch {
-                runCatching { loadHistory(hostId, sessionId, subscriptionId) }.onFailure { error(it.message ?: "History unavailable") }
+        reduction.effects.forEach { effect ->
+            when (effect) {
+                is GatewayEffect.ResyncResource -> {
+                    if (effect.resource == "host/sessions") state.value.hosts[effect.hostId]?.paired?.let(::connect)
+                    else if (effect.resource.startsWith("session/")) {
+                        val sessionId = effect.resource.removePrefix("session/")
+                        if (connections.isDesired(effect.hostId, sessionId)) connections.subscribe(effect.hostId, sessionId)
+                    }
+                }
+                is GatewayEffect.LoadHistory -> {
+                    val subscriptionId = state.value.details[effect.session]?.subscriptionId
+                    if (subscriptionId != null) scope.launch {
+                        runCatching { sessions.loadHistory(effect.session.hostId, effect.session.sessionId, subscriptionId) }
+                            .onFailure { reportError(it.message ?: "History unavailable") }
+                    }
+                }
             }
         }
     }
@@ -169,177 +159,22 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         connections.networkUnavailable(state.value.hosts.filterValues { it.connection != ConnectionState.AuthenticationRequired && it.connection != ConnectionState.UpgradeRequired }.keys)
     }
 
-    suspend fun listing(hostId: String, path: String, forceRefresh: Boolean = false): Listing {
-        val key = DirectoryListingKey(hostId, path)
-        return listings.getOrLoad(key, forceRefresh) {
-            val p = paired(hostId)
-            JSONObject(api.request(p.url, p.credential, "/api/v2/fs/list", query = "path" to path)).listing()
-        }
-    }
+    suspend fun listing(hostId: String, path: String, forceRefresh: Boolean = false) =
+        directories.listing(hostId, path, forceRefresh)
 
-    fun prefetchListings(hostId: String, paths: List<String>) {
-        paths.distinct().take(12).forEach { path -> scope.launch { runCatching { listing(hostId, path) } } }
-    }
+    fun prefetchListings(hostId: String, paths: List<String>) = directories.prefetch(hostId, paths)
 
-    suspend fun create(hostId: String, cwd: String): Session {
-        val p = paired(hostId)
-        val key = "$hostId:$cwd"
-        val commandId = pendingCreateIds.computeIfAbsent(key) { UUID.randomUUID().toString() }
-        val body = JSONObject().put("commandId", commandId).put("hostId", hostId).put("cwd", cwd)
-        val session = JSONObject(api.request(p.url, p.credential, "/api/v2/sessions", "POST", body)).session()
-        pendingCreateIds.remove(key, commandId)
-        return session
-    }
-
-    suspend fun detail(hostId: String, id: String) {
-        val key = SessionKey(hostId, id)
-        mutable.update { it.copy(details = it.details - key) }
-        connections.focus(hostId, id)
-        awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[key]?.subscriptionId != null }
-    }
-
-    private suspend fun loadHistory(hostId: String, id: String, subscriptionId: String) {
-        val key = SessionKey(hostId, id)
-        val before = state.value.details[key] ?: return
-        if (before.subscriptionId != subscriptionId) return
-        val request = HistoryRequest(subscriptionId, before.historyEpoch)
-        val p = paired(hostId)
-        val raw = api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "limit" to "100")
-        val page = parseHistoryPage(raw)
-        mutable.update { app ->
-            val current = app.details[key] ?: return@update app
-            if (!request.matches(current)) return@update app
-            app.copy(details = app.details + (key to current.copy(
-                historyItems = page.items,
-                liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
-                historySourceId = page.source,
-                nextHistoryCursor = page.nextCursor,
-            )))
-        }
-    }
-
-    suspend fun loadSavedHistory(hostId: String, id: String) {
-        val subscriptionId = state.value.details[SessionKey(hostId, id)]?.subscriptionId ?: return
-        loadHistory(hostId, id, subscriptionId)
-    }
-
-    suspend fun loadEarlierHistory(hostId: String, id: String) {
-        val key = SessionKey(hostId, id)
-        val before = state.value.details[key] ?: return
-        val cursor = before.nextHistoryCursor ?: return
-        val request = HistoryRequest(before.subscriptionId ?: return, before.historyEpoch)
-        val p = paired(hostId)
-        val page = try {
-            parseHistoryPage(api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "cursor" to cursor))
-        } catch (failure: IOException) {
-            if ((failure as? GatewayHttpException)?.errorCode == "stale_cursor") {
-                before.subscriptionId?.let { loadHistory(hostId, id, it) }
-                return
-            }
-            throw failure
-        }
-        mutable.update { app ->
-            val current = app.details[key] ?: return@update app
-            if (!request.matches(current) || current.historySourceId != page.source) return@update app
-            val history = page.items + current.historyItems
-            app.copy(details = app.details + (key to current.copy(
-                historyItems = history,
-                nextHistoryCursor = page.nextCursor,
-            )))
-        }
-    }
-
-    suspend fun models(hostId: String, id: String): ModelCatalog {
-        val p = paired(hostId)
-        val raw = JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/models"))
-        return ModelCatalog(raw.getJSONArray("models").objects().map { it.modelInfo() }, raw.getJSONArray("thinkingLevels").strings())
-    }
-
-    suspend fun selectModel(hostId: String, id: String, model: ModelInfo) {
-        sendCommand(hostId, id, "select_model:${model.provider}:${model.id}", "select_model") {
-            val generation = requireNotNull(state.value.details[SessionKey(hostId, id)]?.session?.runtimeGeneration) { "Runtime required" }
-            JSONObject().put("expectedGeneration", generation).put("provider", model.provider).put("modelId", model.id)
-        }
-    }
-
-    suspend fun setThinkingLevel(hostId: String, id: String, level: String) {
-        sendCommand(hostId, id, "set_thinking_level:$level", "set_thinking_level") {
-            val generation = requireNotNull(state.value.details[SessionKey(hostId, id)]?.session?.runtimeGeneration) { "Runtime required" }
-            JSONObject().put("expectedGeneration", generation).put("level", level)
-        }
-    }
-
-    suspend fun command(hostId: String, id: String, command: String, body: JSONObject = JSONObject(), intentId: String? = null) {
-        if (command == "prompt") require(!intentId.isNullOrBlank()) { "Prompt intent ID required" }
-        val requested = body.toString()
-        sendCommand(hostId, id, intentId?.let { "$command:intent:$it" } ?: "$command:$requested", when (command) {
-            "stop" -> "stop_runtime"
-            "start" -> "start_runtime"
-            else -> command
-        }, intentId) {
-            val input = JSONObject(requested)
-            val session = state.value.details[SessionKey(hostId, id)]?.session ?: state.value.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
-            val generation = session?.runtimeGeneration
-            when (command) {
-                "prompt" -> {
-                    val delivery = if (session?.runtimeExecution == "active") "steer" else "start"
-                    JSONObject().put("delivery", delivery).put("message", input.getString("message"))
-                        .also { if (input.has("fileIds")) it.put("fileIds", input.getJSONArray("fileIds")) }
-                        .also { if (session?.runtimeAttached == true) it.put("expectedGeneration", requireNotNull(generation) { "Runtime required" }) }
-                }
-                "start" -> JSONObject()
-                "interrupt", "stop" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
-                "respond" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
-                    .put("inputRequestId", input.getString("id"))
-                    .also {
-                        if (input.has("value")) it.put("value", input.getString("value"))
-                        if (input.has("confirmed")) it.put("confirmed", input.getBoolean("confirmed"))
-                        if (input.has("cancelled")) it.put("cancelled", input.getBoolean("cancelled"))
-                    }
-                else -> throw IllegalArgumentException("Unknown command")
-            }
-        }
-    }
-
-    private suspend fun sendCommand(hostId: String, id: String, action: String, type: String, intentId: String? = null, fields: () -> JSONObject) {
-        val p = paired(hostId)
-        pendingCommands.submit(CommandRequest(hostId, p.clientId, id, action, type, intentId, fields), commandTransport(p, id))
-    }
-
-    private suspend fun recoverPendingCommands() {
-        for (pending in pendingCommands.records()) {
-            val host = state.value.hosts[pending.hostId]?.paired?.takeIf { it.clientId == pending.clientId } ?: continue
-            try {
-                pendingCommands.recover(pending, commandTransport(host, pending.sessionId))
-            } catch (failure: CancellationException) {
-                throw failure
-            } catch (_: Exception) {
-                // Leave the record available for the next restart or the user's retry.
-            }
-        }
-    }
-
-    private fun commandTransport(host: PairedHost, sessionId: String) = CommandTransport(
-        post = { body -> JSONObject(api.request(host.url, host.credential, "/api/v2/sessions/$sessionId/commands", "POST", body)) },
-        lookup = { commandId -> JSONObject(api.request(host.url, host.credential, "/api/v2/sessions/$sessionId/operations/$commandId")) },
-    )
-}
-
-internal fun historyCursor(page: JSONObject): String? = (page.opt("nextCursor") as? String)?.takeIf { it.isNotBlank() }
-
-private data class HistoryPage(val source: String?, val items: List<TimelineItem>, val nextCursor: String?)
-
-internal data class HistoryRequest(val subscriptionId: String, val epoch: Long) {
-    fun matches(detail: SessionDetail?): Boolean = detail?.subscriptionId == subscriptionId && detail.historyEpoch == epoch
-}
-
-private suspend fun parseHistoryPage(raw: String): HistoryPage = withContext(Dispatchers.Default) {
-    val page = JSONObject(raw)
-    HistoryPage(
-        source = page.optJSONObject("source")?.getString("id"),
-        items = page.getJSONArray("items").objects().map { it.item() },
-        nextCursor = historyCursor(page),
-    )
+    suspend fun create(hostId: String, cwd: String) = sessions.create(hostId, cwd)
+    suspend fun detail(hostId: String, id: String) = sessions.detail(hostId, id)
+    suspend fun loadSavedHistory(hostId: String, id: String) = sessions.loadSavedHistory(hostId, id)
+    suspend fun loadEarlierHistory(hostId: String, id: String) = sessions.loadEarlierHistory(hostId, id)
+    suspend fun models(hostId: String, id: String) = sessions.models(hostId, id)
+    suspend fun selectModel(hostId: String, id: String, model: ModelInfo) = commandDispatcher.selectModel(hostId, id, model)
+    suspend fun setThinkingLevel(hostId: String, id: String, level: String) = commandDispatcher.setThinkingLevel(hostId, id, level)
+    suspend fun prompt(hostId: String, id: String, message: String, fileIds: List<String>, intentId: String) =
+        commandDispatcher.prompt(hostId, id, message, fileIds, intentId)
+    suspend fun respond(hostId: String, id: String, response: AttentionResponse) = commandDispatcher.respond(hostId, id, response)
+    suspend fun command(hostId: String, id: String, command: String) = commandDispatcher.command(hostId, id, command)
 }
 
 internal suspend fun <T> awaitSnapshot(state: kotlinx.coroutines.flow.StateFlow<T>, message: String, ready: (T) -> Boolean) {

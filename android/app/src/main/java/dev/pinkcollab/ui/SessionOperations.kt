@@ -3,6 +3,7 @@ package dev.pinkcollab.ui
 import android.app.Application
 import android.net.Uri
 import dev.pinkcollab.data.GatewayRepository
+import dev.pinkcollab.data.AttentionResponse
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.TerminalCommandFailure
@@ -15,12 +16,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 
 internal interface SessionActions {
     suspend fun upload(session: Session, file: SelectedFile)
-    suspend fun command(session: Session, command: String, body: JSONObject = JSONObject(), intentId: String? = null)
+    suspend fun prompt(session: Session, message: String, fileIds: List<String>, intentId: String)
+    suspend fun command(session: Session, command: SessionUserCommand)
+    suspend fun respond(session: Session, response: AttentionResponse)
     suspend fun selectModel(session: Session, model: ModelInfo)
     suspend fun setThinkingLevel(session: Session, level: String)
     suspend fun loadSavedHistory(session: Session)
@@ -34,8 +35,14 @@ internal class RepositorySessionActions(
     override suspend fun upload(session: Session, file: SelectedFile) =
         repository.uploadFile(application, session.hostId, session.id, file.id, file.name, Uri.parse(file.uri))
 
-    override suspend fun command(session: Session, command: String, body: JSONObject, intentId: String?) =
-        repository.command(session.hostId, session.id, command, body, intentId)
+    override suspend fun prompt(session: Session, message: String, fileIds: List<String>, intentId: String) =
+        repository.prompt(session.hostId, session.id, message, fileIds, intentId)
+
+    override suspend fun command(session: Session, command: SessionUserCommand) =
+        repository.command(session.hostId, session.id, command.wire)
+
+    override suspend fun respond(session: Session, response: AttentionResponse) =
+        repository.respond(session.hostId, session.id, response)
 
     override suspend fun selectModel(session: Session, model: ModelInfo) =
         repository.selectModel(session.hostId, session.id, model)
@@ -79,7 +86,7 @@ internal class SessionOperations(
     private val actions: SessionActions,
     private val drafts: SessionDraftStore,
     private val clearSentDraft: (SessionKey, Long) -> Unit,
-    private val reportError: (String?) -> Unit,
+    private val reportError: (String) -> Unit,
 ) {
     private val lock = Any()
     private val jobs = mutableMapOf<SessionOperationKey, Job>()
@@ -95,8 +102,7 @@ internal class SessionOperations(
             draft.files.forEach { actions.upload(session, it) }
             currentCoroutineContext().ensureActive()
             try {
-                actions.command(session, "prompt", JSONObject().put("message", draft.text)
-                    .put("fileIds", JSONArray(draft.files.map { it.id })), draft.intentId)
+                actions.prompt(session, draft.text, draft.files.map { it.id }, draft.intentId)
             } catch (failure: TerminalCommandFailure) {
                 drafts.rotateFailedIntent(key, draft.version, draft.intentId)
                 throw failure
@@ -109,12 +115,12 @@ internal class SessionOperations(
         val key = SessionKey(session.hostId, session.id)
         if (command.lane == SessionLane.Control) cancelSend(key)
         launch(key, command.lane) {
-            actions.command(session, command.wire)
+            actions.command(session, command)
         }
     }
 
-    fun respond(session: Session, body: JSONObject) = launch(session.key(), SessionLane.Action) {
-        actions.command(session, "respond", body)
+    fun respond(session: Session, response: AttentionResponse) = launch(session.key(), SessionLane.Action) {
+        actions.respond(session, response)
     }
 
     fun selectModel(session: Session, model: ModelInfo) = launch(session.key(), SessionLane.Action) {
@@ -142,7 +148,6 @@ internal class SessionOperations(
         val job = synchronized(lock) {
             if (operation in jobs) return
             scope.launch(start = CoroutineStart.LAZY) {
-                reportError(null)
                 try {
                     action()
                 } catch (failure: CancellationException) {

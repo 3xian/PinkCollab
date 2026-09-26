@@ -24,15 +24,9 @@ import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.Listing
 import dev.pinkcollab.ui.theme.*
 
-internal sealed interface DirectoryBrowserState {
-    data object Loading : DirectoryBrowserState
-    data class Ready(val listing: Listing) : DirectoryBrowserState
-    data class Failed(val message: String) : DirectoryBrowserState
-}
-
 @Composable
 internal fun DirectoryBrowserScreen(
-    state: DirectoryBrowserState,
+    state: LoadState<Listing>?,
     hostName: String,
     creating: Boolean,
     browse: (String) -> Unit,
@@ -40,10 +34,10 @@ internal fun DirectoryBrowserScreen(
     retry: () -> Unit,
 ) {
     when (state) {
-        DirectoryBrowserState.Loading -> DirectoryLoadingState(hostName)
-        is DirectoryBrowserState.Failed -> EmptyState("Directory unavailable", state.message, "Retry", retry)
-        is DirectoryBrowserState.Ready -> DirectoryListing(
-            listing = state.listing,
+        null, LoadState.Loading -> DirectoryLoadingState(hostName)
+        is LoadState.Failed -> EmptyState("Directory unavailable", state.message, "Retry", retry)
+        is LoadState.Ready -> DirectoryListing(
+            listing = state.value,
             hostName = hostName,
             creating = creating,
             browse = browse,

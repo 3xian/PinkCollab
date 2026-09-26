@@ -7,6 +7,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class V2ReducerTest {
+    private fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpochMillis: Long = 123L) =
+        dev.pinkcollab.data.reduceV2(app, hostId, frame, nowEpochMillis)
+
     private val sessionKey = SessionKey("host", "session")
     private val paired = PairedHost(Host("host", "Desktop", "windows", "18.3.1", "0.1.1"), "https://host.example", "secret", "client")
     private fun app() = AppState(hosts = mapOf("host" to HostState(paired)))
@@ -63,8 +66,8 @@ class V2ReducerTest {
                 .put("value", JSONObject().put("runtime", JSONObject().put("generation", "run-one")
                     .put("phase", "ready").put("execution", "active").put("pendingInputs", org.json.JSONArray())))))
         val result = reduceV2(baseline, "host", change)
-        assertNull(result.resyncResource)
-        assertEquals("running", result.state.hosts.getValue("host").sessions.single().status)
+        assertTrue(result.effects.isEmpty())
+        assertEquals(SessionStatus.Running, result.state.hosts.getValue("host").sessions.single().status)
         assertEquals("run-one", result.state.hosts.getValue("host").sessions.single().runtimeGeneration)
         assertEquals(1L, result.state.hosts.getValue("host").cursor?.revision)
     }
@@ -75,11 +78,11 @@ class V2ReducerTest {
             .put("subscriptionId", "host-sub").put("epoch", "epoch")
             .put("baseRevision", 1).put("revision", 2).put("changes", org.json.JSONArray())
         val gap = reduceV2(baseline, "host", change)
-        assertEquals("host/sessions", gap.resyncResource)
+        assertEquals(listOf(GatewayEffect.ResyncResource("host", "host/sessions")), gap.effects)
         assertEquals(0L, gap.state.hosts.getValue("host").cursor?.revision)
         change.put("subscriptionId", "old-sub")
         val old = reduceV2(baseline, "host", change)
-        assertEquals("host/sessions", old.resyncResource)
+        assertEquals(listOf(GatewayEffect.ResyncResource("host", "host/sessions")), old.effects)
         assertEquals(0L, old.state.hosts.getValue("host").cursor?.revision)
     }
 
@@ -102,7 +105,7 @@ class V2ReducerTest {
         val updated = reduceV2(active, "host", metadata).state.hosts.getValue("host").sessions.single()
         assertEquals("Renamed", updated.title)
         assertEquals("run-one", updated.runtimeGeneration)
-        assertEquals("running", updated.status)
+        assertEquals(SessionStatus.Running, updated.status)
     }
 
     @Test fun stopping_phase_and_timeline_patches_are_applied_in_order() {
@@ -115,7 +118,7 @@ class V2ReducerTest {
             .put("payload", JSONObject().put("session", record).put("runtime", runtime)
                 .put("messages", org.json.JSONArray()).put("recentOperations", org.json.JSONArray()))
         val baseline = reduceV2(hostState, "host", snapshot).state
-        assertEquals("stopping", baseline.details.getValue(sessionKey).session.status)
+        assertEquals(SessionStatus.Stopping, baseline.details.getValue(sessionKey).session.status)
 
         fun change(base: Long, kind: String, value: JSONObject) = JSONObject()
             .put("type", "change").put("resource", "session/session").put("subscriptionId", "session-sub")
@@ -179,7 +182,7 @@ class V2ReducerTest {
             .put("changes", org.json.JSONArray().put(JSONObject().put("type", "v2.runtime.exited")
                 .put("value", JSONObject())))
         val result = reduceV2(withHistory, "host", exit)
-        assertEquals("session", result.historySessionId)
+        assertEquals(listOf(GatewayEffect.LoadHistory(sessionKey)), result.effects)
         assertEquals(emptyList<TimelineItem>(), result.state.details.getValue(sessionKey).historyItems)
         assertNull(result.state.details.getValue(sessionKey).historySourceId)
         assertNull(result.state.details.getValue(sessionKey).nextHistoryCursor)

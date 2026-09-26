@@ -20,10 +20,17 @@ import kotlin.coroutines.resumeWithException
 
 class GatewayHttpException(val statusCode: Int, val errorCode: String?, message: String) : IOException(message)
 
-class GatewayApi {
+internal interface GatewayTransport {
+    val client: OkHttpClient
+    fun validateURL(value: String): String
+    suspend fun request(url: String, credential: String?, path: String, method: String = "GET", body: JSONObject? = null, query: Pair<String, String>? = null): String
+    suspend fun upload(url: String, credential: String, path: String, name: String, bytes: ByteArray): String
+}
+
+internal class GatewayApi : GatewayTransport {
     // Tailscale Serve and similar reverse tunnels can reset large HTTP/2 timeline responses with
     // PROTOCOL_ERROR. PinkCollab makes few independent requests, so HTTP/1.1 is the reliable path.
-    val client = OkHttpClient.Builder()
+    override val client = OkHttpClient.Builder()
         .protocols(listOf(Protocol.HTTP_1_1))
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
@@ -32,7 +39,7 @@ class GatewayApi {
         .followRedirects(false)
         .followSslRedirects(false)
         .build()
-    fun validateURL(value: String): String {
+    override fun validateURL(value: String): String {
         val url = value.trim().trimEnd('/').toHttpUrl()
         require(url.username.isEmpty() && url.password.isEmpty() && url.encodedPath == "/" && url.query == null && url.fragment == null) { "Enter the Gateway root URL" }
         require(url.isHttps || (BuildConfig.DEBUG && url.host in listOf("localhost", "127.0.0.1", "10.0.2.2"))) { "The Gateway must use HTTPS" }
@@ -41,14 +48,14 @@ class GatewayApi {
     private fun endpoint(url: String, path: String, query: Pair<String, String>?): HttpUrl =
         (url + path).toHttpUrl().newBuilder().apply { query?.let { addQueryParameter(it.first, it.second) } }.build()
 
-    suspend fun request(url: String, credential: String?, path: String, method: String = "GET", body: JSONObject? = null, query: Pair<String, String>? = null): String {
+    override suspend fun request(url: String, credential: String?, path: String, method: String, body: JSONObject?, query: Pair<String, String>?): String {
         val builder = Request.Builder().url(endpoint(url, path, query))
         credential?.let { builder.header("Authorization", "Bearer $it") }
         if (method != "GET") builder.method(method, (body?.toString() ?: "{}").toRequestBody("application/json".toMediaType()))
         return send(client.newCall(builder.build()))
     }
 
-    suspend fun upload(url: String, credential: String, path: String, name: String, bytes: ByteArray): String {
+    override suspend fun upload(url: String, credential: String, path: String, name: String, bytes: ByteArray): String {
         val request = Request.Builder()
             .url(endpoint(url, path, "name" to name))
             .header("Authorization", "Bearer $credential")

@@ -31,7 +31,7 @@ class SessionDisplayProjectionTest {
     )
 
     @Test fun saved_history_and_back_to_live_use_distinct_sources() {
-        val session = Session("session", "host", "/work", "Task", "running", "", false, null, "", "", true, "run")
+        val session = Session("session", "host", "/work", "Task", dev.pinkcollab.data.SessionStatus.Running, "", false, null, "", "", true, "run")
         val live = message("live", "assistant", "current")
         val saved = message("saved", "user", "older")
         val detail = SessionDetail(session = session, liveItems = listOf(live), historyItems = listOf(saved))
