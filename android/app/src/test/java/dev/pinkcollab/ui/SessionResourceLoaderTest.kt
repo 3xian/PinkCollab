@@ -69,4 +69,28 @@ class SessionResourceLoaderTest {
         runCurrent()
         assertEquals(1, calls)
     }
+
+    @Test fun forgetting_host_clears_pending_model_load_and_allows_fresh_load() = runTest {
+        val first = CompletableDeferred<ModelCatalog>()
+        var calls = 0
+        val actions = object : SessionResourceActions {
+            override fun hasDetail(key: SessionKey) = false
+            override suspend fun detail(session: Session) = Unit
+            override suspend fun models(session: Session): ModelCatalog {
+                calls++
+                return if (calls == 1) first.await() else ModelCatalog(emptyList(), listOf("fresh"))
+            }
+        }
+        val loader = SessionResourceLoader(backgroundScope, actions, {})
+        loader.loadModels(session)
+        runCurrent()
+        loader.removeHost("host")
+        runCurrent()
+        assertEquals(null, loader.modelLoads.value[key])
+
+        loader.loadModels(session)
+        runCurrent()
+        assertEquals(2, calls)
+        assertEquals(listOf("fresh"), (loader.modelLoads.value[key] as LoadState.Ready).value.thinkingLevels)
+    }
 }

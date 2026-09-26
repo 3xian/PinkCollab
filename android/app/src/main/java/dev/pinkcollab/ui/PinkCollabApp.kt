@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val app by vm.appState.collectAsStateWithLifecycle()
     val operations by vm.operations.collectAsStateWithLifecycle()
-    val directories by vm.directories.collectAsStateWithLifecycle()
+    val directory by vm.directory.collectAsStateWithLifecycle()
     val sessionOperations by vm.sessionOperations.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
     val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
@@ -156,7 +156,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             route = current,
                             hostName = app.hosts[current.hostId]?.paired?.host?.name.orEmpty(),
                             creating = OperationKey.CreateTask(current.hostId, current.path) in operations,
-                            state = directories[BrowserKey(current.hostId, current.path)],
+                            state = directory?.takeIf { it.key == BrowserKey(current.hostId, current.path) }?.state,
                             load = { forceRefresh -> vm.loadDirectory(BrowserKey(current.hostId, current.path), forceRefresh) },
                             browse = { path -> route = current.copy(path = path) },
                             select = { path -> vm.createSession(current.hostId, path) },

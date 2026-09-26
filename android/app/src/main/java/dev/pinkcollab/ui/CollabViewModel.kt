@@ -52,11 +52,16 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         viewModelScope,
         RepositoryHostActions(repository),
         { effectChannel.trySend(it) },
-        ::removeHostDrafts,
+        { hostId -> sessionCoordinator.cancelHost(hostId) },
+        { hostId ->
+            removeHostDrafts(hostId)
+            resourceLoader.removeHost(hostId)
+            mutableFileSelections.update { it.filterKeys { key -> key.hostId != hostId } }
+        },
         { session -> loadDetail(session) },
     )
     internal val operations = hostOperations.operations
-    internal val directories = hostOperations.directories
+    internal val directory = hostOperations.directory
     private val sessionCoordinator = SessionOperations(
         viewModelScope,
         RepositorySessionActions(application, repository),

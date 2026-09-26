@@ -2,12 +2,17 @@ package dev.pinkcollab.data
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import okhttp3.OkHttpClient
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -59,6 +64,72 @@ class GatewayRepositorySafetyTest {
 
     private fun missing(): Nothing = throw GatewayHttpException(404, "operation_not_found", "missing")
     private fun receipt(id: String, status: String) = JSONObject().put("commandId", id).put("status", status)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun forgetting_host_waits_for_command_and_removes_its_pending_record() = runTest {
+        val storage = MemoryOutbox()
+        val gate = HostCommandGate()
+        val posted = CompletableDeferred<Unit>()
+        val releasePost = CompletableDeferred<Unit>()
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        var paired = true
+        var posts = 0
+        val transport = object : GatewayTransport {
+            override val client = OkHttpClient()
+            override fun validateURL(value: String) = value
+            override suspend fun request(url: String, credential: String?, path: String, method: String,
+                body: JSONObject?, query: Pair<String, String>?): String {
+                check(path.endsWith("/commands"))
+                posts++
+                posted.complete(Unit)
+                releasePost.await()
+                return JSONObject().put("operation", receipt(body!!.getString("commandId"), "accepted")).toString()
+            }
+            override suspend fun upload(url: String, credential: String, path: String, name: String,
+                bytes: ByteArray): String = error("unexpected upload")
+        }
+        val dispatcher = CommandDispatcher(MutableStateFlow(AppState()),
+            { check(paired) { "Host removed" }; host }, transport, storage, gate)
+
+        val sending = async { dispatcher.command("host", "session", "start") }
+        posted.await()
+        val forgetting = async {
+            gate.withHostRemoval("host") {
+                paired = false
+                dispatcher.removeHost("host")
+            }
+        }
+        runCurrent()
+        assertFalse(forgetting.isCompleted)
+        assertTrue(runCatching { dispatcher.command("host", "other-session", "start") }.isFailure)
+        assertEquals(1, posts)
+        releasePost.complete(Unit)
+        sending.await()
+        forgetting.await()
+
+        assertTrue(storage.records().isEmpty())
+        assertEquals(1, posts)
+        assertTrue(runCatching { dispatcher.command("host", "session", "start") }.isFailure)
+        assertEquals(1, posts)
+    }
+
+    @Test fun commands_for_the_same_host_can_still_run_concurrently() = runTest {
+        val gate = HostCommandGate()
+        val firstStarted = CompletableDeferred<Unit>()
+        val finishFirst = CompletableDeferred<Unit>()
+        val first = async {
+            gate.withHost("host") {
+                firstStarted.complete(Unit)
+                finishFirst.await()
+            }
+        }
+        firstStarted.await()
+        var secondFinished = false
+        gate.withHost("host") { secondFinished = true }
+        assertTrue(secondFinished)
+        finishFirst.complete(Unit)
+        first.await()
+    }
 
     @Test fun outbox_key_is_opaque_and_stable() {
         assertEquals(64, request().key.length)

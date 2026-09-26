@@ -4,7 +4,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
-import java.util.concurrent.ConcurrentHashMap
 
 internal data class DirectoryListingKey(val hostId: String, val path: String)
 
@@ -16,7 +15,7 @@ internal class DirectoryListingCache(
 ) {
     private data class Entry(val listing: Listing, val expiresAt: Long)
 
-    private val requests = ConcurrentHashMap<DirectoryListingKey, Deferred<Listing>>()
+    private val requests = mutableMapOf<DirectoryListingKey, Deferred<Listing>>()
     private val hostGenerations = mutableMapOf<String, Long>()
     private val entries = object : LinkedHashMap<DirectoryListingKey, Entry>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<DirectoryListingKey, Entry>) =
@@ -34,8 +33,8 @@ internal class DirectoryListingCache(
     }
 
     @Synchronized
-    private fun put(key: DirectoryListingKey, listing: Listing, generation: Long) {
-        if (hostGenerations.getOrDefault(key.hostId, 0) != generation) return
+    private fun putIfCurrent(key: DirectoryListingKey, listing: Listing, generation: Long, request: Deferred<Listing>) {
+        if (hostGenerations.getOrDefault(key.hostId, 0) != generation || requests[key] !== request) return
         entries[key] = Entry(listing, now() + ttlMillis)
     }
 
@@ -44,17 +43,26 @@ internal class DirectoryListingCache(
         forceRefresh: Boolean = false,
         load: suspend () -> Listing,
     ): Listing {
-        if (!forceRefresh) get(key)?.let { return it }
+        val (active, replaced) = synchronized(this) {
+            if (!forceRefresh) get(key)?.let { return it }
+            val inFlight = requests[key]
+            if (inFlight != null && !forceRefresh) return@synchronized inFlight to null
 
-        val generation = synchronized(this) { hostGenerations.getOrDefault(key.hostId, 0) }
-        val candidate = scope.async(start = CoroutineStart.LAZY) {
-            load().also { put(key, it, generation) }
+            val generation = hostGenerations.getOrDefault(key.hostId, 0)
+            lateinit var candidate: Deferred<Listing>
+            candidate = scope.async(start = CoroutineStart.LAZY) {
+                load().also { putIfCurrent(key, it, generation, candidate) }
+            }
+            requests[key] = candidate
+            candidate.invokeOnCompletion {
+                synchronized(this) {
+                    if (requests[key] === candidate) requests.remove(key)
+                }
+            }
+            candidate.start()
+            candidate to inFlight
         }
-        val active = requests.putIfAbsent(key, candidate) ?: candidate.also { request ->
-            request.invokeOnCompletion { requests.remove(key, request) }
-            request.start()
-        }
-        if (active !== candidate) candidate.cancel()
+        replaced?.cancel()
         return active.await()
     }
 

@@ -1,6 +1,8 @@
 package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.Listing
+import dev.pinkcollab.data.DirectoryListingCache
+import dev.pinkcollab.data.DirectoryListingKey
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.Workspace
 import kotlinx.coroutines.CompletableDeferred
@@ -22,6 +24,7 @@ class HostOperationsTest {
         var pairFailure: Exception? = null
         var directoryFailure: Exception? = null
         var firstDirectoryGate: CompletableDeferred<Unit>? = null
+        var listingDelegate: (suspend (String, String, Boolean) -> Listing)? = null
         override suspend fun pair(url: String, token: String) {
             calls += "pair:$url:$token"
             pairFailure?.let { throw it }
@@ -32,6 +35,7 @@ class HostOperationsTest {
         override suspend fun forget(hostId: String) { calls += "forget:$hostId" }
         override suspend fun listing(hostId: String, path: String, forceRefresh: Boolean): Listing {
             calls += "listing:$hostId:$path:$forceRefresh"
+            listingDelegate?.let { return it(hostId, path, forceRefresh) }
             if (calls.count { it.startsWith("listing:") } == 1) firstDirectoryGate?.await()
             directoryFailure?.let { throw it }
             return Listing(path, null, listOf(Workspace("child", "$path/child")))
@@ -48,7 +52,7 @@ class HostOperationsTest {
         val actions = FakeActions()
         val effects = mutableListOf<UiEffect>()
         val loaded = mutableListOf<Session>()
-        val operations = HostOperations(backgroundScope, actions, effects::add, {}, loaded::add)
+        val operations = HostOperations(backgroundScope, actions, effects::add, {}, {}, loaded::add)
         operations.create("host", "/work")
         runCurrent()
         assertEquals(listOf(session), loaded)
@@ -61,7 +65,7 @@ class HostOperationsTest {
         val actions = FakeActions().apply { pairFailure = IllegalStateException("invalid code") }
         val effects = mutableListOf<UiEffect>()
         val removed = mutableListOf<String>()
-        val operations = HostOperations(backgroundScope, actions, effects::add, removed::add, {})
+        val operations = HostOperations(backgroundScope, actions, effects::add, {}, removed::add, {})
         operations.pair("https://host", "token", 7L)
         runCurrent()
         assertEquals(UiEffect.PairingFailed(7L, "invalid code"), effects.single())
@@ -74,43 +78,90 @@ class HostOperationsTest {
 
     @Test fun successful_pair_emits_the_original_attempt_id() = runTest {
         val effects = mutableListOf<UiEffect>()
-        val operations = HostOperations(backgroundScope, FakeActions(), effects::add, {}, {})
+        val operations = HostOperations(backgroundScope, FakeActions(), effects::add, {}, {}, {})
         operations.pair("https://host", "token", 9L)
         runCurrent()
         assertEquals(listOf(UiEffect.HostPaired(9L)), effects)
         assertTrue(operations.operations.value.isEmpty())
     }
 
+    @Test fun forgetting_host_cancels_work_before_removal_and_cleans_state_afterward() = runTest {
+        val actions = FakeActions()
+        val events = mutableListOf<String>()
+        val operations = HostOperations(backgroundScope, actions, {},
+            { assertFalse("forget:host" in actions.calls); events += "cancel" },
+            { assertTrue("forget:host" in actions.calls); events += "cleanup" }, {})
+
+        operations.forget("host")
+        runCurrent()
+
+        assertEquals(listOf("cancel", "cleanup"), events)
+    }
+
     @Test fun directory_loading_and_failure_are_feature_state() = runTest {
         val actions = FakeActions()
-        val operations = HostOperations(backgroundScope, actions, {}, {}, {})
+        val operations = HostOperations(backgroundScope, actions, {}, {}, {}, {})
         val key = BrowserKey("host", "/work")
         operations.loadDirectory(key)
-        assertEquals(LoadState.Loading, operations.directories.value[key])
+        assertEquals(DirectoryLoad(key, LoadState.Loading), operations.directory.value)
         runCurrent()
-        assertEquals("/work", (operations.directories.value[key] as LoadState.Ready).value.path)
+        assertEquals("/work", (operations.directory.value?.state as LoadState.Ready).value.path)
         assertTrue("prefetch:host:/work/child" in actions.calls)
         actions.directoryFailure = IllegalStateException("offline")
         operations.loadDirectory(key, forceRefresh = true)
         runCurrent()
-        assertEquals(LoadState.Failed("offline"), operations.directories.value[key])
+        assertEquals(DirectoryLoad(key, LoadState.Failed("offline")), operations.directory.value)
     }
 
     @Test fun stale_directory_result_cannot_replace_refresh_or_return_after_forget() = runTest {
         val gate = CompletableDeferred<Unit>()
         val actions = FakeActions().apply { firstDirectoryGate = gate }
-        val operations = HostOperations(backgroundScope, actions, {}, {}, {})
+        val operations = HostOperations(backgroundScope, actions, {}, {}, {}, {})
         val key = BrowserKey("host", "/work")
         operations.loadDirectory(key)
         runCurrent()
         operations.loadDirectory(key, forceRefresh = true)
         runCurrent()
-        assertTrue(operations.directories.value[key] is LoadState.Ready)
+        assertTrue(operations.directory.value?.state is LoadState.Ready)
         operations.forget("host")
         runCurrent()
         gate.complete(Unit)
         runCurrent()
-        assertFalse(key in operations.directories.value)
+        assertEquals(null, operations.directory.value)
         assertEquals(1, actions.calls.count { it.startsWith("prefetch:") })
+    }
+
+    @Test fun directory_state_only_retains_the_current_path() = runTest {
+        val operations = HostOperations(backgroundScope, FakeActions(), {}, {}, {}, {})
+        operations.loadDirectory(BrowserKey("host", "/first"))
+        runCurrent()
+        operations.loadDirectory(BrowserKey("host", "/second"))
+        runCurrent()
+        assertEquals(BrowserKey("host", "/second"), operations.directory.value?.key)
+    }
+
+    @Test fun retry_while_loading_uses_a_new_cache_request() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val cache = DirectoryListingCache(backgroundScope)
+        val actions = FakeActions()
+        var networkLoads = 0
+        actions.listingDelegate = { hostId, path, force ->
+            cache.getOrLoad(DirectoryListingKey(hostId, path), force) {
+                networkLoads++
+                if (networkLoads == 1) gate.await()
+                Listing("$path/$networkLoads", null, emptyList())
+            }
+        }
+        val operations = HostOperations(backgroundScope, actions, {}, {}, {}, {})
+        val key = BrowserKey("host", "/work")
+        operations.loadDirectory(key)
+        runCurrent()
+        operations.loadDirectory(key, forceRefresh = true)
+        runCurrent()
+        assertEquals(2, networkLoads)
+        assertEquals("/work/2", (operations.directory.value?.state as LoadState.Ready).value.path)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals("/work/2", (operations.directory.value?.state as LoadState.Ready).value.path)
     }
 }

@@ -77,4 +77,24 @@ class SessionOperationsTest {
         assertEquals(listOf("stop"), actions.commands)
         assertTrue(coordinator.operations.value.activity(key).history)
     }
+
+    @Test fun forgetting_host_cancels_upload_before_prompt_submission() = runTest {
+        val drafts = SessionDraftStore()
+        drafts.setText(key, "send me")
+        drafts.addFile(key, SelectedFile("content://file", "attachment", "file_one"))
+        val actions = FakeActions()
+        val coordinator = SessionOperations(backgroundScope, actions, drafts, drafts::clearIfVersion) {}
+
+        coordinator.send(session)
+        runCurrent()
+        actions.uploadStarted.await()
+        coordinator.cancelHost("host")
+        runCurrent()
+        actions.finishUpload.complete(Unit)
+        runCurrent()
+
+        assertTrue(actions.commands.isEmpty())
+        assertTrue(coordinator.operations.value.isEmpty())
+        assertEquals("send me", drafts.state.value.getValue(key).text)
+    }
 }

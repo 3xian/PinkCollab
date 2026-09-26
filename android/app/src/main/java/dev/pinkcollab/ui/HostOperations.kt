@@ -7,10 +7,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 internal data class BrowserKey(val hostId: String, val path: String)
+internal data class DirectoryLoad(val key: BrowserKey, val state: LoadState<Listing>)
 
 internal sealed interface UiEffect {
     data class ShowSnackbar(val message: String) : UiEffect
@@ -47,15 +47,16 @@ internal class HostOperations(
     private val scope: CoroutineScope,
     private val actions: HostActions,
     private val emit: (UiEffect) -> Unit,
+    private val onHostForgetting: (String) -> Unit,
     private val onHostForgotten: (String) -> Unit,
     private val onSessionCreated: (Session) -> Unit,
 ) {
     private val lock = Any()
     private val mutableOperations = MutableStateFlow<Set<OperationKey>>(emptySet())
     val operations = mutableOperations.asStateFlow()
-    private val mutableDirectories = MutableStateFlow<Map<BrowserKey, LoadState<Listing>>>(emptyMap())
-    val directories = mutableDirectories.asStateFlow()
-    private val directoryRequests = mutableMapOf<BrowserKey, Long>()
+    private val mutableDirectory = MutableStateFlow<DirectoryLoad?>(null)
+    val directory = mutableDirectory.asStateFlow()
+    private var directoryRequest: Long? = null
     private var nextDirectoryRequest = 0L
 
     fun pair(url: String, token: String, attemptId: Long) = run(OperationKey.PairHost,
@@ -72,28 +73,32 @@ internal class HostOperations(
     fun reconnectUnavailableHosts() = actions.reconnectUnavailableHosts()
 
     fun forget(hostId: String) = run(OperationKey.Host(hostId)) {
+        onHostForgetting(hostId)
         actions.forget(hostId)
         onHostForgotten(hostId)
         synchronized(lock) {
-            directoryRequests.keys.removeAll { it.hostId == hostId }
-            mutableDirectories.value = mutableDirectories.value.filterKeys { it.hostId != hostId }
+            if (mutableDirectory.value?.key?.hostId == hostId) {
+                directoryRequest = null
+                mutableDirectory.value = null
+            }
         }
     }
 
     fun loadDirectory(key: BrowserKey, forceRefresh: Boolean = false) {
         val request = synchronized(lock) {
-            if (!forceRefresh && mutableDirectories.value[key] == LoadState.Loading) return
+            if (!forceRefresh && mutableDirectory.value == DirectoryLoad(key, LoadState.Loading)) return
             (++nextDirectoryRequest).also {
-                directoryRequests[key] = it
-                mutableDirectories.value += key to LoadState.Loading
+                directoryRequest = it
+                mutableDirectory.value = DirectoryLoad(key, LoadState.Loading)
             }
         }
         scope.launch {
             try {
                 val listing = actions.listing(key.hostId, key.path, forceRefresh)
                 val current = synchronized(lock) {
-                    if (directoryRequests[key] != request) false else {
-                        mutableDirectories.value += key to LoadState.Ready(listing)
+                    if (directoryRequest != request) false else {
+                        directoryRequest = null
+                        mutableDirectory.value = DirectoryLoad(key, LoadState.Ready(listing))
                         true
                     }
                 }
@@ -102,8 +107,10 @@ internal class HostOperations(
                 throw failure
             } catch (failure: Exception) {
                 synchronized(lock) {
-                    if (directoryRequests[key] == request) {
-                        mutableDirectories.value += key to LoadState.Failed(failure.message ?: "Unable to read this directory")
+                    if (directoryRequest == request) {
+                        directoryRequest = null
+                        mutableDirectory.value = DirectoryLoad(key,
+                            LoadState.Failed(failure.message ?: "Unable to read this directory"))
                     }
                 }
             }

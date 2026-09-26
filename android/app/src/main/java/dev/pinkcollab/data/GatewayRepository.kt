@@ -34,7 +34,9 @@ internal class GatewayRepository(
     private val attachments = AttachmentUploader(api, ::paired)
     private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()
     private val sessions = SessionGateway(mutable, api, ::paired, connections::focus)
-    private val commandDispatcher = CommandDispatcher(state, ::paired, api, outboxStorage ?: SqliteCommandOutboxStorage(context))
+    private val hostCommandGate = HostCommandGate()
+    private val commandDispatcher = CommandDispatcher(state, ::paired, api,
+        outboxStorage ?: SqliteCommandOutboxStorage(context), hostCommandGate)
     private val pairedHosts = PairedHostRegistry(credentials, mutable, ::connect, ::disconnect)
 
     init {
@@ -73,8 +75,17 @@ internal class GatewayRepository(
     }
 
     suspend fun forget(id: String) {
-        pairedHosts.forget(id)
-        commandDispatcher.removeHost(id)
+        hostCommandGate.withHostRemoval(id) {
+            pairedHosts.forget(id)
+            try {
+                commandDispatcher.removeHost(id)
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                // The pairing is already removed; still let the UI release its host-owned state.
+                reportError("Host removed, but pending command cleanup failed: ${failure.message}")
+            }
+        }
     }
 
     private fun disconnect(id: String) {

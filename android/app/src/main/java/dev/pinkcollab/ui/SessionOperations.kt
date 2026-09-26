@@ -139,6 +139,11 @@ internal class SessionOperations(
         actions.loadEarlierHistory(session)
     }
 
+    fun cancelHost(hostId: String) {
+        val active = synchronized(lock) { jobs.filterKeys { it.session.hostId == hostId }.values.toList() }
+        active.forEach(Job::cancel)
+    }
+
     private fun cancelSend(key: SessionKey) {
         synchronized(lock) { jobs[SessionOperationKey(key, SessionLane.Send)] }?.cancel()
     }

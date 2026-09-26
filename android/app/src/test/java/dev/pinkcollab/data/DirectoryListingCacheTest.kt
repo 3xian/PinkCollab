@@ -2,10 +2,12 @@ package dev.pinkcollab.data
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -86,6 +88,31 @@ class DirectoryListingCacheTest {
         release.complete(Unit)
         assertEquals(listing, owner.await())
         assertEquals(listing, remainingWaiter.await())
+    }
+
+    @Test
+    fun forcedRefreshReplacesAnInFlightRequest() = runTest {
+        val cache = DirectoryListingCache(backgroundScope)
+        val key = DirectoryListingKey("host", "path")
+        val firstStarted = CompletableDeferred<Unit>()
+        val firstRelease = CompletableDeferred<Unit>()
+        var loads = 0
+        val first = async {
+            cache.getOrLoad(key) {
+                loads++
+                firstStarted.complete(Unit)
+                withContext(NonCancellable) { firstRelease.await() }
+                listing.copy(path = "old")
+            }
+        }
+        firstStarted.await()
+        val refreshed = listing.copy(path = "new")
+        assertEquals(refreshed, cache.getOrLoad(key, forceRefresh = true) { loads++; refreshed })
+        firstRelease.complete(Unit)
+        runCurrent()
+        assertTrue(first.isCancelled)
+        assertEquals(2, loads)
+        assertEquals(refreshed, cache.get(key))
     }
 
     @Test

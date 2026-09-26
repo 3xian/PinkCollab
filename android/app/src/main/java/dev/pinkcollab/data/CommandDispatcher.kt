@@ -11,6 +11,7 @@ internal class CommandDispatcher(
     private val paired: (String) -> PairedHost,
     private val api: GatewayTransport,
     storage: CommandOutboxStorage,
+    private val hostGate: HostCommandGate,
 ) {
     private val pendingCommands = DurableCommandOutbox(storage)
 
@@ -69,15 +70,20 @@ internal class CommandDispatcher(
     }
 
     private suspend fun sendCommand(hostId: String, id: String, action: String, type: String, intentId: String? = null, fields: () -> JSONObject) {
-        val host = paired(hostId)
-        pendingCommands.submit(CommandRequest(hostId, host.clientId, id, action, type, intentId, fields), commandTransport(host, id))
+        hostGate.withHost(hostId) {
+            val host = paired(hostId)
+            pendingCommands.submit(CommandRequest(hostId, host.clientId, id, action, type, intentId, fields), commandTransport(host, id))
+        }
     }
 
     suspend fun recoverPendingCommands() {
         for (pending in pendingCommands.records()) {
-            val host = state.value.hosts[pending.hostId]?.paired?.takeIf { it.clientId == pending.clientId } ?: continue
             try {
-                pendingCommands.recover(pending, commandTransport(host, pending.sessionId))
+                hostGate.withHost(pending.hostId) {
+                    val host = state.value.hosts[pending.hostId]?.paired?.takeIf { it.clientId == pending.clientId }
+                        ?: return@withHost
+                    pendingCommands.recover(pending, commandTransport(host, pending.sessionId))
+                }
             } catch (failure: CancellationException) {
                 throw failure
             } catch (_: Exception) {
