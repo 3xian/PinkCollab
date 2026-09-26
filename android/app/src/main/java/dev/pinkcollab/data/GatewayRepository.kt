@@ -19,7 +19,7 @@ import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-class GatewayRepository(private val scope: CoroutineScope, private val credentials: PairedHostStore) {
+class GatewayRepository(private val scope: CoroutineScope, private val credentials: PairedHostStore, context: Context) {
     private val api = GatewayApi()
     private val mutable = MutableStateFlow(AppState(loadingCredentials = true))
     val state = mutable.asStateFlow()
@@ -27,7 +27,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     private val listings = DirectoryListingCache(scope)
     private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()
     private val pendingCreateIds = ConcurrentHashMap<String, String>()
-    private val pendingCommands = PendingCommandStore()
+    private val pendingCommands = DurableCommandOutbox(SqliteCommandOutboxStorage(context))
     private val pairedHosts = PairedHostRegistry(credentials, mutable, ::connect, ::disconnect)
 
     init {
@@ -38,6 +38,14 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                 throw failure
             } catch (failure: Exception) {
                 mutable.update { it.copy(loadingCredentials = false, error = "Pairing data could not be loaded; pair again: ${failure.message}") }
+                return@launch
+            }
+            try {
+                recoverPendingCommands()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                mutable.update { it.copy(error = "Pending commands could not be recovered: ${failure.message}") }
             }
         }
     }
@@ -81,6 +89,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
 
     suspend fun forget(id: String) {
         pairedHosts.forget(id)
+        pendingCommands.removeHost(id)
     }
 
     private fun disconnect(id: String) {
@@ -257,13 +266,14 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         }
     }
 
-    suspend fun command(hostId: String, id: String, command: String, body: JSONObject = JSONObject()) {
+    suspend fun command(hostId: String, id: String, command: String, body: JSONObject = JSONObject(), intentId: String? = null) {
+        if (command == "prompt") require(!intentId.isNullOrBlank()) { "Prompt intent ID required" }
         val requested = body.toString()
-        sendCommand(hostId, id, "$command:$requested", when (command) {
+        sendCommand(hostId, id, intentId?.let { "$command:intent:$it" } ?: "$command:$requested", when (command) {
             "stop" -> "stop_runtime"
             "start" -> "start_runtime"
             else -> command
-        }) {
+        }, intentId) {
             val input = JSONObject(requested)
             val session = state.value.details[id]?.session ?: state.value.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
             val generation = session?.runtimeGeneration
@@ -288,14 +298,28 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         }
     }
 
-    private suspend fun sendCommand(hostId: String, id: String, action: String, type: String, fields: () -> JSONObject) {
+    private suspend fun sendCommand(hostId: String, id: String, action: String, type: String, intentId: String? = null, fields: () -> JSONObject) {
         val p = paired(hostId)
-        submitPendingCommand(
-            pendingCommands, "$hostId:$id:$action", type, fields,
-            post = { body -> JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/commands", "POST", body)) },
-            lookup = { commandId -> JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/operations/$commandId")) },
-        )
+        pendingCommands.submit(CommandRequest(hostId, p.clientId, id, action, type, intentId, fields), commandTransport(p, id))
     }
+
+    private suspend fun recoverPendingCommands() {
+        for (pending in pendingCommands.records()) {
+            val host = state.value.hosts[pending.hostId]?.paired?.takeIf { it.clientId == pending.clientId } ?: continue
+            try {
+                pendingCommands.recover(pending, commandTransport(host, pending.sessionId))
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (_: Exception) {
+                // Leave the record available for the next restart or the user's retry.
+            }
+        }
+    }
+
+    private fun commandTransport(host: PairedHost, sessionId: String) = CommandTransport(
+        post = { body -> JSONObject(api.request(host.url, host.credential, "/api/v2/sessions/$sessionId/commands", "POST", body)) },
+        lookup = { commandId -> JSONObject(api.request(host.url, host.credential, "/api/v2/sessions/$sessionId/operations/$commandId")) },
+    )
 }
 
 internal fun historyCursor(page: JSONObject): String? = (page.opt("nextCursor") as? String)?.takeIf { it.isNotBlank() }
@@ -317,71 +341,6 @@ private suspend fun parseHistoryPage(raw: String): HistoryPage = withContext(Dis
 
 internal suspend fun <T> awaitSnapshot(state: kotlinx.coroutines.flow.StateFlow<T>, message: String, ready: (T) -> Boolean) {
     withTimeoutOrNull(15_000) { state.first(ready) } ?: throw IOException(message)
-}
-
-internal data class PendingCommand(val id: String, val payload: String) {
-    @Volatile var attempted = false
-    @Volatile var lookupOnly = false
-}
-
-internal class PendingCommandStore {
-    private val values = ConcurrentHashMap<String, PendingCommand>()
-    fun getOrCreate(key: String, create: () -> PendingCommand): PendingCommand = values.computeIfAbsent(key) { create() }
-    fun remove(key: String, pending: PendingCommand) { values.remove(key, pending) }
-}
-
-internal suspend fun submitPendingCommand(
-    commands: PendingCommandStore,
-    key: String,
-    type: String,
-    fields: () -> JSONObject,
-    post: suspend (JSONObject) -> JSONObject,
-    lookup: suspend (String) -> JSONObject,
-) {
-    val pending = commands.getOrCreate(key) {
-        val commandId = UUID.randomUUID().toString()
-        PendingCommand(commandId, JSONObject(fields().toString()).put("type", type).put("commandId", commandId).toString())
-    }
-    val commandId = pending.id
-    if (pending.attempted) {
-        val known = runCatching { lookup(commandId) }.getOrNull()
-        if (known != null) {
-            if (known.optString("status") != "outcome_unknown") commands.remove(key, pending)
-            checkReceipt(known)
-            return
-        }
-        if (pending.lookupOnly) throw IOException("Command outcome unconfirmed; inspect the session before retrying command $commandId")
-    }
-    pending.attempted = true
-    val response = try {
-        post(JSONObject(pending.payload))
-    } catch (error: IOException) {
-        if (error is GatewayHttpException && error.statusCode in 400..499 && error.statusCode != 408 && error.statusCode != 429) {
-            commands.remove(key, pending)
-            throw error
-        }
-        val known = runCatching { lookup(commandId) }.getOrNull()
-        if (known == null) throw IOException("Command outcome unconfirmed. Retry the same action to query command $commandId.", error)
-        if (known.optString("status") != "outcome_unknown") commands.remove(key, pending)
-        checkReceipt(known)
-        return
-    }
-    if (!response.optBoolean("receiptStored", true)) {
-        pending.lookupOnly = true
-        throw IOException("Stop sent, but its receipt could not be saved; verify the runtime state")
-    }
-    val receipt = response.getJSONObject("operation")
-    if (receipt.optString("status") != "outcome_unknown") commands.remove(key, pending)
-    checkReceipt(receipt)
-}
-
-private fun checkReceipt(receipt: JSONObject) {
-    val status = receipt.optString("status")
-    if (status == "outcome_unknown") throw IOException("Command ${receipt.optString("commandId")} has an unconfirmed outcome; inspect the session before sending another command")
-    if (status == "failed" || status == "cancelled") {
-        val error = receipt.optJSONObject("error")
-        throw IOException(error?.optString("message")?.takeIf { it.isNotBlank() } ?: "Command $status")
-    }
 }
 
 internal fun <S, R> updateAtomically(state: MutableStateFlow<S>, reduce: (S) -> Pair<S, R>): R {

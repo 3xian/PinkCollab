@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 class CollabViewModel(application: Application, savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
-    val repository = GatewayRepository(viewModelScope, CredentialStore(application))
+    val repository = GatewayRepository(viewModelScope, CredentialStore(application), application)
     private val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {

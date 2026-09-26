@@ -101,7 +101,7 @@ jobs:
           if ("${{ runner.os }}" -ne "Windows") { chmod 755 $destination }
       - name: Install tarballs and test launcher
         run: node npm/scripts/smoke-package.mjs "${{ matrix.id }}" "dist/${{ matrix.id }}/${{ matrix.binary }}"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: gateway-${{ matrix.id }}
           path: dist/${{ matrix.id }}/${{ matrix.binary }}
@@ -156,7 +156,7 @@ jobs:
         run: |
           mkdir -p ../dist/android
           cp app/build/outputs/apk/release/app-release.apk ../dist/android/pinkcollab-android.apk
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: android-release
           path: dist/android/pinkcollab-android.apk
@@ -180,7 +180,7 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           pattern: gateway-*
           path: artifacts
@@ -221,11 +221,11 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           pattern: gateway-*
           path: artifacts
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v7
         with:
           name: android-release
           path: release-assets

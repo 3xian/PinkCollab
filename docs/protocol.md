@@ -31,7 +31,7 @@ Creation body: `{commandId,hostId,cwd,title?}`. The Gateway canonicalizes and ch
 
 ## Commands and receipts
 
-Every command has a client-generated `commandId`, unique within `(clientId,sessionId)`. Retrying the same ID and semantic body returns the current receipt without another dispatch. Receipts are retained with the session management record. After an uncertain response, the Android client keeps the original ID and serialized payload in memory, looks up the receipt, and resends only that same command when needed. Pending retries do not survive an app restart.
+Every command has a client-generated `commandId`, unique within `(clientId,sessionId)`. Retrying the same ID and semantic body returns the current receipt without another dispatch. Receipts are retained with the session management record. Android stores each pending command and its encrypted payload in a separate SQLite row before sending it. A conditional update claims the row before POST, so an unsent row deleted by a newer draft cannot later be posted by recovery. On app restart Android queries pending receipts and, when safe, resends only the original ID and payload. Each prompt draft has a stable intent ID used directly as its `commandId`: even when a terminal receipt removes the local row, an older restored draft checks that ID on the Gateway before posting. Android checks unresolved earlier prompts before sending an edited draft. A Stop whose response may have been lost remains lookup-only and is never automatically resent. During receipt lookup, only an exact `operation_not_found` response counts as absence; other failures preserve the pending command.
 
 ```json
 {"commandId":"example-1","type":"prompt","delivery":"start","message":"Check the build"}

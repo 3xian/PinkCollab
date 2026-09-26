@@ -29,7 +29,7 @@ class SessionOperationsTest {
             finishUpload.await()
         }
 
-        override suspend fun command(session: Session, command: String, body: JSONObject) {
+        override suspend fun command(session: Session, command: String, body: JSONObject, intentId: String?) {
             commands += command
         }
 

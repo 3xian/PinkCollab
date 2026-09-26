@@ -128,7 +128,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       - run: chmod +x gradlew
       - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: pinkcollab-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk

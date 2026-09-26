@@ -5,6 +5,7 @@ import android.net.Uri
 import dev.pinkcollab.data.GatewayRepository
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
+import dev.pinkcollab.data.TerminalCommandFailure
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -19,7 +20,7 @@ import org.json.JSONObject
 
 internal interface SessionActions {
     suspend fun upload(session: Session, file: SelectedFile)
-    suspend fun command(session: Session, command: String, body: JSONObject = JSONObject())
+    suspend fun command(session: Session, command: String, body: JSONObject = JSONObject(), intentId: String? = null)
     suspend fun selectModel(session: Session, model: ModelInfo)
     suspend fun setThinkingLevel(session: Session, level: String)
     suspend fun loadSavedHistory(session: Session)
@@ -33,8 +34,8 @@ internal class RepositorySessionActions(
     override suspend fun upload(session: Session, file: SelectedFile) =
         repository.uploadFile(application, session.hostId, session.id, file.id, file.name, Uri.parse(file.uri))
 
-    override suspend fun command(session: Session, command: String, body: JSONObject) =
-        repository.command(session.hostId, session.id, command, body)
+    override suspend fun command(session: Session, command: String, body: JSONObject, intentId: String?) =
+        repository.command(session.hostId, session.id, command, body, intentId)
 
     override suspend fun selectModel(session: Session, model: ModelInfo) =
         repository.selectModel(session.hostId, session.id, model)
@@ -89,11 +90,17 @@ internal class SessionOperations(
         val key = SessionKey(session.hostId, session.id)
         val draft = drafts.state.value[key] ?: return
         if (draft.text.isBlank() && draft.files.isEmpty()) return
+        drafts.markSendStarted(key, draft.version)
         launch(key, SessionLane.Send) {
             draft.files.forEach { actions.upload(session, it) }
             currentCoroutineContext().ensureActive()
-            actions.command(session, "prompt", JSONObject().put("message", draft.text)
-                .put("fileIds", JSONArray(draft.files.map { it.id })))
+            try {
+                actions.command(session, "prompt", JSONObject().put("message", draft.text)
+                    .put("fileIds", JSONArray(draft.files.map { it.id })), draft.intentId)
+            } catch (failure: TerminalCommandFailure) {
+                drafts.rotateFailedIntent(key, draft.version, draft.intentId)
+                throw failure
+            }
             clearSentDraft(key, draft.version)
         }
     }
