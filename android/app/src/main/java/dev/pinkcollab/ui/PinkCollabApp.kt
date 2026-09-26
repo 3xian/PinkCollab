@@ -12,7 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -24,18 +23,18 @@ import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.CancellationException
-import org.json.JSONObject
-import org.json.JSONArray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val repo = vm.repository
-    val context = LocalContext.current.applicationContext
     val app by repo.state.collectAsStateWithLifecycle()
     val operations by vm.operations.collectAsStateWithLifecycle()
+    val sessionOperations by vm.sessionOperations.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
     val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
+    val drafts by vm.drafts.collectAsStateWithLifecycle()
+    val fileSelections by vm.fileSelections.collectAsStateWithLifecycle()
     var route by rememberSaveable(stateSaver = AppRouteSaver) { mutableStateOf<AppRoute>(AppRoute.Tasks) }
     var pairHost by rememberSaveable(stateSaver = PairHostSheetStateSaver) {
         mutableStateOf(PairHostSheetState())
@@ -134,49 +133,25 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             detailLoads = detailLoads,
                             modelLoads = modelLoads,
                             operations = operations,
+                            sessionOperations = sessionOperations,
+                            drafts = drafts,
+                            fileSelections = fileSelections,
                             selectedSessionId = selectedSessionId,
                             onSessionSelected = { selectedSessionId = it },
                             openResources = { route = AppRoute.Resources },
                             connectHost = { pairHost = PairHostSheetState(visible = true) },
                             loadSession = vm::loadDetail,
                             loadModels = vm::loadModels,
-                            onPrompt = { session, message, files, onSent ->
-                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    files.forEach { repo.uploadFile(context, session.hostId, session.id, it.id, it.name, it.uri) }
-                                    repo.command(session.hostId, session.id, "prompt", JSONObject().put("message", message).put("fileIds", JSONArray(files.map { it.id })))
-                                    onSent()
-                                }
-                            },
-                            onCommand = { session, command ->
-                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.command(session.hostId, session.id, command)
-                                }
-                            },
-                            onRespond = { session, body ->
-                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.command(session.hostId, session.id, "respond", body)
-                                }
-                            },
-                            onSelectModel = { session, model ->
-                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.selectModel(session.hostId, session.id, model)
-                                }
-                            },
-                            onSetThinkingLevel = { session, level ->
-                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.setThinkingLevel(session.hostId, session.id, level)
-                                }
-                            },
-                            onLoadSavedHistory = { session ->
-                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.loadSavedHistory(session.hostId, session.id)
-                                }
-                            },
-                            onLoadEarlier = { session ->
-                                vm.run(OperationKey.Session(SessionKey(session.hostId, session.id))) {
-                                    repo.loadEarlierHistory(session.hostId, session.id)
-                                }
-                            },
+                            onPrompt = vm::sendPrompt,
+                            onDraftTextChange = vm::setDraftText,
+                            onFileSelected = vm::selectDraftFile,
+                            onFileRemoved = vm::removeDraftFile,
+                            onCommand = vm::sessionCommand,
+                            onRespond = vm::respond,
+                            onSelectModel = vm::selectModel,
+                            onSetThinkingLevel = vm::setThinkingLevel,
+                            onLoadSavedHistory = vm::loadSavedHistory,
+                            onLoadEarlier = vm::loadEarlierHistory,
                         )
 
                         AppRoute.Resources -> ResourcesScreen(
@@ -191,7 +166,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                     repo.requestReconnect(hostId)
                                 }
                             },
-                            forget = { hostId -> vm.run(OperationKey.Host(hostId)) { repo.forget(hostId) } },
+                            forget = { hostId -> vm.run(OperationKey.Host(hostId)) { repo.forget(hostId); vm.removeHostDrafts(hostId) } },
                         )
 
                         is AppRoute.Browser -> BrowserRoute(

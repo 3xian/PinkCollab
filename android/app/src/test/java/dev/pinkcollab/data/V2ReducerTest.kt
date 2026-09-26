@@ -3,6 +3,7 @@ package dev.pinkcollab.data
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class V2ReducerTest {
@@ -93,5 +94,76 @@ class V2ReducerTest {
         assertEquals(listOf("abc"), updated.details.getValue("session").liveItems.map { it.text })
         val reset = reduceV2(updated, "host", change(2, "v2.timeline.reset", JSONObject())).state
         assertEquals(0, reset.details.getValue("session").liveItems.size)
+    }
+
+    @Test fun live_patch_after_loading_saved_history_keeps_the_live_view_separate() {
+        val hostState = reduceV2(app(), "host", hostSnapshot()).state
+        val runtime = JSONObject().put("generation", "run-one").put("phase", "ready")
+            .put("execution", "active").put("pendingInputs", org.json.JSONArray())
+        val snapshot = JSONObject().put("type", "snapshot").put("resource", "session/session")
+            .put("subscriptionId", "session-sub")
+            .put("cursor", JSONObject().put("epoch", "epoch").put("revision", 0))
+            .put("payload", JSONObject().put("session", record).put("runtime", runtime)
+                .put("messages", org.json.JSONArray()).put("recentOperations", org.json.JSONArray()))
+        val baseline = reduceV2(hostState, "host", snapshot).state
+        val history = TimelineItem("saved", "user", "older", "", "")
+        val detail = baseline.details.getValue("session").copy(historyItems = listOf(history))
+        val withHistory = baseline.copy(details = baseline.details + ("session" to detail))
+        val live = JSONObject().put("id", "live").put("kind", "assistant")
+            .put("text", "current").put("detail", "").put("timestamp", "")
+        val patch = JSONObject().put("type", "change").put("resource", "session/session")
+            .put("subscriptionId", "session-sub").put("epoch", "epoch")
+            .put("baseRevision", 0).put("revision", 1)
+            .put("changes", org.json.JSONArray().put(JSONObject().put("type", "v2.timeline.patch")
+                .put("value", JSONObject().put("items", org.json.JSONArray().put(live))
+                    .put("removedIds", org.json.JSONArray()))))
+        val updated = reduceV2(withHistory, "host", patch).state.details.getValue("session")
+        assertEquals(listOf("saved"), updated.historyItems.map { it.id })
+        assertEquals(listOf("live"), updated.liveItems.map { it.id })
+    }
+
+    @Test fun runtime_exit_clears_previous_history_until_the_new_page_arrives() {
+        val hostState = reduceV2(app(), "host", hostSnapshot()).state
+        val runtime = JSONObject().put("generation", "run-one").put("phase", "ready")
+            .put("execution", "quiescent").put("pendingInputs", org.json.JSONArray())
+        val snapshot = JSONObject().put("type", "snapshot").put("resource", "session/session")
+            .put("subscriptionId", "session-sub")
+            .put("cursor", JSONObject().put("epoch", "epoch").put("revision", 0))
+            .put("payload", JSONObject().put("session", record).put("runtime", runtime)
+                .put("messages", org.json.JSONArray()).put("recentOperations", org.json.JSONArray()))
+        val baseline = reduceV2(hostState, "host", snapshot).state
+        val oldHistory = TimelineItem("saved", "user", "older", "", "")
+        val detail = baseline.details.getValue("session").copy(
+            historyItems = listOf(oldHistory), historySourceId = "old-source", nextHistoryCursor = "older",
+        )
+        val withHistory = baseline.copy(details = baseline.details + ("session" to detail))
+        val exit = JSONObject().put("type", "change").put("resource", "session/session")
+            .put("subscriptionId", "session-sub").put("epoch", "epoch")
+            .put("baseRevision", 0).put("revision", 1)
+            .put("changes", org.json.JSONArray().put(JSONObject().put("type", "v2.runtime.exited")
+                .put("value", JSONObject())))
+        val result = reduceV2(withHistory, "host", exit)
+        assertEquals("session", result.historySessionId)
+        assertEquals(emptyList<TimelineItem>(), result.state.details.getValue("session").historyItems)
+        assertNull(result.state.details.getValue("session").historySourceId)
+        assertNull(result.state.details.getValue("session").nextHistoryCursor)
+
+        val previousRequest = HistoryRequest("session-sub", result.state.details.getValue("session").historyEpoch)
+        val nextRuntime = JSONObject().put("generation", "run-two").put("phase", "ready")
+            .put("execution", "quiescent").put("pendingInputs", org.json.JSONArray())
+        val attach = JSONObject().put("type", "change").put("resource", "session/session")
+            .put("subscriptionId", "session-sub").put("epoch", "epoch")
+            .put("baseRevision", 1).put("revision", 2)
+            .put("changes", org.json.JSONArray().put(JSONObject().put("type", "v2.runtime.updated")
+                .put("value", JSONObject().put("runtime", nextRuntime))))
+        val secondRuntime = reduceV2(result.state, "host", attach).state
+        val secondExit = JSONObject().put("type", "change").put("resource", "session/session")
+            .put("subscriptionId", "session-sub").put("epoch", "epoch")
+            .put("baseRevision", 2).put("revision", 3)
+            .put("changes", org.json.JSONArray().put(JSONObject().put("type", "v2.runtime.exited")
+                .put("value", JSONObject())))
+        val latest = reduceV2(secondRuntime, "host", secondExit).state.details.getValue("session")
+        assertNull(latest.session.runtimeGeneration)
+        assertTrue(!previousRequest.matches(latest))
     }
 }

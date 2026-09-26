@@ -17,6 +17,11 @@ class TaskListLoadStateTest {
     }
 
     @Test
+    fun `credential loading does not briefly show onboarding`() {
+        assertEquals(TaskListLoadState.Loading, AppState(loadingCredentials = true).taskListLoadState)
+    }
+
+    @Test
     fun `host without snapshot is loading`() {
         assertEquals(
             TaskListLoadState.Loading,

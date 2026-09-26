@@ -651,6 +651,35 @@ async fn v2_resume_keeps_transcript_and_uses_new_generation() {
         "succeeded",
     )
     .await;
+    assert_eq!(
+        client
+            .post(&commands)
+            .bearer_auth(&credential)
+            .json(&json!({"commandId":"late-prompt","type":"prompt","delivery":"start","message":"must not restart","expectedGeneration":old_generation}))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    let rejected = wait_operation(
+        &client,
+        &format!("{session_url}/operations/late-prompt"),
+        &credential,
+        "failed",
+    )
+    .await;
+    assert_eq!(rejected["error"]["code"], "runtime_required");
+    let after_stop: Value = client
+        .get(&session_url)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(after_stop["runtime"].is_null());
     let page: Value = client
         .get(format!("{session_url}/history?limit=1"))
         .bearer_auth(&credential)
@@ -710,7 +739,7 @@ async fn v2_resume_keeps_transcript_and_uses_new_generation() {
             .post(&commands)
             .bearer_auth(&credential)
             .json(
-                &json!({"commandId":"second","type":"prompt","delivery":"start","message":"again"})
+                &json!({"commandId":"second","type":"prompt","delivery":"start","message":"again","expectedGeneration":new_generation})
             )
             .send()
             .await

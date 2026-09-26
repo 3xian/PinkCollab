@@ -1,6 +1,8 @@
 package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.TimelineItem
+import dev.pinkcollab.data.Session
+import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.ToolArguments
 import dev.pinkcollab.data.ToolTrace
 import org.json.JSONObject
@@ -27,6 +29,16 @@ class SessionDisplayProjectionTest {
         timestamp = "2026-09-20T00:00:00Z",
         tool = ToolTrace(id, name, arguments, result, error, completed = true),
     )
+
+    @Test fun saved_history_and_back_to_live_use_distinct_sources() {
+        val session = Session("session", "host", "/work", "Task", "running", "", false, null, "", "", true, "run")
+        val live = message("live", "assistant", "current")
+        val saved = message("saved", "user", "older")
+        val detail = SessionDetail(session = session, liveItems = listOf(live), historyItems = listOf(saved))
+        assertEquals(listOf("saved"), visibleSessionItems(detail, true).map { it.id })
+        assertEquals(listOf("live"), visibleSessionItems(detail, false).map { it.id })
+        assertEquals(listOf("saved"), visibleSessionItems(detail.copy(session = session.copy(runtimeAttached = false)), false).map { it.id })
+    }
 
     @Test fun conciseProjectionGroupsStagesAndAssistantTextEndsAGroup() {
         val projected = projectSessionTimeline(

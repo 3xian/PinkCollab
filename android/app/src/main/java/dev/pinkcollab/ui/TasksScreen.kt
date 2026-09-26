@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import android.net.Uri
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import kotlinx.coroutines.launch
@@ -38,14 +39,20 @@ internal fun TasksScreen(
     detailLoads: Map<SessionKey, LoadState<Unit>>,
     modelLoads: Map<SessionKey, LoadState<ModelCatalog>>,
     operations: Set<OperationKey>,
+    sessionOperations: Set<SessionOperationKey>,
+    drafts: Map<SessionKey, SessionDraft>,
+    fileSelections: Map<SessionKey, Int>,
     selectedSessionId: String,
     onSessionSelected: (String) -> Unit,
     openResources: () -> Unit,
     connectHost: () -> Unit,
     loadSession: (Session, Boolean) -> Unit,
     loadModels: (Session, Boolean) -> Unit,
-    onPrompt: (Session, String, List<SelectedFile>, () -> Unit) -> Unit,
-    onCommand: (Session, String) -> Unit,
+    onPrompt: (Session) -> Unit,
+    onDraftTextChange: (SessionKey, String) -> Unit,
+    onFileSelected: (SessionKey, Uri) -> Unit,
+    onFileRemoved: (SessionKey, String) -> Unit,
+    onCommand: (Session, SessionUserCommand) -> Unit,
     onRespond: (Session, JSONObject) -> Unit,
     onSelectModel: (Session, ModelInfo) -> Unit,
     onSetThinkingLevel: (Session, String) -> Unit,
@@ -117,7 +124,7 @@ internal fun TasksScreen(
                 val session = sessions[pageIndex]
                 val key = SessionKey(session.hostId, session.id)
                 val detail = app.details[session.id]
-                LaunchedEffect(key, pagerState.currentPage) {
+                LaunchedEffect(key, pagerState.currentPage, app.hosts[session.hostId]?.subscriptionId) {
                     if (pageIndex == pagerState.currentPage) loadSession(session, true)
                 }
                 val detailState = detail?.let { LoadState.Ready(it) }
@@ -128,9 +135,14 @@ internal fun TasksScreen(
                 SessionPage(
                     state = detailState,
                     host = app.hosts[session.hostId],
-                    busy = OperationKey.Session(key) in operations,
+                    draft = drafts[key] ?: SessionDraft(),
+                    selectingFiles = fileSelections[key] ?: 0,
+                    activity = sessionOperations.activity(key),
                     onRetry = { loadSession(session, true) },
-                    onPrompt = { message, files, onSent -> onPrompt(session, message, files, onSent) },
+                    onPrompt = { onPrompt(session) },
+                    onDraftTextChange = { onDraftTextChange(key, it) },
+                    onFileSelected = { onFileSelected(key, it) },
+                    onFileRemoved = { onFileRemoved(key, it) },
                     onCommand = { command -> onCommand(session, command) },
                     onRespond = { body -> onRespond(session, body) },
                     modelState = modelLoads[key],

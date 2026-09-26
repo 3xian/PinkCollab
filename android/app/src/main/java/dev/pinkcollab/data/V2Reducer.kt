@@ -48,7 +48,6 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                 val receipt = payload.optJSONArray("recentOperations")?.objects()?.map { it.receipt() }.orEmpty()
                 val detail = SessionDetail(
                     session = session,
-                    timeline = history + live,
                     model = runtime?.optJSONObject("actualModel")?.modelInfo(),
                     cursor = cursor,
                     subscriptionId = subscriptionId,
@@ -104,17 +103,10 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                         "v2.session.changed" -> {
                             val runtime = value.optJSONObject("runtime")
                             val live = value.getJSONArray("messages").objects().map { it.item() }
-                            updated = updated.copy(
-                                session = updated.session.withRuntime(runtime),
-                                timeline = updated.historyItems + live,
-                                liveItems = live,
-                                model = runtime?.optJSONObject("actualModel")?.modelInfo(),
-                            )
+                            val session = updated.session.withRuntime(runtime)
+                            updated = updated.withRuntimeSession(session, live, runtime?.optJSONObject("actualModel")?.modelInfo())
                         }
-                        "v2.timeline.reset" -> updated = updated.copy(
-                            timeline = updated.historyItems,
-                            liveItems = emptyList(),
-                        )
+                        "v2.timeline.reset" -> updated = updated.copy(liveItems = emptyList())
                         "v2.timeline.patch" -> {
                             val removed = value.getJSONArray("removedIds").strings().toSet()
                             val live = updated.liveItems.filterNot { it.id in removed }.toMutableList()
@@ -122,17 +114,23 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                                 val index = live.indexOfFirst { it.id == item.id }
                                 if (index >= 0) live[index] = item else live.add(item)
                             }
-                            updated = updated.copy(liveItems = live, timeline = updated.historyItems + live)
+                            updated = updated.copy(liveItems = live)
                         }
-                        "v2.runtime.updated" -> updated = updated.copy(
-                            session = applyRuntimeChange(updated.session, "v2.runtime.updated", value),
-                            model = value.optJSONObject("runtime")?.optJSONObject("actualModel")?.modelInfo(),
-                        )
+                        "v2.runtime.updated" -> {
+                            val session = applyRuntimeChange(updated.session, "v2.runtime.updated", value)
+                            updated = updated.withRuntimeSession(
+                                session, updated.liveItems, value.optJSONObject("runtime")?.optJSONObject("actualModel")?.modelInfo(),
+                            )
+                        }
                         "v2.metadata.updated" -> updated = updated.copy(
                             session = updated.session.withMetadata(value.getJSONObject("session")),
                         )
                         "v2.runtime.exited" -> {
-                            updated = updated.copy(session = updated.session.withRuntime(null), liveItems = emptyList())
+                            updated = updated.withRuntimeSession(updated.session.withRuntime(null), emptyList(), null).copy(
+                                historyItems = emptyList(),
+                                historySourceId = null,
+                                nextHistoryCursor = null,
+                            )
                             loadHistory = true
                         }
                         "v2.operation.updated" -> {
@@ -150,6 +148,13 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
         else -> V2Reduction(app)
     }
 }
+
+private fun SessionDetail.withRuntimeSession(session: Session, live: List<TimelineItem>, model: ModelInfo?): SessionDetail = copy(
+    session = session,
+    liveItems = live,
+    model = model,
+    historyEpoch = historyEpoch + if (this.session.runtimeGeneration != session.runtimeGeneration) 1 else 0,
+)
 
 private fun applyRuntimeChange(session: Session, kind: String, value: JSONObject): Session {
     if (kind == "v2.metadata.updated") return session.withMetadata(value.getJSONObject("session"))

@@ -5,6 +5,7 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,27 +13,33 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-class GatewayRepository(private val scope: CoroutineScope, private val credentials: CredentialStore) {
+class GatewayRepository(private val scope: CoroutineScope, private val credentials: PairedHostStore) {
     private val api = GatewayApi()
-    private val mutable = MutableStateFlow(AppState())
+    private val mutable = MutableStateFlow(AppState(loadingCredentials = true))
     val state = mutable.asStateFlow()
     private val connections = HostConnectionSupervisor(scope, api, ::connectionState, ::event)
     private val listings = DirectoryListingCache(scope)
     private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()
     private val pendingCreateIds = ConcurrentHashMap<String, String>()
     private val pendingCommands = PendingCommandStore()
+    private val pairedHosts = PairedHostRegistry(credentials, mutable, ::connect, ::disconnect)
 
     init {
-        runCatching { credentials.read() }.onSuccess { saved ->
-            mutable.update { it.copy(hosts = saved.associate { paired -> paired.host.id to HostState(paired) }) }
-            saved.forEach(::connect)
-        }.onFailure { error("Pairing data could not be decrypted; pair again: ${it.message}") }
+        scope.launch {
+            try {
+                pairedHosts.initialize()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                mutable.update { it.copy(loadingCredentials = false, error = "Pairing data could not be loaded; pair again: ${failure.message}") }
+            }
+        }
     }
 
     fun error(message: String?) { mutable.update { it.copy(error = message) } }
@@ -69,19 +76,17 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
         val response = JSONObject(api.request(base, null, "/api/v2/pair", "POST", JSONObject().put("token", token.trim()).put("name", "PinkCollab Android")))
         require(response.getInt("protocolVersion") == 2) { "Upgrade PinkCollab to connect to this Gateway" }
         val paired = PairedHost(response.getJSONObject("host").host(), base, response.getString("credential"), response.getString("clientId"))
-        val hosts = state.value.hosts + (paired.host.id to HostState(paired))
-        credentials.save(hosts.values.map { it.paired })
-        mutable.update { it.copy(hosts = hosts) }
-        connect(paired)
+        pairedHosts.pair(paired)
     }
 
-    fun forget(id: String) {
-        val hosts = state.value.hosts - id
-        credentials.save(hosts.values.map { it.paired })
+    suspend fun forget(id: String) {
+        pairedHosts.forget(id)
+    }
+
+    private fun disconnect(id: String) {
         connections.forget(id)
         initialSyncTimeouts.remove(id)?.cancel()
         listings.removeHost(id)
-        mutable.update { it.copy(hosts = hosts, details = it.details.filterValues { detail -> detail.session.hostId != id }) }
     }
 
     private fun connect(paired: PairedHost) {
@@ -133,13 +138,18 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     suspend fun refreshHost(id: String) {
         val before = state.value.hosts[id]?.subscriptionId
         connect(paired(id))
-        withTimeout(15_000) { state.first { snapshot -> snapshot.hosts[id]?.subscriptionId?.let { it != before } == true } }
+        awaitSnapshot(state, "Timed out waiting for the host snapshot") {
+            it.hosts[id]?.subscriptionId?.let { subscription -> subscription != before } == true
+        }
     }
 
     fun requestReconnect(id: String) {
-        val host = state.value.hosts[id] ?: return
-        mutable.update { app -> app.copy(hosts = app.hosts + (id to host.copy(initialSync = InitialSyncState.Pending))) }
-        connect(host.paired)
+        if (state.value.hosts[id] == null) return
+        mutable.update { app ->
+            val host = app.hosts[id] ?: return@update app
+            app.copy(hosts = app.hosts + (id to host.copy(initialSync = InitialSyncState.Pending)))
+        }
+        state.value.hosts[id]?.paired?.let(::connect)
     }
 
     fun reconnectUnavailableHosts() {
@@ -175,23 +185,24 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     suspend fun detail(hostId: String, id: String) {
         mutable.update { it.copy(details = it.details - id) }
         connections.focus(hostId, id)
-        withTimeout(15_000) { state.first { it.details[id]?.subscriptionId != null } }
+        awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[id]?.subscriptionId != null }
     }
 
     private suspend fun loadHistory(hostId: String, id: String, subscriptionId: String) {
+        val before = state.value.details[id] ?: return
+        if (before.subscriptionId != subscriptionId) return
+        val request = HistoryRequest(subscriptionId, before.historyEpoch)
         val p = paired(hostId)
-        val page = JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "limit" to "100"))
-        val source = page.optJSONObject("source")?.getString("id")
-        val items = page.getJSONArray("items").objects().map { it.item() }
+        val raw = api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "limit" to "100")
+        val page = parseHistoryPage(raw)
         mutable.update { app ->
             val current = app.details[id] ?: return@update app
-            if (current.subscriptionId != subscriptionId) return@update app
+            if (!request.matches(current)) return@update app
             app.copy(details = app.details + (id to current.copy(
-                timeline = if (current.session.runtimeAttached) current.timeline else items,
-                historyItems = items,
+                historyItems = page.items,
                 liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
-                historySourceId = source,
-                nextHistoryCursor = historyCursor(page),
+                historySourceId = page.source,
+                nextHistoryCursor = page.nextCursor,
             )))
         }
     }
@@ -204,9 +215,10 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     suspend fun loadEarlierHistory(hostId: String, id: String) {
         val before = state.value.details[id] ?: return
         val cursor = before.nextHistoryCursor ?: return
+        val request = HistoryRequest(before.subscriptionId ?: return, before.historyEpoch)
         val p = paired(hostId)
         val page = try {
-            JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "cursor" to cursor))
+            parseHistoryPage(api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "cursor" to cursor))
         } catch (failure: IOException) {
             if ((failure as? GatewayHttpException)?.errorCode == "stale_cursor") {
                 before.subscriptionId?.let { loadHistory(hostId, id, it) }
@@ -214,16 +226,13 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             }
             throw failure
         }
-        val source = page.optJSONObject("source")?.getString("id")
-        val items = page.getJSONArray("items").objects().map { it.item() }
         mutable.update { app ->
             val current = app.details[id] ?: return@update app
-            if (current.subscriptionId != before.subscriptionId || current.historySourceId != source) return@update app
-            val history = items + current.historyItems
+            if (!request.matches(current) || current.historySourceId != page.source) return@update app
+            val history = page.items + current.historyItems
             app.copy(details = app.details + (id to current.copy(
-                timeline = if (current.session.runtimeAttached) current.timeline else history,
                 historyItems = history,
-                nextHistoryCursor = historyCursor(page),
+                nextHistoryCursor = page.nextCursor,
             )))
         }
     }
@@ -263,7 +272,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
                     val delivery = if (session?.runtimeExecution == "active") "steer" else "start"
                     JSONObject().put("delivery", delivery).put("message", input.getString("message"))
                         .also { if (input.has("fileIds")) it.put("fileIds", input.getJSONArray("fileIds")) }
-                        .also { if (delivery == "steer") it.put("expectedGeneration", requireNotNull(generation) { "Runtime required" }) }
+                        .also { if (session?.runtimeAttached == true) it.put("expectedGeneration", requireNotNull(generation) { "Runtime required" }) }
                 }
                 "start" -> JSONObject()
                 "interrupt", "stop" -> JSONObject().put("expectedGeneration", requireNotNull(generation) { "Runtime required" })
@@ -290,6 +299,25 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
 }
 
 internal fun historyCursor(page: JSONObject): String? = (page.opt("nextCursor") as? String)?.takeIf { it.isNotBlank() }
+
+private data class HistoryPage(val source: String?, val items: List<TimelineItem>, val nextCursor: String?)
+
+internal data class HistoryRequest(val subscriptionId: String, val epoch: Long) {
+    fun matches(detail: SessionDetail?): Boolean = detail?.subscriptionId == subscriptionId && detail.historyEpoch == epoch
+}
+
+private suspend fun parseHistoryPage(raw: String): HistoryPage = withContext(Dispatchers.Default) {
+    val page = JSONObject(raw)
+    HistoryPage(
+        source = page.optJSONObject("source")?.getString("id"),
+        items = page.getJSONArray("items").objects().map { it.item() },
+        nextCursor = historyCursor(page),
+    )
+}
+
+internal suspend fun <T> awaitSnapshot(state: kotlinx.coroutines.flow.StateFlow<T>, message: String, ready: (T) -> Boolean) {
+    withTimeoutOrNull(15_000) { state.first(ready) } ?: throw IOException(message)
+}
 
 internal data class PendingCommand(val id: String, val payload: String) {
     @Volatile var attempted = false

@@ -396,6 +396,12 @@ impl SessionController {
                     ));
                 }
                 let (generation, runtime) = match delivery {
+                    Delivery::Start if expected_generation.is_some() => {
+                        self.dispatchable_runtime(
+                            expected_generation.as_deref().unwrap_or_default(),
+                        )
+                        .await?
+                    }
                     Delivery::Start => self.ensure_runtime().await.map_err(start_failure)?,
                     _ => {
                         self.dispatchable_runtime(

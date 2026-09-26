@@ -4,12 +4,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
-internal data class SelectedFile(val uri: Uri, val name: String, val id: String)
+internal data class SelectedFile(val uri: String, val name: String, val id: String)
 
-internal fun selectedFile(context: Context, uri: Uri): SelectedFile {
-    runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+internal suspend fun selectedFile(context: Context, uri: Uri): SelectedFile = withContext(Dispatchers.IO) {
+    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
     val original = runCatching {
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
@@ -25,5 +27,5 @@ internal fun selectedFile(context: Context, uri: Uri): SelectedFile {
     if (reserved) name = "file_$name"
     while (name.toByteArray(Charsets.UTF_8).size > 120) name = name.dropLast(1)
     name = name.trimEnd(' ', '.')
-    return SelectedFile(uri, name.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "attachment", "file_" + UUID.randomUUID().toString().replace("-", ""))
+    SelectedFile(uri.toString(), name.takeIf { it.isNotBlank() && it != "." && it != ".." } ?: "attachment", "file_" + UUID.randomUUID().toString().replace("-", ""))
 }

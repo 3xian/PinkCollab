@@ -1,6 +1,7 @@
 package dev.pinkcollab.ui
 
 import android.graphics.Typeface
+import android.net.Uri
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,10 +58,15 @@ import org.json.JSONObject
 internal fun SessionPage(
     state: LoadState<SessionDetail>,
     host: HostState?,
-    busy: Boolean,
+    draft: SessionDraft,
+    selectingFiles: Int,
+    activity: SessionActivity,
     onRetry: () -> Unit,
-    onPrompt: (String, List<SelectedFile>, () -> Unit) -> Unit,
-    onCommand: (String) -> Unit,
+    onPrompt: () -> Unit,
+    onDraftTextChange: (String) -> Unit,
+    onFileSelected: (Uri) -> Unit,
+    onFileRemoved: (String) -> Unit,
+    onCommand: (SessionUserCommand) -> Unit,
     onRespond: (JSONObject) -> Unit,
     modelState: LoadState<ModelCatalog>?,
     onLoadModels: (Boolean) -> Unit,
@@ -84,18 +90,21 @@ internal fun SessionPage(
     val context = LocalContext.current
     val markwon = remember(context) { Markwon.create(context) }
     val session = detail.session
-    var prompt by rememberSaveable(session.id) { mutableStateOf("") }
-    val selectedFiles = remember(session.id) { mutableStateListOf<SelectedFile>() }
+    val prompt = draft.text
+    val selectedFiles = draft.files
     var fileError by remember(session.id) { mutableStateOf<String?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         fileError = null
+        var count = selectedFiles.size
+        val seen = selectedFiles.map { it.uri }.toMutableSet()
         for (uri in uris) {
-            if (selectedFiles.any { it.uri == uri }) continue
-            if (selectedFiles.size >= 5) {
+            if (!seen.add(uri.toString())) continue
+            if (count >= 5) {
                 fileError = "Up to 5 files per message"
                 break
             }
-            selectedFiles += selectedFile(context, uri)
+            count++
+            onFileSelected(uri)
         }
     }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
@@ -104,13 +113,13 @@ internal fun SessionPage(
     LaunchedEffect(session.runtimeGeneration) { showSavedHistory = false }
     val attached = session.runtimeAttached && host?.connected == true
     val historyMode = showSavedHistory && session.runtimeAttached
-    val visibleItems = if (historyMode) detail.historyItems else detail.timeline
+    val visibleItems = visibleSessionItems(detail, showSavedHistory)
     val displayTimeline = remember(visibleItems) { projectSessionTimeline(visibleItems) }
     val timelineState = rememberLazyListState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
-    val inputEnabled = host?.connected == true && !busy && session.attention == null && session.status != "starting" && session.status != "stopping" && (!session.runtimeAttached || session.runtimeExecution != "unknown")
-    val canSend = (prompt.isNotBlank() || selectedFiles.isNotEmpty()) && inputEnabled
+    val inputEnabled = host?.connected == true && !activity.inputBusy && session.attention == null && session.status != "starting" && session.status != "stopping" && (!session.runtimeAttached || session.runtimeExecution != "unknown")
+    val canSend = (prompt.isNotBlank() || selectedFiles.isNotEmpty()) && inputEnabled && selectingFiles == 0
     var inputFocused by remember { mutableStateOf(false) }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
     LaunchedEffect(timelineState) {
@@ -152,7 +161,7 @@ internal fun SessionPage(
         Brush.linearGradient(listOf(Color.White.copy(alpha = 0.16f), Purple400.copy(alpha = 0.14f)))
     }
     val placeholder = when {
-        detail.timeline.isEmpty() -> "What should OMP do?"
+        visibleItems.isEmpty() -> "What should OMP do?"
         session.status == "running" -> "Steer OMP…"
         else -> "Send another prompt…"
     }
@@ -172,12 +181,12 @@ internal fun SessionPage(
                     showSavedHistory = !showSavedHistory
                     followTimeline = !showSavedHistory
                     if (showSavedHistory) onLoadSavedHistory()
-                }, modifier = Modifier.fillMaxWidth()) {
+                }, modifier = Modifier.fillMaxWidth(), enabled = historyMode || !activity.history) {
                     Text(if (historyMode) "Back to live" else "Saved history")
                 }
             }
             if (detail.nextHistoryCursor != null && (historyMode || !session.runtimeAttached)) item(key = "load-earlier") {
-                TextButton(onClick = onLoadEarlier, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = onLoadEarlier, modifier = Modifier.fillMaxWidth(), enabled = !activity.history) {
                     Text("Load earlier messages")
                 }
             }
@@ -219,7 +228,7 @@ internal fun SessionPage(
                 }
                 Text(text, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = if (receipt.status == "outcome_unknown" || receipt.status == "failed") Red400 else TextMid)
             } }
-            session.attention?.let { attention -> item { AttentionCard(attention, !busy && attached, onRespond) } }
+            session.attention?.let { attention -> item { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
             item(key = "composer-placeholder") {
                 Spacer(
                     Modifier
@@ -272,7 +281,7 @@ internal fun SessionPage(
             Row(verticalAlignment = Alignment.Top) {
                 BasicTextField(
                     value = prompt,
-                    onValueChange = { prompt = it },
+                    onValueChange = onDraftTextChange,
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 58.dp, max = 144.dp)
@@ -296,7 +305,7 @@ internal fun SessionPage(
                         }
                     },
                 )
-                IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = inputEnabled && selectedFiles.size < 5) {
+                IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = inputEnabled && selectedFiles.size + selectingFiles < 5) {
                     Icon(Icons.Outlined.AttachFile, contentDescription = "Attach files")
                 }
             }
@@ -306,7 +315,7 @@ internal fun SessionPage(
                         InputChip(
                             selected = true,
                             enabled = inputEnabled,
-                            onClick = { selectedFiles.remove(file) },
+                            onClick = { onFileRemoved(file.id) },
                             label = { Text(file.name, maxLines = 1) },
                             trailingIcon = { Icon(Icons.Outlined.Close, contentDescription = "Remove ${file.name}", modifier = Modifier.size(14.dp)) },
                         )
@@ -328,33 +337,33 @@ internal fun SessionPage(
                         showModels = true
                         onLoadModels(true)
                     },
-                    enabled = attached && !busy,
+                    enabled = attached && !activity.inputBusy,
                     color = Purple200,
                 )
                 if (!session.runtimeAttached) ComposerActionButton(
                     icon = Icons.Outlined.Tune,
                     label = "Start",
-                    onClick = { onCommand("start") },
-                    enabled = host?.connected == true && !busy,
+                    onClick = { onCommand(SessionUserCommand.Start) },
+                    enabled = host?.connected == true && !activity.inputBusy,
                     color = Purple200,
                 )
                 ComposerActionButton(
                     icon = Icons.Outlined.PauseCircleOutline,
                     label = "Interrupt",
-                    onClick = { onCommand("interrupt") },
-                    enabled = attached && !busy && session.status in listOf("running", "needs_input"),
+                    onClick = { onCommand(SessionUserCommand.Interrupt) },
+                    enabled = attached && !activity.control && session.status in listOf("running", "needs_input"),
                     color = TextMid,
                 )
                 ComposerActionButton(
                     icon = Icons.Outlined.StopCircle,
                     label = "Stop",
                     onClick = { showStopConfirmation = true },
-                    enabled = attached && !busy,
+                    enabled = attached && !activity.control,
                     color = TextMid,
                 )
                 Spacer(Modifier.weight(1f))
                 ComposerSendButton(
-                    onClick = { onPrompt(prompt, selectedFiles.toList()) { prompt = ""; selectedFiles.clear(); fileError = null } },
+                    onClick = { fileError = null; onPrompt() },
                     enabled = canSend,
                 )
             }
@@ -364,7 +373,7 @@ internal fun SessionPage(
         ModelPickerSheet(
             state = modelState,
             current = detail.model,
-            enabled = !busy,
+            enabled = !activity.inputBusy,
             dismiss = { showModels = false },
             retry = { onLoadModels(true) },
             select = { model ->
@@ -382,7 +391,7 @@ internal fun SessionPage(
             dismiss = { showStopConfirmation = false },
             confirm = {
                 showStopConfirmation = false
-                onCommand("stop")
+                onCommand(SessionUserCommand.Stop)
             },
         )
     }

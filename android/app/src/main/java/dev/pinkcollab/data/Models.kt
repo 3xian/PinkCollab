@@ -54,7 +54,6 @@ data class TimelineItem(val id: String, val kind: String, val text: String, val 
 data class OperationReceipt(val commandId: String, val status: String, val commandType: String, val errorCode: String? = null)
 data class SessionDetail(
     val session: Session,
-    val timeline: List<TimelineItem>,
     val streaming: String = "",
     val model: ModelInfo? = null,
     val cursor: Cursor? = null,
@@ -64,6 +63,7 @@ data class SessionDetail(
     val nextHistoryCursor: String? = null,
     val historyItems: List<TimelineItem> = emptyList(),
     val liveItems: List<TimelineItem> = emptyList(),
+    val historyEpoch: Long = 0,
 )
 data class Cursor(val epoch: String, val revision: Long) {
     fun accepts(epoch: String, baseRevision: Long, revision: Long): Boolean =
@@ -97,9 +97,11 @@ data class AppState(
     val hosts: Map<String, HostState> = emptyMap(),
     val details: Map<String, SessionDetail> = emptyMap(),
     val error: String? = null,
+    val loadingCredentials: Boolean = false,
 ) {
     val taskListLoadState: TaskListLoadState
         get() {
+            if (loadingCredentials) return TaskListLoadState.Loading
             val states = hosts.values
             if (states.isEmpty() || states.any { it.sessions.isNotEmpty() }) {
                 return TaskListLoadState.Ready

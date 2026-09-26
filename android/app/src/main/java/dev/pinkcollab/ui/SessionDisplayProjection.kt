@@ -2,6 +2,13 @@ package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.TimelineItem
 import dev.pinkcollab.data.ToolTrace
+import dev.pinkcollab.data.SessionDetail
+
+internal fun visibleSessionItems(detail: SessionDetail, showSavedHistory: Boolean): List<TimelineItem> = when {
+    showSavedHistory && detail.session.runtimeAttached -> detail.historyItems
+    detail.session.runtimeAttached -> detail.liveItems
+    else -> detail.historyItems
+}
 
 enum class SessionDisplayMode { Concise, Debug }
 
