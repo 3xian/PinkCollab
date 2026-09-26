@@ -40,7 +40,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
         mutableStateOf(PairHostSheetState())
     }
     var pairAttemptSequence by rememberSaveable { mutableLongStateOf(0L) }
-    var selectedSessionId by rememberSaveable { mutableStateOf("") }
+    var selectedSession by rememberSaveable(saver = SelectedSessionSaver) { mutableStateOf<SessionKey?>(null) }
     var startupReady by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -136,8 +136,8 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             sessionOperations = sessionOperations,
                             drafts = drafts,
                             fileSelections = fileSelections,
-                            selectedSessionId = selectedSessionId,
-                            onSessionSelected = { selectedSessionId = it },
+                            selectedSession = selectedSession,
+                            onSessionSelected = { selectedSession = it },
                             openResources = { route = AppRoute.Resources },
                             connectHost = { pairHost = PairHostSheetState(visible = true) },
                             loadSession = vm::loadDetail,
@@ -182,7 +182,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                 val operation = OperationKey.CreateTask(current.hostId, path)
                                 vm.run(operation, "Unable to create session") {
                                     val session = repo.create(current.hostId, path)
-                                    selectedSessionId = session.id
+                                    selectedSession = SessionKey(session.hostId, session.id)
                                     route = AppRoute.Tasks
                                     vm.loadDetail(session)
                                     vm.run(OperationKey.Host(current.hostId)) { repo.refreshHost(current.hostId) }

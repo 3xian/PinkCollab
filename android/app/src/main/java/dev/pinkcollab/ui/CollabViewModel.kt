@@ -179,7 +179,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun loadDetail(session: Session, force: Boolean = false) {
         val key = SessionKey(session.hostId, session.id)
         val version = synchronized(detailLoadLock) {
-            if (!force && (repository.state.value.details.containsKey(session.id) || mutableDetailLoads.value[key] == LoadState.Loading)) {
+            if (!force && (repository.state.value.details.containsKey(key) || mutableDetailLoads.value[key] == LoadState.Loading)) {
                 null
             } else {
                 mutableDetailLoads.value += key to LoadState.Loading

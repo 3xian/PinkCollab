@@ -42,8 +42,8 @@ internal fun TasksScreen(
     sessionOperations: Set<SessionOperationKey>,
     drafts: Map<SessionKey, SessionDraft>,
     fileSelections: Map<SessionKey, Int>,
-    selectedSessionId: String,
-    onSessionSelected: (String) -> Unit,
+    selectedSession: SessionKey?,
+    onSessionSelected: (SessionKey) -> Unit,
     openResources: () -> Unit,
     connectHost: () -> Unit,
     loadSession: (Session, Boolean) -> Unit,
@@ -63,17 +63,17 @@ internal fun TasksScreen(
     val sessions = app.hosts.values
         .flatMap { it.sessions }
         .sortedWith { a, b -> compareTimestamps(b.createdAt, a.createdAt) }
-    val initialPage = sessions.indexOfFirst { it.id == selectedSessionId }.coerceAtLeast(0)
+    val initialPage = sessions.indexOfFirst { SessionKey(it.hostId, it.id) == selectedSession }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
-    val sessionIds = sessions.map { it.id }
+    val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(selectedSessionId, sessionIds) {
-        val target = sessions.indexOfFirst { it.id == selectedSessionId }
+    LaunchedEffect(selectedSession, sessionKeys) {
+        val target = sessionKeys.indexOf(selectedSession)
         if (target >= 0 && target != pagerState.currentPage) pagerState.scrollToPage(target)
     }
-    LaunchedEffect(pagerState.currentPage, sessionIds) {
-        sessions.getOrNull(pagerState.currentPage)?.let { onSessionSelected(it.id) }
+    LaunchedEffect(pagerState.currentPage, sessionKeys) {
+        sessionKeys.getOrNull(pagerState.currentPage)?.let(onSessionSelected)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -119,11 +119,11 @@ internal fun TasksScreen(
                 modifier = Modifier.weight(1f),
                 beyondViewportPageCount = 1,
                 pageSpacing = 8.dp,
-                key = { sessionIds[it] },
+                key = { sessionKeys[it] },
             ) { pageIndex ->
                 val session = sessions[pageIndex]
                 val key = SessionKey(session.hostId, session.id)
-                val detail = app.details[session.id]
+                val detail = app.details[key]
                 LaunchedEffect(key, pagerState.currentPage, app.hosts[session.hostId]?.subscriptionId) {
                     if (pageIndex == pagerState.currentPage) loadSession(session, true)
                 }

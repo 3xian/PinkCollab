@@ -6,7 +6,7 @@ internal sealed interface LoadState<out T> {
     data class Failed(val message: String) : LoadState<Nothing>
 }
 
-internal data class SessionKey(val hostId: String, val sessionId: String)
+internal typealias SessionKey = dev.pinkcollab.data.SessionKey
 
 internal sealed interface OperationKey {
     data class Host(val hostId: String) : OperationKey

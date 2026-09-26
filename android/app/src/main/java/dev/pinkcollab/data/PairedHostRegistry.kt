@@ -34,7 +34,7 @@ internal class PairedHostRegistry(
     suspend fun forget(id: String) = mutex.withLock {
         withContext(NonCancellable) {
             store.save(state.value.hosts.values.map { it.paired }.filterNot { it.host.id == id })
-            state.update { it.copy(hosts = it.hosts - id, details = it.details.filterValues { detail -> detail.session.hostId != id }) }
+            state.update { it.copy(hosts = it.hosts - id, details = it.details.filterKeys { key -> key.hostId != id }) }
             disconnect(id)
         }
     }

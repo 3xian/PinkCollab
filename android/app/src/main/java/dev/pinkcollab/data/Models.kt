@@ -5,6 +5,7 @@ import org.json.JSONObject
 
 data class Host(val id: String, val name: String, val os: String, val ompVersion: String, val gatewayVersion: String)
 data class PairedHost(val host: Host, val url: String, val credential: String, val clientId: String)
+data class SessionKey(val hostId: String, val sessionId: String)
 data class Attention(val id: String, val type: String, val text: String, val options: List<String>)
 data class ModelInfo(
     val provider: String,
@@ -95,7 +96,7 @@ data class HostState(
 }
 data class AppState(
     val hosts: Map<String, HostState> = emptyMap(),
-    val details: Map<String, SessionDetail> = emptyMap(),
+    val details: Map<SessionKey, SessionDetail> = emptyMap(),
     val error: String? = null,
     val loadingCredentials: Boolean = false,
 ) {

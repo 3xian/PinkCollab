@@ -123,7 +123,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
 
     private fun event(hostId: String, frame: JSONObject) {
         val reduction = updateAtomically(mutable) { app ->
-            val reduced = reduceV2(app, hostId, frame)
+            val reduced = reduceV2(app, hostId, frame, System.currentTimeMillis())
             reduced.state to reduced
         }
         if (frame.optString("type") == "snapshot" && frame.optString("resource") == "host/sessions") {
@@ -137,7 +137,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             }
         }
         reduction.historySessionId?.let { sessionId ->
-            val subscriptionId = state.value.details[sessionId]?.subscriptionId
+            val subscriptionId = state.value.details[SessionKey(hostId, sessionId)]?.subscriptionId
             if (subscriptionId != null) scope.launch {
                 runCatching { loadHistory(hostId, sessionId, subscriptionId) }.onFailure { error(it.message ?: "History unavailable") }
             }
@@ -192,22 +192,24 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     }
 
     suspend fun detail(hostId: String, id: String) {
-        mutable.update { it.copy(details = it.details - id) }
+        val key = SessionKey(hostId, id)
+        mutable.update { it.copy(details = it.details - key) }
         connections.focus(hostId, id)
-        awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[id]?.subscriptionId != null }
+        awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[key]?.subscriptionId != null }
     }
 
     private suspend fun loadHistory(hostId: String, id: String, subscriptionId: String) {
-        val before = state.value.details[id] ?: return
+        val key = SessionKey(hostId, id)
+        val before = state.value.details[key] ?: return
         if (before.subscriptionId != subscriptionId) return
         val request = HistoryRequest(subscriptionId, before.historyEpoch)
         val p = paired(hostId)
         val raw = api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "limit" to "100")
         val page = parseHistoryPage(raw)
         mutable.update { app ->
-            val current = app.details[id] ?: return@update app
+            val current = app.details[key] ?: return@update app
             if (!request.matches(current)) return@update app
-            app.copy(details = app.details + (id to current.copy(
+            app.copy(details = app.details + (key to current.copy(
                 historyItems = page.items,
                 liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
                 historySourceId = page.source,
@@ -217,12 +219,13 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
     }
 
     suspend fun loadSavedHistory(hostId: String, id: String) {
-        val subscriptionId = state.value.details[id]?.subscriptionId ?: return
+        val subscriptionId = state.value.details[SessionKey(hostId, id)]?.subscriptionId ?: return
         loadHistory(hostId, id, subscriptionId)
     }
 
     suspend fun loadEarlierHistory(hostId: String, id: String) {
-        val before = state.value.details[id] ?: return
+        val key = SessionKey(hostId, id)
+        val before = state.value.details[key] ?: return
         val cursor = before.nextHistoryCursor ?: return
         val request = HistoryRequest(before.subscriptionId ?: return, before.historyEpoch)
         val p = paired(hostId)
@@ -236,10 +239,10 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             throw failure
         }
         mutable.update { app ->
-            val current = app.details[id] ?: return@update app
+            val current = app.details[key] ?: return@update app
             if (!request.matches(current) || current.historySourceId != page.source) return@update app
             val history = page.items + current.historyItems
-            app.copy(details = app.details + (id to current.copy(
+            app.copy(details = app.details + (key to current.copy(
                 historyItems = history,
                 nextHistoryCursor = page.nextCursor,
             )))
@@ -254,14 +257,14 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
 
     suspend fun selectModel(hostId: String, id: String, model: ModelInfo) {
         sendCommand(hostId, id, "select_model:${model.provider}:${model.id}", "select_model") {
-            val generation = requireNotNull(state.value.details[id]?.session?.runtimeGeneration) { "Runtime required" }
+            val generation = requireNotNull(state.value.details[SessionKey(hostId, id)]?.session?.runtimeGeneration) { "Runtime required" }
             JSONObject().put("expectedGeneration", generation).put("provider", model.provider).put("modelId", model.id)
         }
     }
 
     suspend fun setThinkingLevel(hostId: String, id: String, level: String) {
         sendCommand(hostId, id, "set_thinking_level:$level", "set_thinking_level") {
-            val generation = requireNotNull(state.value.details[id]?.session?.runtimeGeneration) { "Runtime required" }
+            val generation = requireNotNull(state.value.details[SessionKey(hostId, id)]?.session?.runtimeGeneration) { "Runtime required" }
             JSONObject().put("expectedGeneration", generation).put("level", level)
         }
     }
@@ -275,7 +278,7 @@ class GatewayRepository(private val scope: CoroutineScope, private val credentia
             else -> command
         }, intentId) {
             val input = JSONObject(requested)
-            val session = state.value.details[id]?.session ?: state.value.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
+            val session = state.value.details[SessionKey(hostId, id)]?.session ?: state.value.hosts[hostId]?.sessions?.firstOrNull { it.id == id }
             val generation = session?.runtimeGeneration
             when (command) {
                 "prompt" -> {

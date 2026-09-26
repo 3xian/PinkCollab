@@ -9,7 +9,7 @@ internal data class V2Reduction(
 )
 
 /** Only cursor-valid snapshots and changes may modify a live resource. */
-internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduction {
+internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpochMillis: Long = System.currentTimeMillis()): V2Reduction {
     val host = app.hosts[hostId] ?: return V2Reduction(app)
     val resource = frame.optString("resource")
     return when (frame.optString("type")) {
@@ -26,22 +26,23 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                 V2Reduction(app.copy(
                     hosts = app.hosts + (hostId to host.copy(
                         paired = host.paired.copy(host = identity),
-                        connection = ConnectionState.Online(System.currentTimeMillis()),
+                        connection = ConnectionState.Online(nowEpochMillis),
                         sessions = sessions,
                         workspaces = workspaces,
                         cursor = cursor,
                         subscriptionId = subscriptionId,
                         revision = host.revision + 1,
-                        lastSyncedAtEpochMillis = System.currentTimeMillis(),
+                        lastSyncedAtEpochMillis = nowEpochMillis,
                         initialSync = InitialSyncState.Ready,
                     )),
-                    details = app.details.filterValues { it.session.hostId != hostId },
+                    details = app.details.filterKeys { it.hostId != hostId },
                 ))
             } else {
                 val sessionId = resource.removePrefix("session/")
                 require(resource.startsWith("session/") && payload.getJSONObject("session").getString("id") == sessionId)
                 val runtime = payload.optJSONObject("runtime")
                 val session = payload.getJSONObject("session").session(runtime)
+                require(session.hostId == hostId) { "Session belongs to another host" }
                 val live = payload.getJSONArray("messages").objects().map { it.item() }
                 // A fresh subscription has no source proof for a page cached by the previous one.
                 val history = emptyList<TimelineItem>()
@@ -58,7 +59,7 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                     liveItems = live,
                 )
                 val updatedHost = host.copy(sessions = host.sessions.filterNot { it.id == sessionId } + session, revision = host.revision + 1)
-                V2Reduction(app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (sessionId to detail)),
+                V2Reduction(app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to detail)),
                     historySessionId = if (runtime == null && payload.optString("historyRef").isNotBlank()) sessionId else null)
             }
         }
@@ -90,7 +91,7 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                 V2Reduction(app.copy(hosts = app.hosts + (hostId to host.copy(sessions = sessions, cursor = cursor.copy(revision = revision), revision = host.revision + 1))))
             } else {
                 val sessionId = resource.removePrefix("session/")
-                val detail = app.details[sessionId] ?: return V2Reduction(app, resource)
+                val detail = app.details[SessionKey(hostId, sessionId)] ?: return V2Reduction(app, resource)
                 val cursor = detail.cursor ?: return V2Reduction(app, resource)
                 if (detail.subscriptionId != subscriptionId || cursor.epoch != epoch) return V2Reduction(app, resource)
                 if (revision <= cursor.revision) return V2Reduction(app)
@@ -141,7 +142,7 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject): V2Reduc
                 }
                 updated = updated.copy(cursor = cursor.copy(revision = revision))
                 val updatedHost = host.copy(sessions = host.sessions.filterNot { it.id == sessionId } + updated.session, revision = host.revision + 1)
-                V2Reduction(app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (sessionId to updated)), historySessionId = if (loadHistory) sessionId else null)
+                V2Reduction(app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to updated)), historySessionId = if (loadHistory) sessionId else null)
             }
         }
         "resync_required" -> V2Reduction(app, resource.ifBlank { "host/sessions" })
