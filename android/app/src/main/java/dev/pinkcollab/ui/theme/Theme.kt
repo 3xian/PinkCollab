@@ -5,10 +5,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import dev.pinkcollab.data.SessionStatus
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-
+import dev.pinkcollab.R
+import dev.pinkcollab.data.SessionStatus
 // ── Palette: neutral graphite surfaces with restrained violet accents ────────
 val Base0 = Color(0xFF07070A)
 val Base1 = Color(0xFF101014)
@@ -55,6 +58,30 @@ val PinkCollabScheme = darkColorScheme(
     onErrorContainer = Color(0xFFFFC9D3),
 )
 
+private val MapleMono = FontFamily(
+    Font(R.font.maple_mono_cn_regular, FontWeight.Normal),
+)
+
+private fun TextStyle.sessionFont() = copy(fontFamily = MapleMono, fontSize = (fontSize.value - 0.5f).sp)
+
+private fun Typography.sessionFont() = copy(
+    displayLarge = displayLarge.sessionFont(),
+    displayMedium = displayMedium.sessionFont(),
+    displaySmall = displaySmall.sessionFont(),
+    headlineLarge = headlineLarge.sessionFont(),
+    headlineMedium = headlineMedium.sessionFont(),
+    headlineSmall = headlineSmall.sessionFont(),
+    titleLarge = titleLarge.sessionFont(),
+    titleMedium = titleMedium.sessionFont(),
+    titleSmall = titleSmall.sessionFont(),
+    bodyLarge = bodyLarge.sessionFont(),
+    bodyMedium = bodyMedium.sessionFont(),
+    bodySmall = bodySmall.sessionFont(),
+    labelLarge = labelLarge.sessionFont(),
+    labelMedium = labelMedium.sessionFont(),
+    labelSmall = labelSmall.sessionFont(),
+)
+
 private val DefaultTypography = Typography()
 
 /** Preserve Material 3's label rhythm with a slightly stronger optical size on dark surfaces. */
@@ -64,6 +91,9 @@ val PinkCollabTypography = Typography(
         fontWeight = FontWeight.SemiBold,
     ),
 )
+
+/** Message list only. Heavier weights are synthesized from the bundled regular face. */
+internal val SessionTypography = PinkCollabTypography.sessionFont()
 
 @Composable
 fun PinkCollabTheme(content: @Composable () -> Unit) {

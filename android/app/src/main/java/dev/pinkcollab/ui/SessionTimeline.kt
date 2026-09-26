@@ -3,7 +3,7 @@ package dev.pinkcollab.ui
 import android.graphics.Typeface
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
-
+import androidx.core.content.res.ResourcesCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,7 +18,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.text.font.FontFamily
+
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -134,16 +134,22 @@ private fun MessageCard(item: SessionDisplayItem.Message, markwon: Markwon) {
 
 @Composable
 private fun YouLabel() {
+    SpeakerTitle("You")
+}
+
+@Composable
+private fun SpeakerTitle(text: String, modifier: Modifier = Modifier) {
     Text(
-        "You",
-        style = MaterialTheme.typography.labelMedium,
+        text,
+        modifier = modifier.brandGradientMask(),
+        style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.Bold,
-        color = TextHigh,
     )
 }
 
 @Composable
 private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
+
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) { title() }
         if (time.isNotEmpty()) MessageTime(time)
@@ -153,12 +159,7 @@ private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
 @Composable
 internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (replying) "Agent · replying" else "Agent",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-            color = TextHigh,
-        )
+        SpeakerTitle(if (replying) "Agent · replying" else "Agent")
         model?.let {
             Spacer(Modifier.width(8.dp))
             Surface(
@@ -212,15 +213,16 @@ private fun MessageTime(label: String, modifier: Modifier = Modifier) {
 private fun MarkdownBody(markdown: String, color: Color, markwon: Markwon) {
     val rendered = remember(markwon, markdown) { markwon.toMarkdown(markdown) }
     val textColor = color.toArgb()
+    val textSizeSp = MaterialTheme.typography.bodyMedium.fontSize.value
     AndroidView(
         factory = {
             TextView(it).apply {
                 includeFontPadding = false
-                typeface = Typeface.SANS_SERIF
+                typeface = ResourcesCompat.getFont(it, dev.pinkcollab.R.font.maple_mono_cn) ?: Typeface.MONOSPACE
                 setTextIsSelectable(true)
                 movementMethod = LinkMovementMethod.getInstance()
                 setLineSpacing(0f, 1.18f)
-                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
             }
         },
         update = { view ->
@@ -282,7 +284,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
             TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) {
                 Text(if (expanded) "Collapse" else detailKind.action)
             }
-            if (expanded) Text(group.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
+            if (expanded) Text(group.details, style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
     }
 }
@@ -313,7 +315,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
         Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (item.details.isNotBlank() && item.details != item.text) {
             TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "Collapse" else "View error") }
-            if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = TextMid)
+            if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
     }
 }
@@ -390,7 +392,6 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
                 Text(
                     detail,
                     style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
                     color = TextMid,
                 )
             }

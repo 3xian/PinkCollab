@@ -100,11 +100,23 @@ internal fun composerRailActions(
     add(ComposerRailAction(Icons.AutoMirrored.Outlined.Send, "Send", canSend, sendContentColor, sendFill, onSend))
 }
 
-private val ComposerRailWidth = 88.dp
+/** Leading/trailing inset for composer content; the composer card itself stays unpadded. */
+internal val ComposerContentInset = 14.dp
+
+private val ComposerRailWidth = 72.dp
+
+/** Each rail action keeps a 48 dp touch target even when the composer card is short. */
+private val ComposerRailActionMinHeight = 48.dp
 
 @Composable
 internal fun ComposerRail(actions: List<ComposerRailAction>, modifier: Modifier = Modifier) {
-    Column(Modifier.fillMaxHeight().width(ComposerRailWidth).then(modifier)) {
+    Column(
+        Modifier
+            .fillMaxHeight()
+            .width(ComposerRailWidth)
+            .heightIn(min = ComposerRailActionMinHeight * actions.size)
+            .then(modifier),
+    ) {
         actions.forEachIndexed { index, action ->
             if (index > 0 && action.fill == null) {
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
@@ -171,10 +183,10 @@ internal fun ComposerModelButton(
     Row(
         modifier
             .fillMaxWidth()
-            .heightIn(min = 36.dp)
+            .heightIn(min = 48.dp)
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick))
-            .semantics { contentDescription = description }
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = ComposerContentInset)
+            .semantics { contentDescription = description },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Outlined.Tune, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)

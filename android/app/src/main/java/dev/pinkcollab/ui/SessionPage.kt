@@ -37,6 +37,8 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.PlatformTextStyle
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import io.noties.markwon.Markwon
@@ -144,7 +146,7 @@ internal fun SessionPage(
     // raw IME inset would lift the composer by a whole navigation bar too much.
     val imeOverlap = WindowInsets.ime.getBottom(density) - WindowInsets.navigationBars.getBottom(density)
     val composerImePadding = with(density) { imeOverlap.coerceAtLeast(0).toDp() }
-    val composerShape = RoundedCornerShape(16.dp)
+    val composerShape = RoundedCornerShape(14.dp)
     val composerFill = Brush.verticalGradient(
         listOf(
             MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -157,7 +159,7 @@ internal fun SessionPage(
     } else {
         idleBorder
     }
-    fun Modifier.composerCard(border: Brush) = this
+    fun Modifier.composerCard(border: Brush? = null) = this
         .shadow(
             elevation = 18.dp,
             shape = composerShape,
@@ -165,12 +167,16 @@ internal fun SessionPage(
             ambientColor = Color.Black.copy(alpha = 0.62f),
             spotColor = Purple400.copy(alpha = 0.18f),
         )
-        .border(width = 1.dp, brush = border, shape = composerShape)
+        .then(if (border == null) Modifier else Modifier.border(width = 1.dp, brush = border, shape = composerShape))
         .clip(composerShape)
         .background(composerFill)
     val placeholder = controls.placeholder
 
     Box(Modifier.fillMaxSize()) {
+        MaterialTheme(
+            colorScheme = MaterialTheme.colorScheme,
+            typography = SessionTypography,
+        ) {
         LazyColumn(
             Modifier.fillMaxSize(),
             state = timelineState,
@@ -234,6 +240,7 @@ internal fun SessionPage(
                 )
             }
         }
+        }
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -253,7 +260,7 @@ internal fun SessionPage(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(bottom = composerImePadding)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp)
                 .onSizeChanged { composerHeightPx = it.height },
         ) {
             Row(
@@ -263,19 +270,30 @@ internal fun SessionPage(
                 Column(
                     Modifier
                         .weight(1f)
-                        .composerCard(composerBorder)
-                        .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 8.dp),
+                        .fillMaxHeight()
+                        .composerCard(composerBorder),
+                    verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Row(verticalAlignment = Alignment.Top) {
+                    val composerTextStyle = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 15.sp,
+                        lineHeight = 20.sp,
+                        platformStyle = PlatformTextStyle(includeFontPadding = false),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = ComposerContentInset),
+                        verticalAlignment = Alignment.Top,
+                    ) {
                         BasicTextField(
                             value = prompt,
                             onValueChange = onDraftTextChange,
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 72.dp, max = 180.dp)
+                                .heightIn(min = 48.dp, max = 180.dp)
+                                // Center the first 20sp line beside the 48dp attachment target.
+                                .padding(top = 14.dp)
                                 .onFocusChanged { inputFocused = it.isFocused },
                             enabled = inputEnabled,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            textStyle = composerTextStyle.copy(
                                 color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
                             ),
                             cursorBrush = SolidColor(Purple400),
@@ -285,7 +303,7 @@ internal fun SessionPage(
                                     if (prompt.isEmpty()) {
                                         Text(
                                             placeholder,
-                                            style = MaterialTheme.typography.bodyLarge,
+                                            style = composerTextStyle,
                                             color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
                                         )
                                     }
@@ -293,12 +311,27 @@ internal fun SessionPage(
                                 }
                             },
                         )
-                        IconButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = controls.canAttach) {
-                            Icon(Icons.Outlined.AttachFile, contentDescription = "Attach files")
+                        IconButton(
+                            onClick = rememberHapticOnClick { picker.launch(arrayOf("*/*")) },
+                            enabled = controls.canAttach,
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(
+                                Icons.Outlined.AttachFile,
+                                contentDescription = "Attach files",
+                                modifier = Modifier.size(20.dp),
+                                tint = if (controls.canAttach) TextMid else Gray400.copy(alpha = 0.34f),
+                            )
                         }
                     }
                     if (selectedFiles.isNotEmpty()) {
-                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(start = ComposerContentInset)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
                             selectedFiles.forEach { file ->
                                 InputChip(
                                     selected = true,
@@ -310,13 +343,25 @@ internal fun SessionPage(
                             }
                         }
                     }
-                    fileError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                    fileError?.let {
+                        Text(
+                            it,
+                            modifier = Modifier.padding(horizontal = ComposerContentInset),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     state.sendProgress?.let { progress ->
                         val status = when (progress) {
                             is SendProgress.Uploading -> "Sending file ${progress.fileIndex} of ${progress.fileCount} · ${progress.fileName}"
                             SendProgress.Submitting -> "Sending message…"
                         }
-                        Column(Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = ComposerContentInset)
+                                .semantics { liveRegion = LiveRegionMode.Polite },
+                        ) {
                             Text(status, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 color = TextMid, style = MaterialTheme.typography.bodySmall)
                             Spacer(Modifier.height(6.dp))
@@ -327,7 +372,6 @@ internal fun SessionPage(
                             )
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
                     ComposerModelButton(
                         label = composerModelLabel(detail.model),
                         thinkingLevel = composerThinkingLabel(detail.model),
@@ -351,7 +395,7 @@ internal fun SessionPage(
                         onExit = { showExitConfirmation = true },
                         onSend = { fileError = null; onPrompt() },
                     ),
-                    modifier = Modifier.composerCard(idleBorder),
+                    modifier = Modifier.composerCard(),
                 )
             }
         }
