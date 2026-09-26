@@ -5,7 +5,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -79,10 +78,8 @@ internal fun ResourcesScreen(
                 host.connection == ConnectionState.Synchronizing ||
                 host.connection == ConnectionState.Reconnecting
             val (connectionLabel, connectionColor) = when (host.connection) {
-                ConnectionState.Connecting -> "Connecting…" to Amber300
-                ConnectionState.Synchronizing -> "Syncing…" to Amber300
+                ConnectionState.Connecting, ConnectionState.Synchronizing, ConnectionState.Reconnecting -> "Connecting…" to Amber300
                 is ConnectionState.Online -> "Online" to Teal300
-                ConnectionState.Reconnecting -> "Retrying connection…" to Amber300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
                 ConnectionState.UpgradeRequired -> "App update required" to Red400
@@ -140,22 +137,23 @@ internal fun ResourcesScreen(
                         Spacer(Modifier.width(8.dp))
                         Box(Modifier.size(6.dp).background(connectionColor, CircleShape))
                         Spacer(Modifier.width(5.dp))
-                        Text(
-                            connectionLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = connectionColor,
-                        )
+                        if (connectionPending) {
+                            ConnectingLabel(connectionLabel, connectionColor)
+                        } else {
+                            Text(
+                                connectionLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = connectionColor,
+                            )
+                        }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    if (connectionPending) ConnectionFlowLine(connectionColor)
-                    else HorizontalDivider(thickness = 2.dp, color = Color.White.copy(alpha = 0.08f))
                     Spacer(Modifier.height(12.dp))
                     if (host.workspaces.isEmpty()) {
                         Text(
                             when (host.connection) {
                                 ConnectionState.Connecting, ConnectionState.Synchronizing -> "Loading allowed directories"
                                 is ConnectionState.Online -> "No allowed directories"
-                                ConnectionState.Reconnecting -> "Can't reach this host. Retrying automatically."
+                                ConnectionState.Reconnecting -> "Waiting for host connection"
                                 is ConnectionState.Offline -> "Reconnect this host to load its directories"
                                 ConnectionState.AuthenticationRequired -> "Pair this host again to load its directories"
                                 ConnectionState.UpgradeRequired -> "Update PinkCollab to load directories"
@@ -206,7 +204,8 @@ internal fun ResourcesScreen(
 }
 
 @Composable
-private fun ConnectionFlowLine(color: Color) {
+private fun ConnectingLabel(text: String, color: Color) {
+    var textWidth by remember { mutableFloatStateOf(0f) }
     val transition = rememberInfiniteTransition(label = "hostConnection")
     val progress by transition.animateFloat(
         initialValue = 0f,
@@ -214,24 +213,19 @@ private fun ConnectionFlowLine(color: Color) {
         animationSpec = infiniteRepeatable(tween(1_800, easing = LinearEasing)),
         label = "connectionFlow",
     )
-    Canvas(Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(999.dp))) {
-        val streakWidth = size.width * 0.38f
-        val streakStart = -streakWidth + progress * (size.width + streakWidth)
-        drawRect(color.copy(alpha = 0.14f))
-        drawRect(
+    val streakWidth = textWidth * 0.38f
+    val streakStart = -streakWidth + progress * (textWidth + streakWidth)
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall.copy(
             brush = Brush.linearGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    color.copy(alpha = 0.55f),
-                    Color.White.copy(alpha = 0.95f),
-                    color.copy(alpha = 0.55f),
-                    Color.Transparent,
-                ),
+                colors = listOf(color, color, Color.White, color, color),
                 start = Offset(streakStart, 0f),
-                end = Offset(streakStart + streakWidth, 0f),
+                end = Offset(streakStart + streakWidth.coerceAtLeast(1f), 0f),
             ),
-        )
-    }
+        ),
+        onTextLayout = { textWidth = it.size.width.toFloat() },
+    )
 }
 
 @Composable

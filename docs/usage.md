@@ -2,6 +2,8 @@
 
 Install and pair as described in the [README](../README.md). The phone keeps its Gateway credential encrypted with Android Keystore; provider credentials stay in OMP on the host.
 
+At launch, the animated logo sits over a pulsing pink glow while the app waits for its initial session list.
+
 ## Create and continue a session
 
 Open **Workspaces**, choose a paired host and an allowed directory, then tap **Create session here**. Creation saves a conversation entry without starting OMP or using a process slot. The first prompt starts OMP lazily. **Start** attaches OMP without sending a prompt. Each later prompt can continue the same conversation; an attached process is not required for the conversation to remain available.
@@ -23,5 +25,7 @@ An input card presents OMP's select, confirm, input, or editor request. Only one
 ## Disconnects
 
 A phone disconnect does not stop OMP. Reconnecting replaces the list and open-session live views with fresh subscription snapshots. The app does not queue offline prompts. If the Gateway restarts, it does not reattach old processes; the Session and OMP transcript remain. Starting that Session later creates a new runtime generation. An unclean exit can leave a conservative runtime lease. Run `pinkcollab leases`; after stopping the Gateway and verifying the old OMP process and descendants are gone, run `pinkcollab clear-lease --session <id> --generation <generation> --verified-exited`. The exact generation prevents clearing a newer lease by mistake.
+
+In **Workspaces**, a host shows **Connecting…** while establishing, synchronizing, or automatically retrying its connection. Its directories cannot be opened until it is online.
 
 Removing a host in Android deletes the phone's local connection only. To revoke that device on the Gateway, run `pinkcollab clients` and `pinkcollab revoke --client <clientId>` on the host.
