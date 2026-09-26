@@ -64,11 +64,9 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 .next-steps li:before{content:counter(step);position:absolute;left:0;top:2px;width:23px;height:23px;border-radius:50%;display:grid;place-items:center;font-family:var(--display);font-size:12px;font-weight:700;color:var(--text-inverse);background:var(--amber)}
 .steps-note{margin-top:28px;font-size:14px;line-height:1.7;color:#d3c9d8}
 .limits{border-top:1px solid var(--line)}
-.limits-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
-.limits-list li{background:var(--surface-raised);border:1px solid #45384f;border-radius:16px;padding:22px 24px;font-size:14px;line-height:1.7;color:#d3c9d8}
-.limits-list b{display:block;font-family:var(--display);font-size:15px;font-weight:700;letter-spacing:-.4px;color:var(--amber-soft);margin-bottom:8px}
-.limits-more{margin-top:20px;font-size:14px;color:var(--text-secondary)}
-@media(max-width:960px){.limits-list{grid-template-columns:1fr}}
+.limits-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.limits-list li{position:relative;padding-left:18px;font-size:14px;line-height:1.7;color:#d3c9d8}
+.limits-list li:before{content:'';position:absolute;left:0;top:9px;width:6px;height:6px;border-radius:50%;background:var(--amber)}
 @media(max-width:820px){.route-head{padding:18px 18px 0}.install-route .route-note{padding:12px 18px 16px}pre{padding:14px 18px 20px}.install-next{margin:0 18px}}
 @media(max-width:560px){pre{white-space:pre-wrap;overflow-wrap:anywhere}}
 @media(max-width:480px){.requirement-list{grid-template-columns:1fr;gap:2px}.requirement-list dt{padding-top:12px}.hero-detail code{font-size:12px}.next-steps li{font-size:14px}}
