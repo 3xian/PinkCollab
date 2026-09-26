@@ -63,43 +63,6 @@ internal fun ExitConfirmationDialog(
     )
 }
 
-internal data class ComposerRailAction(
-    val icon: ImageVector,
-    val label: String,
-    val enabled: Boolean,
-    val contentColor: Color,
-    val fill: Brush? = null,
-    val onClick: () -> Unit,
-)
-
-/**
- * Visible labels are not wire names. Stop sends interrupt and aborts the turn.
- * Exit only opens confirmation; the caller sends stop after that.
- */
-internal fun composerRailActions(
-    showStart: Boolean,
-    canStart: Boolean,
-    canInterrupt: Boolean,
-    canExit: Boolean,
-    canSend: Boolean,
-    sendContentColor: Color,
-    sendFill: Brush,
-    onCommand: (SessionUserCommand) -> Unit,
-    onExit: () -> Unit,
-    onSend: () -> Unit,
-): List<ComposerRailAction> = buildList {
-    if (showStart) {
-        add(ComposerRailAction(Icons.Outlined.PlayArrow, "Start", canStart, Purple200) {
-            onCommand(SessionUserCommand.Start)
-        })
-    }
-    add(ComposerRailAction(Icons.Outlined.Stop, "Stop", canInterrupt, TextMid) {
-        onCommand(SessionUserCommand.Interrupt)
-    })
-    add(ComposerRailAction(Icons.AutoMirrored.Outlined.Logout, "Exit", canExit, TextMid, onClick = onExit))
-    add(ComposerRailAction(Icons.AutoMirrored.Outlined.Send, "Send", canSend, sendContentColor, sendFill, onSend))
-}
-
 /** Leading/trailing inset for composer content; the composer card itself stays unpadded. */
 internal val ComposerContentInset = 14.dp
 
@@ -108,31 +71,62 @@ private val ComposerRailMinWidth = 72.dp
 /** Each rail action keeps a 48 dp touch target even when the composer card is short. */
 private val ComposerRailActionMinHeight = 48.dp
 
+/** Stop aborts the turn; Exit opens confirmation before stopping the runtime. */
 @Composable
-internal fun ComposerRail(actions: List<ComposerRailAction>, modifier: Modifier = Modifier) {
+internal fun ComposerRail(
+    showStart: Boolean,
+    controls: SessionControlsState,
+    onCommand: (SessionUserCommand) -> Unit,
+    onExit: () -> Unit,
+    onSend: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         Modifier
             .fillMaxHeight()
             // Expand with scaled labels rather than clipping them inside a fixed-width rail.
             .widthIn(min = ComposerRailMinWidth)
             .width(IntrinsicSize.Max)
-            .heightIn(min = ComposerRailActionMinHeight * actions.size)
+            .heightIn(min = ComposerRailActionMinHeight * (if (showStart) 4 else 3))
             .then(modifier),
     ) {
-        actions.forEachIndexed { index, action ->
-            if (index > 0 && action.fill == null) {
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-            }
+        if (showStart) {
             ComposerRailButton(
-                icon = action.icon,
-                label = action.label,
-                onClick = action.onClick,
-                enabled = action.enabled,
-                contentColor = action.contentColor,
+                icon = Icons.Outlined.PlayArrow,
+                label = "Start",
+                onClick = { onCommand(SessionUserCommand.Start) },
+                enabled = controls.canStart,
+                contentColor = Purple200,
                 modifier = Modifier.weight(1f),
-                fill = action.fill ?: SolidColor(Color.Transparent),
             )
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
         }
+        ComposerRailButton(
+            icon = Icons.Outlined.Stop,
+            label = "Stop",
+            onClick = { onCommand(SessionUserCommand.Interrupt) },
+            enabled = controls.canInterrupt,
+            contentColor = TextMid,
+            modifier = Modifier.weight(1f),
+        )
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
+        ComposerRailButton(
+            icon = Icons.AutoMirrored.Outlined.Logout,
+            label = "Exit",
+            onClick = onExit,
+            enabled = controls.canStop,
+            contentColor = TextMid,
+            modifier = Modifier.weight(1f),
+        )
+        ComposerRailButton(
+            icon = Icons.AutoMirrored.Outlined.Send,
+            label = "Send",
+            onClick = onSend,
+            enabled = controls.canSend,
+            contentColor = if (controls.canSend) MaterialTheme.colorScheme.onPrimary else Gray400.copy(alpha = 0.58f),
+            modifier = Modifier.weight(1f),
+            fill = if (controls.canSend) BrandGradient else SolidColor(Gray400.copy(alpha = 0.16f)),
+        )
     }
 }
 
@@ -144,13 +138,13 @@ private fun ComposerRailButton(
     enabled: Boolean,
     contentColor: Color,
     modifier: Modifier = Modifier,
-    fill: Brush = SolidColor(Color.Transparent),
+    fill: Brush? = null,
 ) {
     val color = if (enabled) contentColor else Gray400.copy(alpha = 0.34f)
     Box(
         modifier
             .fillMaxWidth()
-            .background(fill)
+            .then(if (fill == null) Modifier else Modifier.background(fill))
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick)),
         contentAlignment = Alignment.Center,
     ) {

@@ -175,17 +175,34 @@ internal class DurableCommandOutbox(private val storage: CommandOutboxStorage) {
     suspend fun records(): List<PendingCommand> = storage.records()
 
     suspend fun submit(request: CommandRequest, transport: CommandTransport) {
+        val key = request.key
         if (request.type == "prompt") {
             require(!request.intentId.isNullOrBlank()) { "Prompt intent ID required" }
             settleEarlierPrompts(request, transport.lookup)
             // A restored draft can outlive its local row. Its stable intent ID is also the Gateway ID.
-            if (storage.find(request.key) == null) {
+            if (storage.find(key) == null) {
                 lookupReceipt(transport.lookup, request.intentId)?.let { checkReceipt(it, request.intentId); return }
+            }
+        }
+        // Start can settle after its POST returns; a later tap needs a fresh ID only after that receipt is terminal.
+        if (request.type == "start_runtime") {
+            val previous = storage.find(key)
+            if (previous != null && previous.state != CommandState.PREPARED) {
+                val receipt = lookupReceipt(transport.lookup, previous.id)
+                if (receipt != null) {
+                    when (receipt.getString("status")) {
+                        "succeeded", "failed", "cancelled" -> settle(previous, receipt, allowTerminalFailure = true)
+                        else -> {
+                            settle(previous, receipt)
+                            return
+                        }
+                    }
+                }
             }
         }
         val commandId = request.intentId ?: UUID.randomUUID().toString()
         val pending = storage.insertIfAbsent(PendingCommand(
-            key = request.key, hostId = request.hostId, clientId = request.clientId,
+            key = key, hostId = request.hostId, clientId = request.clientId,
             sessionId = request.sessionId, id = commandId, type = request.type,
             payload = JSONObject(request.fields().toString()).put("type", request.type)
                 .put("commandId", commandId).toString(),

@@ -111,7 +111,6 @@ internal fun SessionPage(
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
     val inputEnabled = controls.inputEnabled
-    val canSend = controls.canSend
     var inputFocused by remember { mutableStateOf(false) }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
     LaunchedEffect(timelineState) {
@@ -383,18 +382,11 @@ internal fun SessionPage(
                     )
                 }
                 ComposerRail(
-                    actions = composerRailActions(
-                        showStart = !session.runtimeAttached,
-                        canStart = controls.canStart,
-                        canInterrupt = controls.canInterrupt,
-                        canExit = controls.canStop,
-                        canSend = canSend,
-                        sendContentColor = if (canSend) MaterialTheme.colorScheme.onPrimary else Gray400.copy(alpha = 0.58f),
-                        sendFill = if (canSend) BrandGradient else SolidColor(Gray400.copy(alpha = 0.16f)),
-                        onCommand = onCommand,
-                        onExit = { showExitConfirmation = true },
-                        onSend = { fileError = null; onPrompt() },
-                    ),
+                    showStart = !session.runtimeAttached,
+                    controls = controls,
+                    onCommand = onCommand,
+                    onExit = { showExitConfirmation = true },
+                    onSend = { fileError = null; onPrompt() },
                     modifier = Modifier.composerCard(),
                 )
             }
