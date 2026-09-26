@@ -56,15 +56,15 @@
               <div class="phone-heading"><img src="assets/logo-96.png" width="34" height="34" decoding="async" alt=""><span>PinkCollab</span><span class="avatar">P</span></div>
               <div class="phone-title"><div><span class="phone-overline">START · FOLLOW · ANSWER</span><h2>Sessions</h2></div><span class="host-count">2 hosts</span></div>
               <div class="task-tabs" role="tablist" aria-label="Demo session groups">
-                <button id="tab-attention" class="task-tab active" role="tab" aria-selected="true" aria-controls="demo-tasks" data-group="attention">Attention <span>1</span></button>
-                <button id="tab-running" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="running">Running <span>2</span></button>
-                <button id="tab-recent" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="recent">Recent</button>
+                <button id="tab-running" class="task-tab active" role="tab" aria-selected="true" aria-controls="demo-tasks" data-group="running">Running <span>1</span></button>
+                <button id="tab-attention" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="attention">Needs you <span>1</span></button>
+                <button id="tab-recent" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="recent">Paused</button>
               </div>
-              <div id="demo-tasks" role="tabpanel" aria-labelledby="tab-attention" tabindex="0">
-                <article class="demo-task attention-task"><div class="task-label"><span class="status-dot"></span> NEEDS YOUR INPUT <span class="task-time">now</span></div><h3>Review database migration</h3><p class="task-path">dev-server <span>/</span> projects/api</p><div class="task-message"><span aria-hidden="true">↳</span><p>Ready to apply the migration.<br>Would you like to proceed?</p></div><span class="task-footnote">Continue the conversation in the app <span aria-hidden="true">→</span></span></article>
-                <p class="demo-context">A decision from you keeps work moving.</p>
+              <div id="demo-tasks" role="tabpanel" aria-labelledby="tab-running" tabindex="0">
+                <article class="demo-task running-task"><div class="task-label"><span class="status-dot"></span> RUNNING <span class="task-time">live</span></div><h3>Fix the failing tests</h3><p class="task-path">home-pc <span>/</span> projects/web</p><div class="task-message"><span aria-hidden="true">↳</span><p>Running the test suite…</p></div></article>
+                <p class="demo-context">Watch the live stream, then steer with a new prompt.</p>
               </div>
-              <div class="phone-bottom-nav" aria-hidden="true"><span class="selected"><b>▦</b>Sessions</span><span><b>▱</b>Workspaces</span><span><b>▤</b>Hosts</span></div>
+              <div class="phone-bottom-nav" aria-hidden="true"><span class="selected"><b>▦</b>Sessions</span><span><b>▱</b>Workspaces</span></div>
             </div>
             <div class="home-indicator" aria-hidden="true"></div>
           </div>
@@ -75,7 +75,7 @@
       <div class="principles-strip"><p>One phone.<br><strong>Every workspace.</strong></p><span>Start a session</span><span>Follow it live</span><span>Answer when needed <b aria-hidden="true">↗</b></span></div>
       <section class="workflow section" id="how-it-works" aria-labelledby="workflow-title">
         <div class="section-heading"><p class="eyebrow">FROM YOUR DESK TO YOUR POCKET</p><h2 id="workflow-title">Three steps to a running session.</h2><p>Named exactly as they appear in the Android app.</p></div>
-        <div class="steps"><article><span class="step-number">01</span><h3>Choose a workspace.</h3><p>Open <strong>Workspaces</strong>, browse the roots a paired host allows, and pick the project directory you want to work in.</p></article><article><span class="step-number">02</span><h3>Send the first prompt.</h3><p>Your prompt spawns <code>omp --mode rpc-ui</code> inside that directory. The session joins the list right away with its live status.</p></article><article><span class="step-number">03</span><h3>Follow it live.</h3><p>Watch streaming replies and tool activity, then use <strong>Send</strong>, <strong>Stop</strong>, or <strong>Exit</strong> while the app is connected.</p></article></div>
+        <div class="steps"><article><span class="step-number">01</span><h3>Choose a workspace.</h3><p>Open <strong>Workspaces</strong>, browse the roots a paired host allows, and pick the project directory you want to work in.</p></article><article><span class="step-number">02</span><h3>Create the session.</h3><p>PinkCollab saves the conversation and starts <code>omp --mode rpc-ui</code> in that directory immediately, so you can choose a model before the first message.</p></article><article><span class="step-number">03</span><h3>Follow it live.</h3><p>Watch streaming replies and tool activity, then use <strong>Send</strong>, <strong>Stop</strong>, or <strong>Exit</strong> while the app is connected. After <strong>Exit</strong>, <strong>Start</strong> reattaches without sending a prompt.</p></article></div>
         <p class="steps-note">No terminal emulator, no editor: PinkCollab starts and controls OMP sessions on your host. It does not attach to a terminal session.</p>
       </section>
       <section class="getting-started section" id="get-started" aria-labelledby="start-title">
@@ -112,7 +112,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
               <li>Publish it with Tailscale Funnel: <code>pinkcollab funnel</code>. Tailscale runs on the host. The phone does not install Tailscale.</li>
               <li>Start the Gateway with <code>pinkcollab serve</code> and leave that terminal open.</li>
               <li>In another terminal, print a pairing code with <code>pinkcollab pair</code>.</li>
-              <li>Open PinkCollab on Android, scan the code within 5 minutes, choose a workspace, create a session, and send your first prompt.</li>
+              <li>Open PinkCollab on Android, scan the code within 5 minutes, choose a workspace, and create your first session.</li>
             </ol>
             <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>, and build the matching Android app from source. For a direct release download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory.</p>
             <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
@@ -163,7 +163,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
             <a class="powered-link" href="https://omp.sh/">Meet Oh My Pi <span aria-hidden="true">↗</span></a>
           </div>
           <ul class="powered-list">
-            <li><b>Real OMP processes.</b> Sending the first prompt from Android starts <code>omp --mode rpc-ui</code> on the host that owns the code in the current source version.</li>
+            <li><b>Real OMP processes.</b> Creating a session from Android starts <code>omp --mode rpc-ui</code> on the host that owns the code, and later prompts continue that same conversation.</li>
             <li><b>Host-side credentials.</b> Configure model provider credentials on the host, not the phone; OMP may transmit them to your provider for model requests.</li>
             <li><b>Choose your reachability.</b> Funnel needs Tailscale on the host; private Serve needs it on the host and phone. You can also use your own HTTPS reverse proxy.</li>
           </ul>

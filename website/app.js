@@ -2,8 +2,8 @@
 
 const demoGroups = {
   attention: { cards: [{ kind: 'attention-task', label: 'NEEDS YOUR INPUT', time: 'now', title: 'Review database migration', host: 'dev-server', path: 'projects/api', message: 'Ready to apply the migration.\nWould you like to proceed?' }], context: 'A decision from you keeps work moving.' },
-  running: { cards: [{ kind: 'running-task', label: 'RUNNING', time: 'live', title: 'Fix the failing tests', host: 'home-pc', path: 'projects/web', message: 'Running the test suite…' }, { kind: 'running-task', label: 'RUNNING', time: 'live', title: 'Refactor the API routes', host: 'dev-server', path: 'projects/api' }], context: 'See what’s happening across your hosts.' },
-  recent: { cards: [{ kind: 'recent-task', label: 'COMPLETED', time: '12m ago', title: 'Update project documentation', host: 'home-pc', path: 'projects/web' }, { kind: 'recent-task', label: 'COMPLETED', time: '1h ago', title: 'Investigate slow queries', host: 'dev-server', path: 'projects/api' }], context: 'Finished work stays in your recent sessions.' }
+  running: { cards: [{ kind: 'running-task', label: 'RUNNING', time: 'live', title: 'Fix the failing tests', host: 'home-pc', path: 'projects/web', message: 'Running the test suite…' }, { kind: 'running-task', label: 'RUNNING', time: 'live', title: 'Refactor the API routes', host: 'dev-server', path: 'projects/api' }], context: 'Watch the live stream, then steer with a new prompt.' },
+  recent: { cards: [{ kind: 'recent-task', label: 'PAUSED', time: '12m ago', title: 'Update project documentation', host: 'home-pc', path: 'projects/web' }, { kind: 'recent-task', label: 'PAUSED', time: '1h ago', title: 'Investigate slow queries', host: 'dev-server', path: 'projects/api' }], context: 'Start reattaches a paused session without sending a prompt.' }
 };
 
 const tabs = [...document.querySelectorAll('.task-tab')];
