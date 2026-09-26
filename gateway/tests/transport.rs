@@ -155,9 +155,12 @@ async fn stop_reaps_the_omp_process_tree() {
     assert!(!raw.is_null(), "fixture child must be running");
     let child = unsafe { OwnedHandle::from_raw_handle(raw) };
     runtime.stop_confirmed().await.unwrap();
+    // Windows can report an empty job just before the descendant's process handle becomes
+    // signaled. Keep checking the actual child, but allow that brief completion window.
     assert_eq!(
-        unsafe { WaitForSingleObject(child.as_raw_handle(), 0) },
-        WAIT_OBJECT_0
+        unsafe { WaitForSingleObject(child.as_raw_handle(), 5000) },
+        WAIT_OBJECT_0,
+        "Stop left fixture child {pid} running"
     );
     assert_eq!(next_exit(&mut output).await, None);
 }
