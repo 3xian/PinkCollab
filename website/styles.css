@@ -63,6 +63,13 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 .next-steps li{counter-increment:step;position:relative;padding-left:36px;font-size:15px;line-height:1.7;color:#cfc2d6}
 .next-steps li:before{content:counter(step);position:absolute;left:0;top:2px;width:23px;height:23px;border-radius:50%;display:grid;place-items:center;font-family:var(--display);font-size:12px;font-weight:700;color:var(--text-inverse);background:var(--amber)}
 .steps-note{margin-top:28px;font-size:14px;line-height:1.7;color:#d3c9d8}
+.compare{padding-bottom:0}
+.compare-list{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,1fr);gap:26px 34px}
+.compare-list li{position:relative;border-top:1px solid #45384f;padding-top:18px;font-size:14px;line-height:1.7;color:#d3c9d8}
+.compare-list b{display:block;font-family:var(--display);font-size:16px;font-weight:700;letter-spacing:-.5px;color:#fff;margin-bottom:8px}
+.compare-list code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;background:#201828;color:#e0bded;padding:2px 6px;border-radius:5px}
+@media(max-width:820px){.compare-list{grid-template-columns:1fr;gap:20px}.compare-list li{font-size:16px}.compare-list b{font-size:18px}.compare-list code{font-size:14px}}
+@media(max-width:480px){.compare-list li{font-size:15px}.compare-list b{font-size:17px}.compare-list code{font-size:13px}}
 .limits{border-top:1px solid var(--line)}
 .limits-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
 .limits-list li{position:relative;padding-left:18px;font-size:14px;line-height:1.7;color:#d3c9d8}
