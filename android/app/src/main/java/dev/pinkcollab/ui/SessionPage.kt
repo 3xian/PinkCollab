@@ -64,7 +64,6 @@ internal fun SessionPage(
     val onLoadModels: (Boolean) -> Unit = { onAction(SessionAction.LoadModels(it)) }
     val onSelectModel: (ModelInfo) -> Unit = { onAction(SessionAction.SelectModel(it)) }
     val onSetThinkingLevel: (String) -> Unit = { onAction(SessionAction.SetThinkingLevel(it)) }
-    val onLoadSavedHistory: () -> Unit = { onAction(SessionAction.LoadSavedHistory) }
     val onLoadEarlier: () -> Unit = { onAction(SessionAction.LoadEarlierHistory) }
     when (load) {
         LoadState.Loading -> {
@@ -100,13 +99,13 @@ internal fun SessionPage(
     }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
-    var showSavedHistory by rememberSaveable(session.id) { mutableStateOf(false) }
-    LaunchedEffect(session.runtimeGeneration) { showSavedHistory = false }
-    val controls = sessionControls(detail, host, draft, selectingFiles, activity, showSavedHistory)
+    val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
-    val historyMode = controls.historyMode
-    val visibleItems = visibleSessionItems(detail, showSavedHistory)
-    val displayTimeline = remember(visibleItems) { projectSessionTimeline(visibleItems) }
+    val historyTimeline = remember(detail.historyItems) { projectSessionTimeline(detail.historyItems) }
+    val liveTimeline = if (session.runtimeAttached) {
+        remember(detail.liveItems) { projectSessionTimeline(detail.liveItems) }
+    } else emptyList()
+    val hasSavedMessages = historyTimeline.isNotEmpty() || detail.nextHistoryCursor != null
     val timelineState = rememberLazyListState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
@@ -127,7 +126,8 @@ internal fun SessionPage(
         }
     }
     LaunchedEffect(
-        displayTimeline,
+        historyTimeline,
+        liveTimeline,
         detail.streaming,
         session.attention,
         composerHeightPx,
@@ -185,30 +185,42 @@ internal fun SessionPage(
             ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (session.runtimeAttached) item(key = "history-toggle") {
-                TextButton(onClick = {
-                    showSavedHistory = !showSavedHistory
-                    followTimeline = !showSavedHistory
-                    if (showSavedHistory) onLoadSavedHistory()
-                }, modifier = Modifier.fillMaxWidth(), enabled = historyMode || !activity.history) {
-                    Text(if (historyMode) "Back to live" else "Saved history")
-                }
-            }
-            if (detail.nextHistoryCursor != null && (historyMode || !session.runtimeAttached)) item(key = "load-earlier") {
+            if (detail.nextHistoryCursor != null) item(key = "load-earlier") {
                 TextButton(onClick = onLoadEarlier, modifier = Modifier.fillMaxWidth(), enabled = !activity.history) {
                     Text("Load earlier messages")
                 }
             }
-            if (displayTimeline.isEmpty()) item {
+            items(historyTimeline, key = { "saved:${it.id}" }) { item -> DisplayItem(item, markwon) }
+            if (session.runtimeAttached && hasSavedMessages) item(key = "live-divider") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    HorizontalDivider(color = TextMid.copy(alpha = 0.4f))
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Live updates · saved messages above may repeat",
+                        style = PinkCollabTypography.labelMedium,
+                        color = TextMid,
+                    )
+                }
+            }
+            if (session.runtimeAttached) {
+                if (liveTimeline.isEmpty()) item(key = "timeline-empty") {
+                    Text(
+                        "Waiting for the agent…",
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMid,
+                    )
+                }
+                items(liveTimeline, key = { "live:${it.id}" }) { item -> DisplayItem(item, markwon) }
+            } else if (historyTimeline.isEmpty()) item(key = "timeline-empty") {
                 Text(
-                    if (historyMode) "No saved messages on this branch yet" else "Waiting for the agent…",
+                    "No saved messages yet",
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMid,
                 )
             }
-            items(displayTimeline, key = { it.id }) { item -> DisplayItem(item, markwon) }
-            if (!historyMode && detail.streaming.isNotBlank()) item {
+            if (session.runtimeAttached && detail.streaming.isNotBlank()) item {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -374,10 +386,7 @@ internal fun SessionPage(
                     ComposerModelButton(
                         label = composerModelLabel(detail.model),
                         thinkingLevel = composerThinkingLabel(detail.model),
-                        onClick = {
-                            showModels = true
-                            onLoadModels(true)
-                        },
+                        onClick = { showModels = true },
                         enabled = controls.canChooseModel,
                     )
                 }
@@ -391,11 +400,18 @@ internal fun SessionPage(
             }
         }
     }
+    LaunchedEffect(showModels, attached) {
+        if (showModels && attached) onLoadModels(true)
+    }
     if (showModels) {
         ModelPickerSheet(
             state = modelState,
             current = detail.model,
-            enabled = !activity.inputBusy,
+            enabled = attached && !activity.inputBusy,
+            runtimeAttached = attached,
+            runtimeStarting = session.status == SessionStatus.Starting || activity.action,
+            canStartRuntime = controls.canChooseModel,
+            startRuntime = { onCommand(SessionUserCommand.Start) },
             dismiss = { showModels = false },
             retry = { onLoadModels(true) },
             select = { model ->

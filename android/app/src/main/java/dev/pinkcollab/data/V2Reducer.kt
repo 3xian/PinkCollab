@@ -66,7 +66,7 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                 val updatedHost = host.copy(sessions = host.sessions.filterNot { it.id == sessionId } + session, revision = host.revision + 1)
                 V2Reduction(
                     app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to detail)),
-                    if (runtime == null && payload.optString("historyRef").isNotBlank())
+                    if (payload.optString("historyRef").isNotBlank())
                         listOf(GatewayEffect.LoadHistory(SessionKey(hostId, sessionId))) else emptyList(),
                 )
             }
@@ -131,9 +131,11 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                                 session, updated.liveItems, value.optJSONObject("runtime")?.optJSONObject("actualModel")?.modelInfo(),
                             )
                         }
-                        "v2.metadata.updated" -> updated = updated.copy(
-                            session = updated.session.withMetadata(value.getJSONObject("session")),
-                        )
+                        "v2.metadata.updated" -> {
+                            updated = updated.copy(session = updated.session.withMetadata(value.getJSONObject("session")))
+                            // Startup publishes the OMP mapping here; its path is intentionally absent from the wire.
+                            if (updated.historySourceId == null) loadHistory = true
+                        }
                         "v2.runtime.exited" -> {
                             updated = updated.withRuntimeSession(updated.session.withRuntime(null), emptyList(), null).copy(
                                 historyItems = emptyList(),

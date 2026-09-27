@@ -1,6 +1,6 @@
 # Architecture
 
-PinkCollab keeps OMP on the host. Android uses Gateway API v2 over HTTPS and WebSocket; the Gateway starts OMP through its local NDJSON RPC interface. See the [protocol](protocol.md) for wire details and [daily use](usage.md) for the app behavior.
+PinkCollab keeps OMP on the host. Android uses Gateway API v2 over HTTPS and WebSocket; the Gateway starts OMP through its local NDJSON RPC interface. See the [protocol](protocol.md) for wire details.
 
 ```mermaid
 flowchart LR

@@ -25,7 +25,6 @@ internal interface SessionActions {
     suspend fun respond(session: Session, response: AttentionResponse)
     suspend fun selectModel(session: Session, model: ModelInfo)
     suspend fun setThinkingLevel(session: Session, level: String)
-    suspend fun loadSavedHistory(session: Session)
     suspend fun loadEarlierHistory(session: Session)
 }
 
@@ -51,7 +50,6 @@ internal class RepositorySessionActions(
     override suspend fun setThinkingLevel(session: Session, level: String) =
         repository.setThinkingLevel(session.hostId, session.id, level)
 
-    override suspend fun loadSavedHistory(session: Session) = repository.loadSavedHistory(session.hostId, session.id)
     override suspend fun loadEarlierHistory(session: Session) = repository.loadEarlierHistory(session.hostId, session.id)
 }
 
@@ -151,10 +149,6 @@ internal class SessionOperations(
 
     fun setThinkingLevel(session: Session, level: String) = launch(session.key(), SessionLane.Action) {
         actions.setThinkingLevel(session, level)
-    }
-
-    fun loadSavedHistory(session: Session) = launch(session.key(), SessionLane.History) {
-        actions.loadSavedHistory(session)
     }
 
     fun loadEarlierHistory(session: Session) = launch(session.key(), SessionLane.History) {

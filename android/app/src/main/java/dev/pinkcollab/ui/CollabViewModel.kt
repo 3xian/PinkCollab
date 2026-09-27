@@ -113,7 +113,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun respond(session: Session, response: AttentionResponse) = sessionCoordinator.respond(session, response)
     internal fun selectModel(session: Session, model: ModelInfo) = sessionCoordinator.selectModel(session, model)
     internal fun setThinkingLevel(session: Session, level: String) = sessionCoordinator.setThinkingLevel(session, level)
-    internal fun loadSavedHistory(session: Session) = sessionCoordinator.loadSavedHistory(session)
     internal fun loadEarlierHistory(session: Session) = sessionCoordinator.loadEarlierHistory(session)
 
     internal fun onSessionAction(session: Session, action: SessionAction) {
@@ -129,7 +128,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             is SessionAction.LoadModels -> loadModels(session, action.force)
             is SessionAction.SelectModel -> selectModel(session, action.model)
             is SessionAction.SetThinkingLevel -> setThinkingLevel(session, action.level)
-            SessionAction.LoadSavedHistory -> loadSavedHistory(session)
             SessionAction.LoadEarlierHistory -> loadEarlierHistory(session)
         }
     }

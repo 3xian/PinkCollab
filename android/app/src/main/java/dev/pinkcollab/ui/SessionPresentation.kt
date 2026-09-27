@@ -32,13 +32,11 @@ internal sealed interface SessionAction {
     data class LoadModels(val force: Boolean) : SessionAction
     data class SelectModel(val model: ModelInfo) : SessionAction
     data class SetThinkingLevel(val level: String) : SessionAction
-    data object LoadSavedHistory : SessionAction
     data object LoadEarlierHistory : SessionAction
 }
 
 internal data class SessionControlsState(
     val attached: Boolean,
-    val historyMode: Boolean,
     val inputEnabled: Boolean,
     val canSend: Boolean,
     val canAttach: Boolean,
@@ -54,7 +52,6 @@ internal fun sessionControls(
     draft: SessionDraft,
     selectingFiles: Int,
     activity: SessionActivity,
-    showSavedHistory: Boolean,
 ): SessionControlsState {
     val session = detail.session
     val connected = host?.connected == true
@@ -62,20 +59,20 @@ internal fun sessionControls(
     val inputEnabled = connected && !activity.inputBusy && session.attention == null &&
         session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping &&
         (!session.runtimeAttached || session.runtimeExecution != RuntimeExecution.Unknown)
-    val visibleItems = visibleSessionItems(detail, showSavedHistory)
+    val hasMessages = detail.historyItems.isNotEmpty() || detail.liveItems.isNotEmpty()
     val placeholder = when {
-        visibleItems.isEmpty() -> "What should OMP do?"
+        !hasMessages -> "What should OMP do?"
         session.status == SessionStatus.Running -> "Steer OMP…"
         else -> "Send another prompt…"
     }
     return SessionControlsState(
         attached = attached,
-        historyMode = showSavedHistory && session.runtimeAttached,
         inputEnabled = inputEnabled,
         canSend = (draft.text.isNotBlank() || draft.files.isNotEmpty()) && inputEnabled && selectingFiles == 0,
         canAttach = inputEnabled && draft.files.size + selectingFiles < 5,
-        canChooseModel = attached && session.status != SessionStatus.Starting &&
-            session.status != SessionStatus.Stopping && !activity.inputBusy,
+        canChooseModel = (attached || (!session.runtimeAttached && inputEnabled)) &&
+            session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping &&
+            !activity.inputBusy,
         canInterrupt = attached && !activity.control && session.status in setOf(SessionStatus.Running, SessionStatus.NeedsInput),
         canStop = attached && !activity.control,
         placeholder = placeholder,

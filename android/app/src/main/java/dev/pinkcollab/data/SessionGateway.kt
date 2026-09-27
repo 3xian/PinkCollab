@@ -57,11 +57,6 @@ internal class SessionGateway(
         }
     }
 
-    suspend fun loadSavedHistory(hostId: String, id: String) {
-        val subscriptionId = state.value.details[SessionKey(hostId, id)]?.subscriptionId ?: return
-        loadHistory(hostId, id, subscriptionId)
-    }
-
     suspend fun loadEarlierHistory(hostId: String, id: String) {
         val key = SessionKey(hostId, id)
         val before = state.value.details[key] ?: return

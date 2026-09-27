@@ -177,7 +177,6 @@ internal class GatewayRepository(
 
     suspend fun create(hostId: String, cwd: String) = sessions.create(hostId, cwd)
     suspend fun detail(hostId: String, id: String) = sessions.detail(hostId, id)
-    suspend fun loadSavedHistory(hostId: String, id: String) = sessions.loadSavedHistory(hostId, id)
     suspend fun loadEarlierHistory(hostId: String, id: String) = sessions.loadEarlierHistory(hostId, id)
     suspend fun models(hostId: String, id: String) = sessions.models(hostId, id)
     suspend fun selectModel(hostId: String, id: String, model: ModelInfo) = commandDispatcher.selectModel(hostId, id, model)

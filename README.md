@@ -61,13 +61,11 @@ If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attr
 
 ## Docs
 
-- [CLI and configuration](docs/reference.md)
-- [Daily use](docs/usage.md)
-- [Architecture](docs/architecture.md)
-- [Protocol v2](docs/protocol.md)
-- [Deployment and networking](docs/deployment.md)
-- [Development](docs/development.md)
-- [Releases](docs/npm-release.md)
+- [Architecture](docs/architecture.md) — components, lifecycles, and state ownership
+- [Protocol v2](docs/protocol.md) — REST and WebSocket API contracts
+- [Deployment and networking](docs/deployment.md) — HTTPS access, pairing, background services, and Gateway CLI/configuration
+- [Development](docs/development.md) — contributor setup, builds, and validation
+- [Releases](docs/npm-release.md) — maintainer guide to signing and publishing Android, Gateway, and npm releases
 
 ## License
 

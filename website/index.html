@@ -26,7 +26,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700&family=DM+Sans:wght@400..700&family=Manrope:wght@400..800&display=swap">
-  <link rel="stylesheet" href="styles.css?v=96ab20a40eb7">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="styles.css?v=35feb2f7673d">
   <script src="app.js?v=8cabcccece04" defer></script>
   <title>PinkCollab — Android client for Oh My Pi (OMP)</title>
 </head>
@@ -35,7 +36,8 @@
   <div class="site-shell">
     <header class="site-header">
       <a class="brand" href="./" aria-label="PinkCollab home"><img src="assets/logo-96.png" width="42" height="42" decoding="async" alt=""><span>PinkCollab<span class="brand-dot">.</span></span></a>
-      <nav aria-label="Main navigation"><a class="nav-source nav-start" href="#get-started">Get started</a><a href="#architecture">Architecture</a><a class="nav-wide" href="#compare">Why PinkCollab</a><a href="https://omp.sh/">Oh My Pi <span aria-hidden="true">↗</span></a><a class="nav-source" href="https://github.com/3xian/PinkCollab">GitHub <span aria-hidden="true">↗</span></a></nav>
+      <a class="header-omp-mobile" href="https://omp.sh/">Oh My Pi <span aria-hidden="true">↗</span></a>
+      <nav aria-label="Main navigation"><a class="nav-source nav-start" href="#get-started">Get started</a><a class="nav-architecture" href="#architecture">Architecture</a><a class="nav-wide" href="#compare">Why PinkCollab</a><a class="nav-omp" href="https://omp.sh/">Oh My Pi <span aria-hidden="true">↗</span></a><a class="nav-source" href="https://github.com/3xian/PinkCollab">GitHub <span aria-hidden="true">↗</span></a></nav>
     </header>
     <main id="main">
       <section class="hero" aria-labelledby="hero-title">
@@ -173,16 +175,24 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
       </section>
       <section class="powered-by section" id="oh-my-pi" aria-labelledby="omp-title">
         <div class="powered-card">
-          <div class="powered-head">
-            <p class="eyebrow">POWERED BY</p>
-            <h2 id="omp-title">Oh My Pi does the work.<br>PinkCollab keeps you in the loop.</h2>
-            <p class="powered-lead"><a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> is a coding agent for the terminal: subagents, plan mode, LSP and DAP, hindsight memory, hashline edits, and time-traveling rules, on a native Rust engine. PinkCollab adds no agent of its own — it drives OMP on your machines and carries the conversation to your phone.</p>
-            <a class="powered-link" href="https://omp.sh/">Meet Oh My Pi <span aria-hidden="true">↗</span></a>
+          <div class="powered-intro">
+            <div class="powered-head">
+              <p class="eyebrow">POWERED BY <span aria-hidden="true">/ OH MY PI</span></p>
+              <h2 id="omp-title">Oh My Pi does the work.<br>PinkCollab keeps you in the loop.</h2>
+              <p class="powered-lead"><a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> is a coding agent for the terminal: subagents, plan mode, LSP and DAP, hindsight memory, hashline edits, and time-traveling rules, on a native Rust engine. PinkCollab adds no agent of its own — it drives OMP on your machines and carries the conversation to your phone.</p>
+              <a class="powered-link" href="https://omp.sh/docs">Explore OMP docs <span aria-hidden="true">↗</span></a>
+            </div>
+            <div class="powered-brand">
+              <span class="powered-brand-label">THE ENGINE <span>TERMINAL AGENT</span></span>
+              <a class="powered-brand-mark" href="https://omp.sh/" aria-label="Visit Oh My Pi"><img src="assets/omp-mark.svg" width="108" height="108" loading="lazy" alt=""><span>omp</span></a>
+              <p class="powered-brand-capabilities">SUBAGENTS <span>·</span> PLAN MODE <span>·</span> LSP / DAP <span>·</span> HASHLINE</p>
+              <div class="powered-brand-bridge"><span>YOUR HOST</span><span aria-hidden="true">→</span><img src="assets/logo-96.png" width="30" height="30" loading="lazy" alt=""><strong>PinkCollab</strong><span>IN YOUR HAND</span></div>
+            </div>
           </div>
           <ul class="powered-list">
-            <li><b>Real OMP processes.</b> Creating a session from Android starts <code>omp --mode rpc-ui</code> on the host that owns the code, and later prompts continue that same conversation.</li>
-            <li><b>Host-side credentials.</b> Configure model provider credentials on the host, not the phone; OMP may transmit them to your provider for model requests.</li>
-            <li><b>Choose your reachability.</b> Funnel needs Tailscale on the host; private Serve needs it on the host and phone. You can also use your own HTTPS reverse proxy.</li>
+            <li><span class="powered-list-index">01 / RUN</span><b>Real OMP processes.</b> Creating a session from Android starts <code>omp --mode rpc-ui</code> on the host that owns the code, and later prompts continue that same conversation.</li>
+            <li><span class="powered-list-index">02 / OWN</span><b>Host-side credentials.</b> Configure model provider credentials on the host, not the phone; OMP may transmit them to your provider for model requests.</li>
+            <li><span class="powered-list-index">03 / REACH</span><b>Choose your reachability.</b> Funnel needs Tailscale on the host; private Serve needs it on the host and phone. You can also use your own HTTPS reverse proxy.</li>
           </ul>
         </div>
       </section>

@@ -49,11 +49,10 @@ class SessionOperationsTest {
 
         override suspend fun selectModel(session: Session, model: ModelInfo) = Unit
         override suspend fun setThinkingLevel(session: Session, level: String) = Unit
-        override suspend fun loadSavedHistory(session: Session) {
+        override suspend fun loadEarlierHistory(session: Session) {
             historyStarted.complete(Unit)
             finishHistory.await()
         }
-        override suspend fun loadEarlierHistory(session: Session) = Unit
     }
 
     @Test fun stop_cancels_upload_without_submitting_prompt() = runTest {
@@ -124,7 +123,7 @@ class SessionOperationsTest {
         val actions = FakeActions()
         val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }) {}
 
-        coordinator.loadSavedHistory(session)
+        coordinator.loadEarlierHistory(session)
         runCurrent()
         actions.historyStarted.await()
         coordinator.command(session, SessionUserCommand.Stop)

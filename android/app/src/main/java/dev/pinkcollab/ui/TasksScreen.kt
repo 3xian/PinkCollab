@@ -331,19 +331,14 @@ private fun TasksTopBar(
             Box(Modifier.size(6.dp).background(Violet400, CircleShape))
             Spacer(Modifier.width(5.dp))
             Text(
-                "$activeTaskCount active",
+                "$activeTaskCount/$taskCount active",
                 style = MaterialTheme.typography.labelSmall,
                 color = TextHigh,
                 fontWeight = FontWeight.Medium,
             )
         }
         Spacer(Modifier.width(10.dp))
-        Text(
-            "$taskCount total",
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.labelMedium,
-            color = TextMid,
-        )
+        Spacer(Modifier.weight(1f))
         if (showWorkspaces) {
             TextButton(
                 onClick = rememberHapticOnClick(openResources),

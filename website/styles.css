@@ -106,3 +106,54 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 @media(max-width:480px){.not-found{padding:70px 0 62px}.not-found .hero-actions{flex-direction:column;align-items:stretch}}
 
 .hero h1{max-width:16em;font-family:'Big Shoulders Display',Impact,sans-serif;font-weight:700;font-size:clamp(42px,4.8vw,64px);line-height:0.95;letter-spacing:-0.02em;margin:8px 0 28px}
+
+/* OMP's dark, hairline-and-gradient visual language stays inside its own section. */
+.powered-card{display:block;position:relative;overflow:hidden;isolation:isolate;padding:clamp(30px,4vw,54px);border:1px solid #35303d;border-radius:24px;background:radial-gradient(ellipse at 94% 8%,#42214755,transparent 46%),radial-gradient(ellipse at 67% 62%,#142d3730,transparent 42%),#09090c;box-shadow:0 28px 70px -45px #000;font-family:'Geist',var(--font)}
+.powered-card:before{content:'';position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,#ed4abf,#9b4dff 55%,#5ad8e6)}
+.powered-intro{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);align-items:stretch;gap:clamp(32px,5vw,70px)}
+.powered-head{padding:10px 0 34px}
+.powered-head .eyebrow,.powered-brand-label,.powered-brand-capabilities,.powered-brand-bridge>span,.powered-list-index{font-family:'JetBrains Mono',ui-monospace,monospace}
+.powered-head .eyebrow{color:#ed8acf;font-size:11px;letter-spacing:.12em}.powered-head .eyebrow span{color:#94899c}
+.powered-head h2{font-family:'Geist',var(--font);font-weight:600;font-size:clamp(32px,3.4vw,46px);line-height:1.12;letter-spacing:-.045em;margin:28px 0 24px;text-wrap:balance}
+.powered-lead{max-width:590px;color:#bdbac4;font-size:16px;line-height:1.75}.powered-lead .text-link{color:#f5d2ee}
+.powered-link{display:inline-flex;align-items:center;gap:14px;margin-top:26px;padding-bottom:7px;border-bottom:1px solid #b76cae;color:#f5d2ee;font-size:14px;font-weight:600}.powered-link:hover{color:#fff;border-color:#fff}
+.powered-brand{display:flex;flex-direction:column;min-width:0;min-height:330px;padding:22px 26px 0;border:1px solid #4b3b50;background:radial-gradient(circle at 55% 50%,#4a194233,transparent 64%),linear-gradient(150deg,#171219,#0d0d12 70%);box-shadow:inset 0 1px #ffffff10}
+.powered-brand-label{display:flex;justify-content:space-between;gap:12px;color:#d9a0ca;font-size:10px;letter-spacing:.14em}.powered-brand-label span{color:#77717e}
+.powered-brand-mark{display:flex;align-items:center;justify-content:center;gap:14px;flex:1;min-height:170px;color:#fff}.powered-brand-mark img{width:108px;height:108px;filter:drop-shadow(0 0 32px #b04ba655)}.powered-brand-mark span{font-family:'Geist',var(--font);font-size:clamp(66px,7vw,96px);font-weight:700;letter-spacing:-.09em;line-height:1}.powered-brand-mark:hover span{color:#f6c5e9}
+.powered-brand-capabilities{text-align:center;color:#b8a5bb;font-size:10px;line-height:1.7;letter-spacing:.02em;padding:0 0 24px}.powered-brand-capabilities span{color:#a15baf;padding:0 3px}
+.powered-brand-bridge{display:flex;align-items:center;gap:9px;min-height:67px;border-top:1px solid #493846}.powered-brand-bridge>span{font-size:9px;letter-spacing:.04em;color:#bca7bd}.powered-brand-bridge>span:nth-child(2){margin:auto;color:#e69bce;font-size:19px}.powered-brand-bridge img{border-radius:7px}.powered-brand-bridge strong{font-size:13px;font-weight:600;white-space:nowrap}.powered-brand-bridge>span:last-child{margin-left:auto;text-align:right}
+.powered-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid #473c49;margin-top:20px}
+.powered-list li{background:none;border:0;border-radius:0;padding:25px 25px 0 0;color:#bdbac4;font-size:14px;line-height:1.7}.powered-list li+li{border-left:1px solid #473c49;padding-left:25px}.powered-list li:last-child{padding-right:0}
+.powered-list-index{display:block;color:#dba3cf;font-size:10px;letter-spacing:.12em;margin-bottom:18px}.powered-list b{font-family:'Geist',var(--font);font-size:17px;font-weight:600;letter-spacing:-.02em;color:#f6f3f7;margin-bottom:9px}.powered-list code{background:#261d2d;color:#ecc3e9;font-size:12px}
+@media(max-width:900px){.powered-intro{grid-template-columns:1fr;gap:12px}.powered-head{padding-bottom:10px}.powered-brand{min-height:300px}.powered-list{margin-top:34px}}
+@media(max-width:680px){.powered-card{padding:28px 22px;border-radius:18px}.powered-head h2{font-size:clamp(30px,7vw,39px);margin:22px 0}.powered-lead{font-size:15px}.powered-brand{min-height:260px;padding:19px 18px 0}.powered-brand-mark{min-height:130px}.powered-brand-mark img{width:72px;height:72px}.powered-brand-mark span{font-size:67px}.powered-brand-capabilities{font-size:9px}.powered-brand-bridge{column-gap:6px;min-height:64px}.powered-brand-bridge>span{font-size:8px}.powered-brand-bridge>span:last-child{display:none}.powered-brand-bridge img{width:25px;height:25px}.powered-brand-bridge strong{font-size:11px}.powered-list{grid-template-columns:1fr;gap:0}.powered-list li,.powered-list li+li{border-left:0;padding:23px 0}.powered-list li+li{border-top:1px solid #473c49}.powered-list li:last-child{padding-bottom:0}.powered-list-index{margin-bottom:12px}}
+@media(max-width:380px){.powered-brand-capabilities{font-size:8px;letter-spacing:-.04em}}
+
+/* The large section surfaces are square; nested controls and detail cards retain their radii. */
+.compare,.architecture,.powered-card,.install-panel{border-radius:0}
+.header-omp-mobile{display:none}
+
+/* On phones, give the brand its own row and keep navigation labels unwrapped. */
+@media(max-width:680px){
+  .site-header{position:relative;height:auto;display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:16px 0 13px}
+  .site-header .brand{width:max-content}
+  .site-header nav{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;font-size:12px}
+  .site-header nav a:not(.nav-wide){display:inline-flex;align-items:center;justify-content:center;min-height:42px;white-space:nowrap}
+  .site-header nav .nav-wide{display:none}
+  .site-header nav .nav-source{gap:7px;padding:8px 12px}
+  .site-header nav .nav-architecture{padding:8px 4px}
+  .site-header nav a.nav-omp{display:none}
+  .site-header .header-omp-mobile{display:inline-flex;align-items:center;position:absolute;top:16px;right:0;min-height:42px;color:#d8c4e8;font-size:12px}
+}
+@media(max-width:360px){.site-header nav{font-size:11px;gap:6px}.site-header nav .nav-source{padding:8px 9px}}
+
+/* Page-wide dividers belong only below the header and above the footer. */
+.principles-strip{border-top:0;border-bottom:0}
+.getting-started,.limits,.closing{border-top:0}
+
+/* Header navigation is one text treatment, not a mix of links and button shells. */
+.site-header nav a{padding:0;border:0;border-radius:0;background:none;color:var(--text-primary);font-weight:600;gap:5px}
+.site-header nav .nav-source{min-height:44px;align-items:center}
+.site-header .header-omp-mobile{color:var(--text-primary);font-weight:600}
+.site-header nav a:hover,.site-header .header-omp-mobile:hover{color:var(--amber-soft)}
+@media(max-width:680px){.site-header nav .nav-source{min-height:42px}}

@@ -208,6 +208,10 @@ internal fun ModelPickerSheet(
     state: LoadState<ModelCatalog>?,
     current: ModelInfo?,
     enabled: Boolean,
+    runtimeAttached: Boolean,
+    runtimeStarting: Boolean,
+    canStartRuntime: Boolean,
+    startRuntime: () -> Unit,
     dismiss: () -> Unit,
     retry: () -> Unit,
     select: (ModelInfo) -> Unit,
@@ -220,12 +224,30 @@ internal fun ModelPickerSheet(
         ) {
             Column(Modifier.padding(horizontal = 24.dp)) {
                 Text("Models", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                current?.let {
+                current?.takeIf { runtimeAttached }?.let {
                     Spacer(Modifier.height(10.dp))
                     Text("Current · ${it.provider} · ${it.name}", style = MaterialTheme.typography.bodySmall, color = TextMid)
                 }
             }
-            when (state) {
+            if (!runtimeAttached) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        if (runtimeStarting) "Starting OMP…" else "Start OMP to choose a model before sending your next message.",
+                        color = TextMid,
+                    )
+                    if (runtimeStarting) {
+                        CircularProgressIndicator(color = Purple400)
+                    } else {
+                        Button(onClick = rememberHapticOnClick(startRuntime), enabled = canStartRuntime) {
+                            Text("Start runtime")
+                        }
+                    }
+                }
+            } else when (state) {
                 null, LoadState.Loading -> Box(
                     Modifier.fillMaxWidth().height(160.dp),
                     contentAlignment = Alignment.Center,
@@ -278,7 +300,7 @@ internal fun ModelPickerSheet(
                     }
                 }
             }
-            if (state is LoadState.Ready && state.value.thinkingLevels.isNotEmpty()) {
+            if (runtimeAttached && state is LoadState.Ready && state.value.thinkingLevels.isNotEmpty()) {
                 Text("Thinking level", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     state.value.thinkingLevels.forEach { level ->

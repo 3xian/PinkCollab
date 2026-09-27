@@ -27,9 +27,8 @@ class SessionPresentationTest {
         host: HostState? = online,
         activity: SessionActivity = SessionActivity(),
         selectingFiles: Int = 0,
-        showSavedHistory: Boolean = false,
     ) = sessionControls(SessionDetail(session, liveItems = listOf(TimelineItem("live", "user", "hi", "", ""))),
-        host, draft, selectingFiles, activity, showSavedHistory)
+        host, draft, selectingFiles, activity)
 
     @Test fun disconnected_host_disables_composer_and_controls() {
         val state = controls(host = online.copy(connection = ConnectionState.Offline()))
@@ -60,9 +59,14 @@ class SessionPresentationTest {
         assertFalse(controls(session = session.copy(runtimeExecution = RuntimeExecution.Unknown)).inputEnabled)
     }
 
-    @Test fun saved_history_switches_the_presented_mode() {
-        assertFalse(controls().historyMode)
-        assertTrue(controls(showSavedHistory = true).historyMode)
-        assertEquals("Steer OMP…", controls().placeholder)
+    @Test fun model_picker_can_start_a_new_runtime_after_exit() {
+        val exited = session.copy(status = SessionStatus.Idle, runtimeAttached = false,
+            runtimeGeneration = null, runtimeExecution = RuntimeExecution.Unknown)
+        assertTrue(controls(session = exited).canChooseModel)
+        assertFalse(controls(session = exited).attached)
+        assertFalse(controls(session = exited, host = online.copy(connection = ConnectionState.Offline())).canChooseModel)
+        assertFalse(controls(session = exited.copy(status = SessionStatus.Starting)).canChooseModel)
+        assertTrue(controls(session = session.copy(runtimeGeneration = "new-generation")).canChooseModel)
     }
+
 }

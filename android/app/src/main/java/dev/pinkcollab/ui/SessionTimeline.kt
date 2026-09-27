@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -139,11 +140,13 @@ private fun YouLabel() {
 
 @Composable
 private fun SpeakerTitle(text: String, modifier: Modifier = Modifier) {
+    // Reserve space inside the offscreen gradient layer for italic glyph overhang.
     Text(
         text,
-        modifier = modifier.brandGradientMask(),
+        modifier = modifier.brandGradientMask().padding(end = 6.dp),
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.Bold,
+        fontStyle = FontStyle.Italic,
     )
 }
 

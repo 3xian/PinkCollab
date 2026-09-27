@@ -143,8 +143,11 @@ class V2ReducerTest {
             .put("subscriptionId", "session-sub")
             .put("cursor", JSONObject().put("epoch", "epoch").put("revision", 0))
             .put("payload", JSONObject().put("session", record).put("runtime", runtime)
-                .put("messages", org.json.JSONArray()).put("recentOperations", org.json.JSONArray()))
-        val baseline = reduceV2(hostState, "host", snapshot).state
+                .put("messages", org.json.JSONArray()).put("recentOperations", org.json.JSONArray())
+                .put("historyRef", "omp"))
+        val subscribed = reduceV2(hostState, "host", snapshot)
+        assertEquals(listOf(GatewayEffect.LoadHistory(sessionKey)), subscribed.effects)
+        val baseline = subscribed.state
         val history = TimelineItem("saved", "user", "older", "", "")
         val detail = baseline.details.getValue(sessionKey).copy(historyItems = listOf(history))
         val withHistory = baseline.copy(details = baseline.details + (sessionKey to detail))
@@ -159,6 +162,25 @@ class V2ReducerTest {
         val updated = reduceV2(withHistory, "host", patch).state.details.getValue(sessionKey)
         assertEquals(listOf("saved"), updated.historyItems.map { it.id })
         assertEquals(listOf("live"), updated.liveItems.map { it.id })
+    }
+
+    @Test fun newly_mapped_session_loads_history_after_runtime_startup() {
+        val hostState = reduceV2(app(), "host", hostSnapshot()).state
+        val snapshot = JSONObject().put("type", "snapshot").put("resource", "session/session")
+            .put("subscriptionId", "session-sub")
+            .put("cursor", JSONObject().put("epoch", "epoch").put("revision", 0))
+            .put("payload", JSONObject().put("session", record).put("runtime", JSONObject.NULL)
+                .put("messages", org.json.JSONArray()))
+        val beforeMapping = reduceV2(hostState, "host", snapshot)
+        assertTrue(beforeMapping.effects.isEmpty())
+
+        val metadata = JSONObject().put("type", "change").put("resource", "session/session")
+            .put("subscriptionId", "session-sub").put("epoch", "epoch")
+            .put("baseRevision", 0).put("revision", 1)
+            .put("changes", org.json.JSONArray().put(JSONObject().put("type", "v2.metadata.updated")
+                .put("value", JSONObject().put("session", record))))
+        val mapped = reduceV2(beforeMapping.state, "host", metadata)
+        assertEquals(listOf(GatewayEffect.LoadHistory(sessionKey)), mapped.effects)
     }
 
     @Test fun runtime_exit_clears_previous_history_until_the_new_page_arrives() {
