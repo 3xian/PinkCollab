@@ -149,9 +149,9 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
         <ul class="compare-list">
           <li><b>Start work, do not just watch it.</b> <code>/collab</code> shares a session that is already running on a terminal you opened. PinkCollab creates the session itself and starts OMP in that directory, so a new task can begin without a keyboard in front of the host.</li>
           <li><b>Persistent sessions.</b> A Collab room follows one process and ends when it does. PinkCollab keeps the session in your list after OMP exits, reloads its transcript, and starts a new runtime on the same conversation later.</li>
-          <li><b>Nothing to paste.</b> A <code>/collab</code> link carries the room key and expires with the session. Pairing scans a single-use QR once; after that, every workspace and session is one tap away.</li>
+          <li><b>Attach files and choose the model.</b> A <code>/collab</code> guest can prompt and interrupt, but cannot change the model or upload a file. PinkCollab does both from the phone, then sends, steers, stops, or answers.</li>
           <li><b>Reachable without a relay.</b> <code>/collab</code> reaches guests through OMP's hosted relay, and its production relay is not distributed for self-hosting. PinkCollab talks only to the Gateway you run: Tailscale Funnel, private Serve, or your own HTTPS proxy.</li>
-          <li><b>No OMP on the second device.</b> Collab guests render the session in another OMP instance or the web client. PinkCollab is a native Android app that speaks the Gateway's protocol directly.</li>
+          <li><b>Swipe between live sessions.</b> A <code>/collab</code> link opens one session. PinkCollab keeps every session in one pager: swipe to read the next one and steer it, while the others keep running.</li>
           <li><b>Gaps it does not close.</b> PinkCollab does not mirror the TUI, and OMP stays in control of tools, files, and credentials. Use <code>/collab</code> when you want a colleague inside your terminal session; use PinkCollab to run your own sessions from your phone.</li>
         </ul>
       </section>
