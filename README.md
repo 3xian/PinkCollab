@@ -2,7 +2,7 @@
 
 <h1 align="center">PinkCollab</h1>
 
-<p align="center"><a href="https://3xian.github.io/PinkCollab/">3xian.github.io/PinkCollab</a>, <strong>Android client for Oh My Pi (OMP).</strong></p>
+<p align="center"><a href="https://3xian.github.io/PinkCollab/">PinkCollab</a>, <strong>Android client for Oh My Pi (OMP).</strong></p>
 
 [OMP](https://omp.sh/) runs on your computer or server. Use the PinkCollab mobile app to start sessions and steer their progress.
 
