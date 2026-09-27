@@ -6,9 +6,9 @@ At launch, the animated logo sits over a pulsing pink glow while the app waits f
 
 ## Create and continue a session
 
-Open **Workspaces**, choose a paired host and an allowed directory, then tap **Create session here**. The app saves the conversation and immediately starts OMP without sending a prompt, so you can choose a model before the first message. If startup fails, the session remains available and **Start** can retry; after **Exit**, **Start** can reattach without sending a prompt. Each later prompt continues the same conversation; an attached process is not required for the conversation to remain available.
+Open **Workspaces**, choose a paired host and an allowed directory, then tap **Create session here**. The app saves the conversation and immediately starts OMP without sending a prompt, so you can choose a model before the first message. If startup fails, the session remains available; sending a prompt starts the runtime. After **Exit**, sending a prompt reattaches and continues the same conversation without a separate Start action. An attached process is not required for the conversation to remain available.
 
-One **Start** tap sends a new command when an earlier Start has a confirmed success or failure. If the earlier command is still pending or its outcome is unknown, the app reconciles that command instead of risking a second launch.
+The automatic startup command has a durable receipt. On app restart, pending commands are looked up and safely recovered with their original IDs; an uncertain outcome is not treated as permission to launch a second runtime. After a confirmed startup failure, a prompt can start the runtime lazily.
 
 When the runtime is working, sending another prompt steers that execution. When OMP confirms it is settled, sending starts a new turn. **Stop** asks OMP to abort current work and keeps the process. **Exit** ends the process after confirmation; it preserves the Session and OMP transcript. Sending another prompt after Exit starts a new generation and loads that transcript. A stale Exit or answer cannot target a newer generation.
 
@@ -18,7 +18,7 @@ Tap the paperclip in a session to choose up to five files, then send them with a
 
 ## Live page and history
 
-The session page subscribes to a versioned live view. It shows OMP output, model state, pending questions, and command receipts. `accepted` means Gateway stored the command; `dispatching` means it is entering OMP; `running` means execution is underway. If the result is `outcome_unknown`, inspect the conversation before issuing a new command. After an uncertain network response or server error, retrying the same action in the running app first checks the original receipt, then resends the original command ID and payload only when safe. If Exit was sent without a stored receipt, inspect the runtime before trying again. Pending commands are not preserved across app restarts.
+The session page subscribes to a versioned live view. It shows OMP output, model state, pending questions, and command receipts. `accepted` means Gateway stored the command; `dispatching` means it is entering OMP; `running` means execution is underway. If the result is `outcome_unknown`, inspect the conversation before issuing a new command. After an uncertain network response or server error, retrying the same action in the running app first checks the original receipt, then resends the original command ID and payload only when safe. If Exit was sent without a stored receipt, inspect the runtime before trying again. Pending commands are stored across app restarts for receipt lookup and safe recovery.
 
 The live projection is a bounded preview. While attached, **Saved history** opens a separate view of the durable OMP transcript and **Back to live** returns to current output. After the runtime detaches, the app reads saved history automatically. **Load earlier messages** retrieves older pages. A missing or corrupt history file is reported as unavailable. The app does not guess that a live message and a transcript entry are identical based on their text. The live view and saved history can be observed at different moments.
 
@@ -26,7 +26,7 @@ An input card presents OMP's select, confirm, input, or editor request. Only one
 
 ## Disconnects
 
-A phone disconnect does not stop OMP. Reconnecting replaces the list and open-session live views with fresh subscription snapshots. The app does not queue offline prompts. If the Gateway restarts, it does not reattach old processes; the Session and OMP transcript remain. Starting that Session later creates a new runtime generation. An unclean exit can leave a conservative runtime lease. Run `pinkcollab leases`; after stopping the Gateway and verifying the old OMP process and descendants are gone, run `pinkcollab clear-lease --session <id> --generation <generation> --verified-exited`. The exact generation prevents clearing a newer lease by mistake.
+A phone disconnect does not stop OMP. Reconnecting replaces the list and open-session live views with fresh subscription snapshots. The app does not queue offline prompts. If the Gateway restarts, it does not reattach old processes; the Session and OMP transcript remain. Sending a prompt in that Session later creates a new runtime generation. An unclean exit can leave a conservative runtime lease. Run `pinkcollab leases`; after stopping the Gateway and verifying the old OMP process and descendants are gone, run `pinkcollab clear-lease --session <id> --generation <generation> --verified-exited`. The exact generation prevents clearing a newer lease by mistake.
 
 In **Workspaces**, a host shows **Connecting…** while establishing, synchronizing, or automatically retrying its connection. Its directories cannot be opened until it is online.
 

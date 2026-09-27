@@ -43,7 +43,6 @@ internal data class SessionControlsState(
     val canSend: Boolean,
     val canAttach: Boolean,
     val canChooseModel: Boolean,
-    val canStart: Boolean,
     val canInterrupt: Boolean,
     val canStop: Boolean,
     val placeholder: String,
@@ -77,7 +76,6 @@ internal fun sessionControls(
         canAttach = inputEnabled && draft.files.size + selectingFiles < 5,
         canChooseModel = attached && session.status != SessionStatus.Starting &&
             session.status != SessionStatus.Stopping && !activity.inputBusy,
-        canStart = !session.runtimeAttached && connected && !activity.inputBusy,
         canInterrupt = attached && !activity.control && session.status in setOf(SessionStatus.Running, SessionStatus.NeedsInput),
         canStop = attached && !activity.control,
         placeholder = placeholder,

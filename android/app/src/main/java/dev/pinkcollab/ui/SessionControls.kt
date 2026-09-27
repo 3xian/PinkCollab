@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.outlined.Send
@@ -74,7 +73,6 @@ private val ComposerRailActionMinHeight = 48.dp
 /** Stop aborts the turn; Exit opens confirmation before stopping the runtime. */
 @Composable
 internal fun ComposerRail(
-    showStart: Boolean,
     controls: SessionControlsState,
     onCommand: (SessionUserCommand) -> Unit,
     onExit: () -> Unit,
@@ -87,20 +85,9 @@ internal fun ComposerRail(
             // Expand with scaled labels rather than clipping them inside a fixed-width rail.
             .widthIn(min = ComposerRailMinWidth)
             .width(IntrinsicSize.Max)
-            .heightIn(min = ComposerRailActionMinHeight * (if (showStart) 4 else 3))
+            .heightIn(min = ComposerRailActionMinHeight * 3)
             .then(modifier),
     ) {
-        if (showStart) {
-            ComposerRailButton(
-                icon = Icons.Outlined.PlayArrow,
-                label = "Start",
-                onClick = { onCommand(SessionUserCommand.Start) },
-                enabled = controls.canStart,
-                contentColor = Purple200,
-                modifier = Modifier.weight(1f),
-            )
-            Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-        }
         ComposerRailButton(
             icon = Icons.Outlined.Stop,
             label = "Stop",

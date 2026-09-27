@@ -382,7 +382,6 @@ internal fun SessionPage(
                     )
                 }
                 ComposerRail(
-                    showStart = !session.runtimeAttached,
                     controls = controls,
                     onCommand = onCommand,
                     onExit = { showExitConfirmation = true },

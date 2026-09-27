@@ -3,6 +3,7 @@
 // text still matches the authoritative docs. No dependencies.
 //
 //   node .github/actions/check-website/check-site.mjs
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,7 +96,7 @@ for (const page of PAGES) {
       inlineAnchors.push([page, page, url.slice(1)]);
       continue;
     }
-    let path = url.split('#')[0];
+    let path = url.split(/[?#]/)[0];
     const hash = url.includes('#') ? url.slice(url.indexOf('#') + 1) : '';
     if (path.startsWith('/')) {
       check(page === '404.html', `${page}: root-absolute path "${url}" breaks on a project page`);
@@ -209,6 +210,19 @@ check(robots.includes(`${ORIGIN}${BASE}/sitemap.xml`), 'robots.txt: sitemap URL 
 // --- stylesheet and font loading ----------------------------------------
 
 const css = readSite('styles.css');
+const cssVersion = createHash('sha256').update(css).digest('hex').slice(0, 12);
+for (const page of PAGES) {
+  const prefix = page === '404.html' ? `${BASE}/` : '';
+  check(
+    html[page].includes(`href="${prefix}styles.css?v=${cssVersion}"`),
+    `${page}: stylesheet URL must carry the current content hash`,
+  );
+}
+const scriptVersion = createHash('sha256').update(readSite('app.js')).digest('hex').slice(0, 12);
+check(
+  html['index.html'].includes(`src="app.js?v=${scriptVersion}"`),
+  'index.html: script URL must carry the current content hash',
+);
 check(!/@import/.test(css), 'styles.css: use a <link> in the document head instead of @import');
 for (const page of PAGES.filter((page) => html[page].includes('styles.css'))) {
   check(

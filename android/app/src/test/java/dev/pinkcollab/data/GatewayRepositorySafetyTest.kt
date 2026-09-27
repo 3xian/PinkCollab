@@ -197,75 +197,21 @@ class GatewayRepositorySafetyTest {
         assertTrue(storage.records().isEmpty())
     }
 
-    @Test fun start_after_a_terminal_receipt_posts_a_new_command_on_the_first_tap() = runBlocking {
-        for (terminal in listOf("succeeded", "failed")) {
-            val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
-            val storage = MemoryOutbox()
-            val statuses = mutableMapOf<String, String>()
-            val posted = mutableListOf<String>()
-            val transport = object : GatewayTransport {
-                override val client = OkHttpClient()
-                override fun validateURL(value: String) = value
-                override suspend fun request(url: String, credential: String?, path: String, method: String,
-                    body: JSONObject?, query: Pair<String, String>?): String {
-                    if (method == "GET") {
-                        val id = path.substringAfterLast('/')
-                        return receipt(id, statuses.getValue(id)).toString()
-                    }
-                    val id = requireNotNull(body).getString("commandId")
-                    posted += id
-                    statuses[id] = "accepted"
-                    return accepted(body).toString()
-                }
-                override suspend fun upload(url: String, credential: String, path: String, name: String,
-                    bytes: ByteArray): String = error("unexpected upload")
-            }
-            val dispatcher = CommandDispatcher(MutableStateFlow(AppState()), { host }, transport, storage, HostCommandGate())
+    @Test fun detached_prompt_requests_lazy_runtime_start_without_a_generation() = runBlocking {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        val session = Session("session", "host", "/tmp", "Work", SessionStatus.Idle, "", false, null,
+            "2026-01-01", "2026-01-01", false, null, RuntimeExecution.Unknown)
+        val state = MutableStateFlow(AppState(hosts = mapOf("host" to HostState(host, sessions = listOf(session)))))
+        val transport = RecordingTransport(::accepted)
+        val dispatcher = CommandDispatcher(state, { host }, transport, MemoryOutbox(), HostCommandGate())
 
-            dispatcher.command("host", "session", "start")
-            assertEquals(1, posted.size)
-            statuses[posted.single()] = terminal
-            dispatcher.command("host", "session", "start")
+        dispatcher.prompt("host", "session", "hello", emptyList(), "intent-one")
 
-            assertEquals("first Start after $terminal", 2, posted.size)
-            assertNotEquals(posted[0], posted[1])
-            assertEquals("start_runtime", storage.records().single().type)
-        }
-    }
-
-    @Test fun start_does_not_replace_an_unsettled_or_unconfirmed_command() = runBlocking {
-        val storage = MemoryOutbox()
-        val request = CommandRequest("host", "client", "session", "start:{}", "start_runtime") { JSONObject() }
-        val posted = mutableListOf<String>()
-        var status = "accepted"
-        var receiptMissing = false
-        val transport = CommandTransport(
-            post = { body ->
-                val id = body.getString("commandId")
-                posted += id
-                JSONObject().put("operation", receipt(id, "accepted"))
-            },
-            lookup = { id -> if (receiptMissing) missing() else receipt(id, status) },
-        )
-        val outbox = DurableCommandOutbox(storage)
-
-        outbox.submit(request, transport)
-        val original = posted.single()
-        outbox.submit(request, transport)
-        status = "running"
-        outbox.submit(request, transport)
-        assertEquals(listOf(original), posted)
-
-        receiptMissing = true
-        outbox.submit(request, transport)
-        assertEquals(listOf(original, original), posted)
-
-        receiptMissing = false
-        status = "outcome_unknown"
-        try { outbox.submit(request, transport); throw AssertionError("uncertain Start must not be replaced") }
-        catch (failure: IOException) { assertTrue(failure.message.orEmpty().contains("unconfirmed outcome")) }
-        assertEquals(listOf(original, original), posted)
-        assertEquals(CommandState.LOOKUP_ONLY, storage.records().single().state)
+        val posted = transport.posts.single()
+        assertEquals("prompt", posted.getString("type"))
+        assertEquals("start", posted.getString("delivery"))
+        assertEquals("hello", posted.getString("message"))
+        assertFalse(posted.has("expectedGeneration"))
     }
 
     @Test fun lookup_authentication_failure_never_posts_or_discards_a_command() = runBlocking {
