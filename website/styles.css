@@ -155,3 +155,17 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 .site-header .header-omp-mobile{color:var(--text-primary);font-weight:600}
 .site-header nav a:hover,.site-header .header-omp-mobile:hover{color:var(--amber-soft)}
 @media(max-width:680px){.site-header nav .nav-source{min-height:42px}}
+
+/* A real-world moment sits between the interactive hero and product details. */
+.in-hand{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(280px,.9fr);align-items:center;gap:clamp(32px,5vw,76px);padding:24px 0 36px}
+.in-hand-photo{min-width:0;margin:0}
+.in-hand-photo img{width:100%;height:auto;border:1px solid #433649;box-shadow:0 28px 70px -40px #aa68a680}
+.in-hand-photo figcaption{margin-top:13px;color:#9b8da5;font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.in-hand-copy .eyebrow{color:var(--amber-soft)}
+.in-hand-copy h2{margin:19px 0 22px;font-size:clamp(36px,3.9vw,54px);line-height:1.12;letter-spacing:-.055em;text-wrap:balance}
+.in-hand-copy h2 span{color:#d8a8eb}
+.in-hand-copy>p:not(.eyebrow){max-width:410px;color:var(--text-secondary);font-size:16px;line-height:1.8}
+.in-hand-copy>a{display:inline-flex;align-items:center;gap:13px;margin-top:27px;padding-bottom:6px;border-bottom:1px solid #8a679b;color:#ead3f0;font-size:14px;font-weight:600}
+.in-hand-copy>a:hover{color:var(--amber-soft);border-color:var(--amber-soft)}
+@media(max-width:850px){.in-hand{grid-template-columns:1fr;gap:28px}.in-hand-photo{max-width:680px}.in-hand-copy{max-width:610px}}
+@media(max-width:480px){.in-hand{gap:24px;padding:12px 0 18px}.in-hand-photo figcaption{font-size:9px}.in-hand-copy h2{font-size:clamp(34px,9vw,43px);margin:15px 0 16px}.in-hand-copy>p:not(.eyebrow){font-size:15px}.in-hand-copy>a{margin-top:20px}}
