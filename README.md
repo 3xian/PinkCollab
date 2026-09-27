@@ -57,6 +57,8 @@ Scan the QR in the app. Open **Workspaces**, choose one of the directories you a
 
 The pairing code lasts five minutes and works once. If it expires, run `pair` again.
 
+From **Sessions**, open **Conf → Check for updates** to check the latest GitHub release manually or see the installed version. On normal startup the app checks at most once every 24 hours; an available update shows its release notes and opens the HTTPS APK link in a browser. Installation remains outside the app.
+
 If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attribute in the Tailscale admin console, then run it again.
 
 ## Docs

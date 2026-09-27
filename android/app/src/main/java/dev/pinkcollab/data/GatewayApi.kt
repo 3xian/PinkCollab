@@ -1,22 +1,17 @@
 package dev.pinkcollab.data
 
 import dev.pinkcollab.BuildConfig
-import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Call
-import okhttp3.Callback
 import okhttp3.HttpUrl
 import okhttp3.Request
 import okhttp3.Protocol
 import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 class GatewayHttpException(val statusCode: Int, val errorCode: String?, message: String) : IOException(message)
 
@@ -66,33 +61,11 @@ internal class GatewayApi : GatewayTransport {
         return send(call)
     }
 
-    private suspend fun send(call: Call): String = suspendCancellableCoroutine { continuation ->
-        continuation.invokeOnCancellation { call.cancel() }
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, error: IOException) {
-                if (continuation.isActive) continuation.resumeWithException(error)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                try {
-                    response.use {
-                        val text = it.body?.string().orEmpty()
-                        if (!continuation.isActive) return
-                        if (it.isSuccessful) continuation.resume(text)
-                        else {
-                            val parsed = runCatching { JSONObject(text) }.getOrNull()
-                            val message = if (it.code == 426) "Update PinkCollab to use this Gateway"
-                                else parsed?.optString("message")?.ifBlank { parsed.optString("error") }?.ifBlank { "Gateway HTTP ${it.code}" }
-                                    ?: "Gateway HTTP ${it.code}"
-                            continuation.resumeWithException(GatewayHttpException(it.code, parsed?.optString("code"), message))
-                        }
-                    }
-                } catch (error: Exception) {
-                    // OkHttp does not route exceptions thrown while consuming a response body to
-                    // onFailure. Resume the suspended caller instead of leaving its UI loading.
-                    if (continuation.isActive) continuation.resumeWithException(error)
-                }
-            }
-        })
+    private suspend fun send(call: Call): String = call.awaitSuccessfulBody { code, text ->
+        val parsed = runCatching { JSONObject(text) }.getOrNull()
+        val message = if (code == 426) "Update PinkCollab to use this Gateway"
+            else parsed?.optString("message")?.ifBlank { parsed.optString("error") }?.ifBlank { "Gateway HTTP $code" }
+                ?: "Gateway HTTP $code"
+        GatewayHttpException(code, parsed?.optString("code"), message)
     }
 }

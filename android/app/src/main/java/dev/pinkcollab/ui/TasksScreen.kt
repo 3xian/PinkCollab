@@ -13,6 +13,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -46,6 +47,8 @@ internal data class TasksScreenActions(
     val selectSession: (SessionKey) -> Unit,
     val openResources: () -> Unit,
     val connectHost: () -> Unit,
+    val checkForUpdates: () -> Unit,
+    val showVersion: () -> Unit,
     val session: (Session, SessionAction) -> Unit,
 )
 
@@ -87,6 +90,8 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
             taskCount = sessions.size,
             showWorkspaces = app.hosts.isNotEmpty(),
             openResources = openResources,
+            checkForUpdates = actions.checkForUpdates,
+            showVersion = actions.showVersion,
         )
         TasksPagerBar(
             sessions = sessions,
@@ -307,69 +312,86 @@ private fun TasksTopBar(
     taskCount: Int,
     showWorkspaces: Boolean,
     openResources: () -> Unit,
+    checkForUpdates: () -> Unit,
+    showVersion: () -> Unit,
 ) {
-    Row(
+    var showConfMenu by remember { mutableStateOf(false) }
+    Column(
         Modifier
             .fillMaxWidth()
-            .height(44.dp)
             .background(Base0.copy(alpha = 0.90f))
-            .padding(start = 16.dp, end = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
-        Text(
-            "Sessions",
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.width(8.dp))
         Row(
-            Modifier
-                .background(Violet400.copy(alpha = 0.12f), RoundedCornerShape(50))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(6.dp).background(Violet400, CircleShape))
-            Spacer(Modifier.width(5.dp))
             Text(
-                "$activeTaskCount/$taskCount active",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextHigh,
-                fontWeight = FontWeight.Medium,
+                "Sessions",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
             )
-        }
-        Spacer(Modifier.width(10.dp))
-        Spacer(Modifier.weight(1f))
-        if (showWorkspaces) {
-            TextButton(
-                onClick = rememberHapticOnClick(openResources),
-                contentPadding = PaddingValues(0.dp),
+            Spacer(Modifier.width(8.dp))
+            Row(
+                Modifier
+                    .background(Violet400.copy(alpha = 0.12f), RoundedCornerShape(50))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    Modifier
-                        .height(30.dp)
-                        .background(Color.White.copy(alpha = 0.065f), RoundedCornerShape(50))
-                        .padding(horizontal = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(
-                        Modifier.brandGradientMask(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Outlined.FolderOpen,
-                            contentDescription = null,
-                            Modifier.size(16.dp),
-                            tint = Color.White,
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            "Workspaces",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White,
-                        )
-                    }
+                Box(Modifier.size(6.dp).background(Violet400, CircleShape))
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    "$activeTaskCount/$taskCount active",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextHigh,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (showWorkspaces) {
+                TopBarPill(Icons.Outlined.FolderOpen, "Workspaces", openResources)
+            }
+            Spacer(Modifier.width(6.dp))
+            Box {
+                TopBarPill(Icons.Outlined.Settings, "Conf") { showConfMenu = true }
+                DropdownMenu(expanded = showConfMenu, onDismissRequest = { showConfMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Check for updates") },
+                        onClick = { showConfMenu = false; checkForUpdates() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Current version: v${dev.pinkcollab.BuildConfig.VERSION_NAME}") },
+                        onClick = { showConfMenu = false; showVersion() },
+                    )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TopBarPill(icon: ImageVector, label: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = rememberHapticOnClick(onClick),
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Row(
+            Modifier
+                .height(30.dp)
+                .background(Color.White.copy(alpha = 0.065f), RoundedCornerShape(50))
+                .padding(horizontal = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(Modifier.brandGradientMask(), verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                Spacer(Modifier.width(5.dp))
+                Text(label, style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium, color = Color.White)
             }
         }
     }

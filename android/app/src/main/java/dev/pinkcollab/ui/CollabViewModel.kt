@@ -10,13 +10,18 @@ import android.os.Bundle
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import dev.pinkcollab.BuildConfig
+import dev.pinkcollab.data.AppRelease
+import dev.pinkcollab.data.AppUpdateChecker
 import dev.pinkcollab.data.CredentialStore
 import dev.pinkcollab.data.GatewayRepository
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.AttentionResponse
 import dev.pinkcollab.data.ConnectionState
+import dev.pinkcollab.data.isNewerRelease
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -29,6 +34,10 @@ import kotlinx.coroutines.launch
 class CollabViewModel(application: Application, savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
     private val repository = GatewayRepository(viewModelScope, CredentialStore(application), application)
     internal val appState = repository.state
+    private val updateChecker = AppUpdateChecker(application)
+    private var updateCheckJob: Job? = null
+    private val mutableAvailableUpdate = MutableStateFlow<AppRelease?>(null)
+    internal val availableUpdate = mutableAvailableUpdate.asStateFlow()
     private val effectChannel = Channel<UiEffect>(Channel.BUFFERED)
     internal val effects = effectChannel.receiveAsFlow()
     private fun showError(message: String) { effectChannel.trySend(UiEffect.ShowSnackbar(message)) }
@@ -107,6 +116,29 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun reconnectUnavailableHosts() = hostOperations.reconnectUnavailableHosts()
     internal fun loadDirectory(key: BrowserKey, forceRefresh: Boolean = false) = hostOperations.loadDirectory(key, forceRefresh)
     internal fun createSession(hostId: String, path: String) = hostOperations.create(hostId, path)
+    internal fun checkForUpdates(manual: Boolean) {
+        if (!manual && updateCheckJob?.isActive == true) return
+        updateCheckJob?.cancel()
+        updateCheckJob = viewModelScope.launch {
+            try {
+                val latest = if (manual) updateChecker.fetchLatest() else updateChecker.checkAutomatically()
+                if (latest != null && isNewerRelease(latest, BuildConfig.VERSION_CODE)) {
+                    if (manual || !BuildConfig.DEBUG) mutableAvailableUpdate.value = latest
+                } else if (manual) {
+                    showError("PinkCollab is up to date")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (manual) showError("Could not check for updates")
+            }
+        }
+    }
+
+    internal fun dismissUpdate() {
+        updateCheckJob?.cancel()
+        mutableAvailableUpdate.value = null
+    }
 
     internal fun sendPrompt(session: Session) = sessionCoordinator.send(session)
     internal fun sessionCommand(session: Session, command: SessionUserCommand) = sessionCoordinator.command(session, command)

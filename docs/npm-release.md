@@ -58,6 +58,8 @@ git push origin vX.Y.Z
 
 Do not use a lightweight tag or `git tag -m`. A new tag without committed notes, or whose annotation does not match that file, fails before the build. The workflow does not generate a commit list.
 
+For a prerelease, use the same suffix in every manifest version, the notes filename, and the annotated tag (for example, `1.2.3-rc.1` and `docs/releases/v1.2.3-rc.1.md`). The workflow marks suffix tags as GitHub prereleases, excluding them from `/releases/latest`, which the Android updater uses; unsuffixed `vX.Y.Z` tags remain stable GitHub releases.
+
 npm versions and GitHub Release assets are never overwritten. If publishing stops after only some platform packages, cut a new version. If every npm package was published but Release creation failed, create the Release from that run's artifacts and checksums instead of rebuilding binaries.
 
 If nothing was published and those artifacts are gone:

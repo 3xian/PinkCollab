@@ -240,9 +240,14 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           notes="docs/releases/$RELEASE_TAG.md"
+          release_args=(--verify-tag --title "$RELEASE_TAG")
+          case "$RELEASE_TAG" in
+            *-*) release_args+=(--prerelease) ;;
+          esac
           if [ -f "$notes" ]; then
-            gh release create "$RELEASE_TAG" release-assets/* --verify-tag --notes-file "$notes" --title "$RELEASE_TAG"
+            release_args+=(--notes-file "$notes")
           else
             # Recovery of tags published before versioned release notes were required.
-            gh release create "$RELEASE_TAG" release-assets/* --verify-tag --generate-notes --title "$RELEASE_TAG"
+            release_args+=(--generate-notes)
           fi
+          gh release create "$RELEASE_TAG" release-assets/* "${release_args[@]}"

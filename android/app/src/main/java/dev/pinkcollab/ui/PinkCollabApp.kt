@@ -1,5 +1,8 @@
 package dev.pinkcollab.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -17,6 +20,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
+import dev.pinkcollab.BuildConfig
 import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
@@ -33,6 +38,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
     val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
     val drafts by vm.drafts.collectAsStateWithLifecycle()
+    val availableUpdate by vm.availableUpdate.collectAsStateWithLifecycle()
     val fileSelections by vm.fileSelections.collectAsStateWithLifecycle()
     var route by rememberSaveable(stateSaver = AppRouteSaver) { mutableStateOf<AppRoute>(AppRoute.Tasks) }
     var pairHost by rememberSaveable(stateSaver = PairHostSheetStateSaver) {
@@ -42,6 +48,8 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     var selectedSession by rememberSaveable(saver = SelectedSessionSaver) { mutableStateOf<SessionKey?>(null) }
     var startupReady by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner, vm) {
@@ -59,6 +67,9 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     LaunchedEffect(vm) {
         awaitStartupReadiness(vm.appState)
         startupReady = true
+    }
+    LaunchedEffect(startupReady, vm) {
+        if (startupReady) vm.checkForUpdates(manual = false)
     }
 
     LaunchedEffect(vm) {
@@ -140,6 +151,10 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                 selectSession = { selectedSession = it },
                                 openResources = { route = AppRoute.Resources },
                                 connectHost = { pairHost = PairHostSheetState(visible = true) },
+                                checkForUpdates = { vm.checkForUpdates(manual = true) },
+                                showVersion = {
+                                    scope.launch { snackbar.showSnackbar("Current version: v${BuildConfig.VERSION_NAME}") }
+                                },
                                 session = vm::onSessionAction,
                             ),
                         )
@@ -178,6 +193,21 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                 },
             )
             }
+        }
+        availableUpdate?.let { release ->
+            AppUpdateDialog(
+                release = release,
+                currentVersion = "v${BuildConfig.VERSION_NAME}",
+                onDismiss = vm::dismissUpdate,
+                onUpdate = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.updateUrl)))
+                        vm.dismissUpdate()
+                    } catch (_: ActivityNotFoundException) {
+                        scope.launch { snackbar.showSnackbar("No browser available to open the update") }
+                    }
+                },
+            )
         }
     }
 }
