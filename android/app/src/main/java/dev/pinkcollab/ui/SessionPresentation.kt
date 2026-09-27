@@ -59,7 +59,7 @@ internal fun sessionControls(
     val inputEnabled = connected && !activity.inputBusy && session.attention == null &&
         session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping &&
         (!session.runtimeAttached || session.runtimeExecution != RuntimeExecution.Unknown)
-    val hasMessages = detail.historyItems.isNotEmpty() || detail.liveItems.isNotEmpty()
+    val hasMessages = detail.savedHistory.items.isNotEmpty() || detail.liveItems.isNotEmpty()
     val placeholder = when {
         !hasMessages -> "What should OMP do?"
         session.status == SessionStatus.Running -> "Steer OMP…"

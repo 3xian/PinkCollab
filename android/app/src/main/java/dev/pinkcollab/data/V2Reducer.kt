@@ -50,7 +50,7 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                 require(session.hostId == hostId) { "Session belongs to another host" }
                 val live = payload.getJSONArray("messages").objects().map { it.item() }
                 // A fresh subscription has no source proof for a page cached by the previous one.
-                val history = emptyList<TimelineItem>()
+                val savedHistory = if (payload.optString("historyRef").isNotBlank()) SavedHistory.Loading else SavedHistory.None
                 val receipt = payload.optJSONArray("recentOperations")?.objects()?.map { it.receipt() }.orEmpty()
                 val detail = SessionDetail(
                     session = session,
@@ -58,15 +58,13 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                     cursor = cursor,
                     subscriptionId = subscriptionId,
                     operations = receipt,
-                    historySourceId = null,
-                    nextHistoryCursor = null,
-                    historyItems = history,
+                    savedHistory = savedHistory,
                     liveItems = live,
                 )
                 val updatedHost = host.copy(sessions = host.sessions.filterNot { it.id == sessionId } + session, revision = host.revision + 1)
                 V2Reduction(
                     app.copy(hosts = app.hosts + (hostId to updatedHost), details = app.details + (SessionKey(hostId, sessionId) to detail)),
-                    if (payload.optString("historyRef").isNotBlank())
+                    if (savedHistory is SavedHistory.Loading)
                         listOf(GatewayEffect.LoadHistory(SessionKey(hostId, sessionId))) else emptyList(),
                 )
             }
@@ -134,14 +132,14 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                         "v2.metadata.updated" -> {
                             updated = updated.copy(session = updated.session.withMetadata(value.getJSONObject("session")))
                             // Startup publishes the OMP mapping here; its path is intentionally absent from the wire.
-                            if (updated.historySourceId == null) loadHistory = true
+                            if (updated.savedHistory.sourceId == null) {
+                                if (updated.savedHistory !is SavedHistory.Ready) updated = updated.copy(savedHistory = SavedHistory.Loading)
+                                loadHistory = true
+                            }
                         }
                         "v2.runtime.exited" -> {
-                            updated = updated.withRuntimeSession(updated.session.withRuntime(null), emptyList(), null).copy(
-                                historyItems = emptyList(),
-                                historySourceId = null,
-                                nextHistoryCursor = null,
-                            )
+                            updated = updated.withRuntimeSession(updated.session.withRuntime(null), emptyList(), null)
+                                .copy(savedHistory = SavedHistory.Loading)
                             loadHistory = true
                         }
                         "v2.operation.updated" -> {

@@ -147,9 +147,10 @@ class V2ReducerTest {
                 .put("historyRef", "omp"))
         val subscribed = reduceV2(hostState, "host", snapshot)
         assertEquals(listOf(GatewayEffect.LoadHistory(sessionKey)), subscribed.effects)
+        assertEquals(SavedHistory.Loading, subscribed.state.details.getValue(sessionKey).savedHistory)
         val baseline = subscribed.state
         val history = TimelineItem("saved", "user", "older", "", "")
-        val detail = baseline.details.getValue(sessionKey).copy(historyItems = listOf(history))
+        val detail = baseline.details.getValue(sessionKey).copy(savedHistory = SavedHistory.Ready("source", listOf(history), null))
         val withHistory = baseline.copy(details = baseline.details + (sessionKey to detail))
         val live = JSONObject().put("id", "live").put("kind", "assistant")
             .put("text", "current").put("detail", "").put("timestamp", "")
@@ -160,7 +161,7 @@ class V2ReducerTest {
                 .put("value", JSONObject().put("items", org.json.JSONArray().put(live))
                     .put("removedIds", org.json.JSONArray()))))
         val updated = reduceV2(withHistory, "host", patch).state.details.getValue(sessionKey)
-        assertEquals(listOf("saved"), updated.historyItems.map { it.id })
+        assertEquals(listOf("saved"), updated.savedHistory.items.map { it.id })
         assertEquals(listOf("live"), updated.liveItems.map { it.id })
     }
 
@@ -181,6 +182,7 @@ class V2ReducerTest {
                 .put("value", JSONObject().put("session", record))))
         val mapped = reduceV2(beforeMapping.state, "host", metadata)
         assertEquals(listOf(GatewayEffect.LoadHistory(sessionKey)), mapped.effects)
+        assertEquals(SavedHistory.Loading, mapped.state.details.getValue(sessionKey).savedHistory)
     }
 
     @Test fun runtime_exit_clears_previous_history_until_the_new_page_arrives() {
@@ -193,9 +195,10 @@ class V2ReducerTest {
             .put("payload", JSONObject().put("session", record).put("runtime", runtime)
                 .put("messages", org.json.JSONArray()).put("recentOperations", org.json.JSONArray()))
         val baseline = reduceV2(hostState, "host", snapshot).state
+        assertEquals(SavedHistory.None, baseline.details.getValue(sessionKey).savedHistory)
         val oldHistory = TimelineItem("saved", "user", "older", "", "")
         val detail = baseline.details.getValue(sessionKey).copy(
-            historyItems = listOf(oldHistory), historySourceId = "old-source", nextHistoryCursor = "older",
+            savedHistory = SavedHistory.Ready("old-source", listOf(oldHistory), "older"),
         )
         val withHistory = baseline.copy(details = baseline.details + (sessionKey to detail))
         val exit = JSONObject().put("type", "change").put("resource", "session/session")
@@ -205,9 +208,7 @@ class V2ReducerTest {
                 .put("value", JSONObject())))
         val result = reduceV2(withHistory, "host", exit)
         assertEquals(listOf(GatewayEffect.LoadHistory(sessionKey)), result.effects)
-        assertEquals(emptyList<TimelineItem>(), result.state.details.getValue(sessionKey).historyItems)
-        assertNull(result.state.details.getValue(sessionKey).historySourceId)
-        assertNull(result.state.details.getValue(sessionKey).nextHistoryCursor)
+        assertEquals(SavedHistory.Loading, result.state.details.getValue(sessionKey).savedHistory)
 
         val previousRequest = HistoryRequest("session-sub", result.state.details.getValue(sessionKey).historyEpoch)
         val nextRuntime = JSONObject().put("generation", "run-two").put("phase", "ready")

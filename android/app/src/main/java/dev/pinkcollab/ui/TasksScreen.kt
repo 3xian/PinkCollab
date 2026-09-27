@@ -316,59 +316,38 @@ private fun TasksTopBar(
     showVersion: () -> Unit,
 ) {
     var showConfMenu by remember { mutableStateOf(false) }
-    Column(
+    Row(
         Modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 44.dp)
             .background(Base0.copy(alpha = 0.90f))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "Sessions",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.width(8.dp))
-            Row(
-                Modifier
-                    .background(Violet400.copy(alpha = 0.12f), RoundedCornerShape(50))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(6.dp).background(Violet400, CircleShape))
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    "$activeTaskCount/$taskCount active",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextHigh,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (showWorkspaces) {
-                TopBarPill(Icons.Outlined.FolderOpen, "Workspaces", openResources)
-            }
+        Text(
+            "Sessions $activeTaskCount/$taskCount active",
+            Modifier.weight(1f).padding(end = 10.dp),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            softWrap = false,
+        )
+        if (showWorkspaces) {
+            TopBarPill(Icons.Outlined.FolderOpen, "Workspaces", openResources)
             Spacer(Modifier.width(6.dp))
-            Box {
-                TopBarPill(Icons.Outlined.Settings, "Conf") { showConfMenu = true }
-                DropdownMenu(expanded = showConfMenu, onDismissRequest = { showConfMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Check for updates") },
-                        onClick = { showConfMenu = false; checkForUpdates() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Current version: v${dev.pinkcollab.BuildConfig.VERSION_NAME}") },
-                        onClick = { showConfMenu = false; showVersion() },
-                    )
-                }
+        }
+        Box {
+            TopBarPill(Icons.Outlined.Settings, "Conf") { showConfMenu = true }
+            DropdownMenu(expanded = showConfMenu, onDismissRequest = { showConfMenu = false }) {
+                DropdownMenuItem(
+                    text = { Text("Check for updates") },
+                    onClick = { showConfMenu = false; checkForUpdates() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Current version: v${dev.pinkcollab.BuildConfig.VERSION_NAME}") },
+                    onClick = { showConfMenu = false; showVersion() },
+                )
             }
         }
     }
@@ -387,12 +366,10 @@ private fun TopBarPill(icon: ImageVector, label: String, onClick: () -> Unit) {
                 .padding(horizontal = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(Modifier.brandGradientMask(), verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
-                Spacer(Modifier.width(5.dp))
-                Text(label, style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Medium, color = Color.White)
-            }
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Purple400)
+            Spacer(Modifier.width(5.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Medium, color = Purple400)
         }
     }
 }

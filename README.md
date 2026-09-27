@@ -55,6 +55,8 @@ pinkcollab pair
 
 Scan the QR in the app. Open **Workspaces**, choose one of the directories you allowed, create a session, and send a prompt.
 
+In a session, the right-hand composer controls are **Stop** (interrupt the current turn), **Exit** (confirm before ending the runtime), and **Send** (submit the prompt).
+
 The pairing code lasts five minutes and works once. If it expires, run `pair` again.
 
 From **Sessions**, open **Conf → Check for updates** to check the latest GitHub release manually or see the installed version. On normal startup the app checks at most once every 24 hours; an available update shows its release notes and opens the HTTPS APK link in a browser. Installation remains outside the app.

@@ -136,7 +136,7 @@ internal class GatewayRepository(
                 }
                 is GatewayEffect.LoadHistory -> {
                     val subscriptionId = state.value.details[effect.session]?.subscriptionId
-                    if (subscriptionId != null) scope.launch {
+                    scope.launch {
                         runCatching { sessions.loadHistory(effect.session.hostId, effect.session.sessionId, subscriptionId) }
                             .onFailure { reportError(it.message ?: "History unavailable") }
                     }

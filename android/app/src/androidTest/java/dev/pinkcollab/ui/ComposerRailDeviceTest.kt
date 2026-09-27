@@ -43,10 +43,13 @@ class ComposerRailDeviceTest {
             }
         }
 
-        compose.onNodeWithText("Stop").assertExists()
-        compose.onNodeWithText("Exit").assertExists()
+        val stop = compose.onNodeWithText("Stop")
+        val exit = compose.onNodeWithText("Exit")
+        val send = compose.onNodeWithText("Send")
+        assertEquals(stop.fetchSemanticsNode().boundsInRoot.left, exit.fetchSemanticsNode().boundsInRoot.left)
+        assertEquals(stop.fetchSemanticsNode().boundsInRoot.left, send.fetchSemanticsNode().boundsInRoot.left)
         compose.onNodeWithText("Start").assertDoesNotExist()
-        compose.onNodeWithText("Send").performClick()
+        send.performClick()
         compose.runOnIdle { assertEquals(1, sent.get()) }
     }
 

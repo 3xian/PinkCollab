@@ -8,9 +8,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -21,9 +19,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.ModelCatalog
@@ -65,7 +62,7 @@ internal fun ExitConfirmationDialog(
 /** Leading/trailing inset for composer content; the composer card itself stays unpadded. */
 internal val ComposerContentInset = 14.dp
 
-private val ComposerRailMinWidth = 72.dp
+private val ComposerRailMinWidth = 64.dp
 
 /** Each rail action keeps a 48 dp touch target even when the composer card is short. */
 private val ComposerRailActionMinHeight = 48.dp
@@ -89,7 +86,6 @@ internal fun ComposerRail(
             .then(modifier),
     ) {
         ComposerRailButton(
-            icon = Icons.Outlined.Stop,
             label = "Stop",
             onClick = { onCommand(SessionUserCommand.Interrupt) },
             enabled = controls.canInterrupt,
@@ -98,7 +94,6 @@ internal fun ComposerRail(
         )
         Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
         ComposerRailButton(
-            icon = Icons.AutoMirrored.Outlined.Logout,
             label = "Exit",
             onClick = onExit,
             enabled = controls.canStop,
@@ -106,20 +101,19 @@ internal fun ComposerRail(
             modifier = Modifier.weight(1f),
         )
         ComposerRailButton(
-            icon = Icons.AutoMirrored.Outlined.Send,
             label = "Send",
             onClick = onSend,
             enabled = controls.canSend,
-            contentColor = if (controls.canSend) MaterialTheme.colorScheme.onPrimary else Gray400.copy(alpha = 0.58f),
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             modifier = Modifier.weight(1f),
-            fill = if (controls.canSend) BrandGradient else SolidColor(Gray400.copy(alpha = 0.16f)),
+            // Disabled Send is a plain rail row like Stop: no fill, same dim label.
+            fill = if (controls.canSend) BrandGradient else null,
         )
     }
 }
 
 @Composable
 private fun ComposerRailButton(
-    icon: ImageVector,
     label: String,
     onClick: () -> Unit,
     enabled: Boolean,
@@ -135,11 +129,14 @@ private fun ComposerRailButton(
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick)),
         contentAlignment = Alignment.Center,
     ) {
-        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
-            Spacer(Modifier.width(4.dp))
-            Text(label, maxLines = 1, style = MaterialTheme.typography.labelMedium, color = color)
-        }
+        Text(
+            label,
+            maxLines = 1,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Default,
+            fontWeight = FontWeight.Bold,
+            color = color,
+        )
     }
 }
 

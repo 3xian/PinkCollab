@@ -135,18 +135,18 @@ private fun MessageCard(item: SessionDisplayItem.Message, markwon: Markwon) {
 
 @Composable
 private fun YouLabel() {
-    SpeakerTitle("You")
+    SpeakerTitle("You", Purple400)
 }
 
 @Composable
-private fun SpeakerTitle(text: String, modifier: Modifier = Modifier) {
-    // Reserve space inside the offscreen gradient layer for italic glyph overhang.
+private fun SpeakerTitle(text: String, color: Color, modifier: Modifier = Modifier) {
     Text(
         text,
-        modifier = modifier.brandGradientMask().padding(end = 6.dp),
+        modifier = modifier.padding(end = 6.dp), // Keeps the synthesized italic overhang clear of the model chip.
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.Bold,
         fontStyle = FontStyle.Italic,
+        color = color,
     )
 }
 
@@ -162,7 +162,7 @@ private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
 @Composable
 internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        SpeakerTitle(if (replying) "Agent · replying" else "Agent")
+        SpeakerTitle(if (replying) "Agent · replying" else "Agent", BrandPink)
         model?.let {
             Spacer(Modifier.width(8.dp))
             Surface(
@@ -279,7 +279,9 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
     ) {
         Text(
             title,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            fontStyle = FontStyle.Italic,
             color = activityTint,
         )
         if (group.summary.isNotBlank()) Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid)
@@ -314,7 +316,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Error", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = Red400)
+        Text("Error", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = Red400)
         Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (item.details.isNotBlank() && item.details != item.text) {
             TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "Collapse" else "View error") }
@@ -366,8 +368,9 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
                         "error" -> "Error"
                         else -> "Activity"
                     },
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
+                    fontStyle = FontStyle.Italic,
                     color = if (item.kind == "error") Red400 else TextMid,
                 )
             }

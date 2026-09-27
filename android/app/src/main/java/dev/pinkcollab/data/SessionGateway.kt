@@ -37,30 +37,55 @@ internal class SessionGateway(
         awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[key]?.subscriptionId != null }
     }
 
-    suspend fun loadHistory(hostId: String, id: String, subscriptionId: String) {
+    suspend fun loadHistory(hostId: String, id: String, subscriptionId: String?) {
         val key = SessionKey(hostId, id)
         val before = state.value.details[key] ?: return
         if (before.subscriptionId != subscriptionId) return
+        if (subscriptionId == null) {
+            failUnstartedHistory(key)
+            throw IOException("History unavailable")
+        }
         val request = HistoryRequest(subscriptionId, before.historyEpoch)
         val p = paired(hostId)
-        val raw = api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "limit" to "100")
-        val page = parseHistoryPage(raw)
+        val page = try {
+            parseHistoryPage(api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "limit" to "100"))
+        } catch (failure: Exception) {
+            // A visible page stays visible. An in-flight first page must not become "no messages".
+            updateMatched(key, request) { current ->
+                if (current.savedHistory is SavedHistory.Ready) current else current.copy(savedHistory = SavedHistory.Failed)
+            }
+            throw failure
+        }
+        updateMatched(key, request) { current ->
+            current.copy(
+                savedHistory = SavedHistory.Ready(page.source, page.items, page.nextCursor),
+                liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
+            )
+        }
+    }
+
+    /** The effect was dropped before a request existed. Do not leave the page Loading. */
+    private fun failUnstartedHistory(key: SessionKey) {
+        mutable.update { app ->
+            val current = app.details[key] ?: return@update app
+            if (current.subscriptionId != null || current.savedHistory !is SavedHistory.Loading) return@update app
+            app.copy(details = app.details + (key to current.copy(savedHistory = SavedHistory.Failed)))
+        }
+    }
+
+    private fun updateMatched(key: SessionKey, request: HistoryRequest, transform: (SessionDetail) -> SessionDetail) {
         mutable.update { app ->
             val current = app.details[key] ?: return@update app
             if (!request.matches(current)) return@update app
-            app.copy(details = app.details + (key to current.copy(
-                historyItems = page.items,
-                liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
-                historySourceId = page.source,
-                nextHistoryCursor = page.nextCursor,
-            )))
+            app.copy(details = app.details + (key to transform(current)))
         }
     }
 
     suspend fun loadEarlierHistory(hostId: String, id: String) {
         val key = SessionKey(hostId, id)
         val before = state.value.details[key] ?: return
-        val cursor = before.nextHistoryCursor ?: return
+        val ready = before.savedHistory as? SavedHistory.Ready ?: return
+        val cursor = ready.nextCursor ?: return
         val request = HistoryRequest(before.subscriptionId ?: return, before.historyEpoch)
         val p = paired(hostId)
         val page = try {
@@ -72,14 +97,13 @@ internal class SessionGateway(
             }
             throw failure
         }
-        mutable.update { app ->
-            val current = app.details[key] ?: return@update app
-            if (!request.matches(current) || current.historySourceId != page.source) return@update app
-            val history = page.items + current.historyItems
-            app.copy(details = app.details + (key to current.copy(
-                historyItems = history,
-                nextHistoryCursor = page.nextCursor,
-            )))
+        updateMatched(key, request) { current ->
+            val currentReady = current.savedHistory as? SavedHistory.Ready
+            if (currentReady == null || currentReady.sourceId != page.source) current
+            else current.copy(savedHistory = currentReady.copy(
+                items = page.items + currentReady.items,
+                nextCursor = page.nextCursor,
+            ))
         }
     }
 

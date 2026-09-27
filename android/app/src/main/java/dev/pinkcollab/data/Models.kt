@@ -106,6 +106,30 @@ sealed interface OperationStatus {
 }
 
 data class OperationReceipt(val commandId: String, val status: OperationStatus, val commandType: String, val errorCode: String? = null)
+/** Saved transcript for this subscription. Loading and Failed are not an empty page. */
+sealed interface SavedHistory {
+    val sourceId: String? get() = null
+    val items: List<TimelineItem> get() = emptyList()
+    val nextCursor: String? get() = null
+
+    /** True only when the transcript is known to be absent. */
+    val knownEmpty: Boolean
+        get() = when (this) {
+            None -> true
+            is Ready -> items.isEmpty()
+            Loading, Failed -> false
+        }
+
+    data object None : SavedHistory
+    data object Loading : SavedHistory
+    data class Ready(
+        override val sourceId: String?,
+        override val items: List<TimelineItem>,
+        override val nextCursor: String?,
+    ) : SavedHistory
+    data object Failed : SavedHistory
+}
+
 data class SessionDetail(
     val session: Session,
     val streaming: String = "",
@@ -113,9 +137,7 @@ data class SessionDetail(
     val cursor: Cursor? = null,
     val subscriptionId: String? = null,
     val operations: List<OperationReceipt> = emptyList(),
-    val historySourceId: String? = null,
-    val nextHistoryCursor: String? = null,
-    val historyItems: List<TimelineItem> = emptyList(),
+    val savedHistory: SavedHistory = SavedHistory.None,
     val liveItems: List<TimelineItem> = emptyList(),
     val historyEpoch: Long = 0,
 )

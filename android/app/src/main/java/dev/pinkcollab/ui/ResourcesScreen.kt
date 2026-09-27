@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -123,8 +124,8 @@ internal fun ResourcesScreen(
                             Icon(Icons.Outlined.DeleteOutline, "Remove host")
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Text(host.paired.url, style = MaterialTheme.typography.bodySmall, color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(2.dp))
+                    HostUrlRow(host.paired.url)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             "OMP ${host.paired.host.ompVersion} · Gateway ${host.paired.host.gatewayVersion}",
@@ -226,6 +227,32 @@ private fun ConnectingLabel(text: String, color: Color) {
         ),
         onTextLayout = { textWidth = it.size.width.toFloat() },
     )
+}
+
+@Composable
+private fun HostUrlRow(url: String) {
+    var visible by rememberSaveable(url) { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (visible) url else "https://••••",
+            Modifier.weight(1f, fill = false),
+            style = MaterialTheme.typography.bodySmall,
+            color = Gray400,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        IconButton(
+            onClick = rememberHapticOnClick { visible = !visible },
+            modifier = Modifier.size(36.dp),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = Gray400),
+        ) {
+            Icon(
+                if (visible) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                contentDescription = if (visible) "Hide URL" else "Show URL",
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
 }
 
 @Composable

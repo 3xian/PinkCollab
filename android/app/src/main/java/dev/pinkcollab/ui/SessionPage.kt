@@ -101,11 +101,12 @@ internal fun SessionPage(
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
-    val historyTimeline = remember(detail.historyItems) { projectSessionTimeline(detail.historyItems) }
+    val savedHistory = detail.savedHistory
+    val historyTimeline = remember(savedHistory.items) { projectSessionTimeline(savedHistory.items) }
     val liveTimeline = if (session.runtimeAttached) {
         remember(detail.liveItems) { projectSessionTimeline(detail.liveItems) }
     } else emptyList()
-    val hasSavedMessages = historyTimeline.isNotEmpty() || detail.nextHistoryCursor != null
+    val hasSavedMessages = historyTimeline.isNotEmpty() || savedHistory.nextCursor != null
     val timelineState = rememberLazyListState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
 
@@ -181,11 +182,12 @@ internal fun SessionPage(
             state = timelineState,
             contentPadding = PaddingValues(
                 top = 8.dp,
-                bottom = 0.dp,
+                // Keeps the last timeline item clear of the floating composer card.
+                bottom = composerClearance,
             ),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            if (detail.nextHistoryCursor != null) item(key = "load-earlier") {
+            if (savedHistory.nextCursor != null) item(key = "load-earlier") {
                 TextButton(onClick = onLoadEarlier, modifier = Modifier.fillMaxWidth(), enabled = !activity.history) {
                     Text("Load earlier messages")
                 }
@@ -212,7 +214,7 @@ internal fun SessionPage(
                     )
                 }
                 items(liveTimeline, key = { "live:${it.id}" }) { item -> DisplayItem(item, markwon) }
-            } else if (historyTimeline.isEmpty()) item(key = "timeline-empty") {
+            } else if (savedHistory.knownEmpty) item(key = "timeline-empty") {
                 Text(
                     "No saved messages yet",
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
@@ -242,14 +244,6 @@ internal fun SessionPage(
                 Text(text, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = if (receipt.status == OperationStatus.OutcomeUnknown || receipt.status == OperationStatus.Failed) Red400 else TextMid)
             } }
             session.attention?.let { attention -> item { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
-            item(key = "composer-placeholder") {
-                Spacer(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(composerClearance + 12.dp)
-                        .background(TimelineBandBase),
-                )
-            }
         }
         }
         Box(
