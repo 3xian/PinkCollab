@@ -35,7 +35,7 @@
   <div class="site-shell">
     <header class="site-header">
       <a class="brand" href="./" aria-label="PinkCollab home"><img src="assets/logo-96.png" width="42" height="42" decoding="async" alt=""><span>PinkCollab<span class="brand-dot">.</span></span></a>
-      <nav aria-label="Main navigation"><a class="nav-source nav-start" href="#get-started">Get started</a><a href="#architecture">Architecture</a><a class="nav-wide" href="#how-it-works">How it works</a><a href="https://omp.sh/">Oh My Pi <span aria-hidden="true">↗</span></a><a class="nav-source" href="https://github.com/3xian/PinkCollab">GitHub <span aria-hidden="true">↗</span></a></nav>
+      <nav aria-label="Main navigation"><a class="nav-source nav-start" href="#get-started">Get started</a><a href="#architecture">Architecture</a><a class="nav-wide" href="#compare">Why PinkCollab</a><a href="https://omp.sh/">Oh My Pi <span aria-hidden="true">↗</span></a><a class="nav-source" href="https://github.com/3xian/PinkCollab">GitHub <span aria-hidden="true">↗</span></a></nav>
     </header>
     <main id="main">
       <section class="hero" aria-labelledby="hero-title">
@@ -73,10 +73,27 @@
         </div>
       </section>
       <div class="principles-strip"><p>One phone.<br><strong>Every workspace.</strong></p><span>Start a session</span><span>Follow it live</span><span>Answer when needed <b aria-hidden="true">↗</b></span></div>
-      <section class="workflow section" id="how-it-works" aria-labelledby="workflow-title">
-        <div class="section-heading"><p class="eyebrow">FROM YOUR DESK TO YOUR POCKET</p><h2 id="workflow-title">Three steps to a running session.</h2><p>Named exactly as they appear in the Android app.</p></div>
-        <div class="steps"><article><span class="step-number">01</span><h3>Choose a workspace.</h3><p>Open <strong>Workspaces</strong>, browse the roots a paired host allows, and pick the project directory you want to work in.</p></article><article><span class="step-number">02</span><h3>Create the session.</h3><p>PinkCollab saves the conversation and starts <code>omp --mode rpc-ui</code> in that directory immediately, so you can choose a model before the first message.</p></article><article><span class="step-number">03</span><h3>Follow it live.</h3><p>Watch streaming replies and tool activity, then use <strong>Send</strong>, <strong>Stop</strong>, or <strong>Exit</strong> while the app is connected. After <strong>Exit</strong>, <strong>Start</strong> reattaches without sending a prompt.</p></article></div>
-        <p class="steps-note">No terminal emulator, no editor: PinkCollab starts and controls OMP sessions on your host. It does not attach to a terminal session.</p>
+      <section class="compare section" id="compare" aria-labelledby="compare-title">
+        <div class="compare-intro">
+          <div class="compare-copy">
+            <p class="eyebrow">WHY A SEPARATE APP <span aria-hidden="true">/ 01</span></p>
+            <h2 id="compare-title">OMP already has <code>/collab</code>.<br><span>Here is what PinkCollab adds.</span></h2>
+            <p>Both give a second screen on OMP. They solve different halves of the problem.</p>
+          </div>
+          <div class="compare-visual" role="img" aria-label="Collab shares an existing terminal session; PinkCollab starts and manages sessions from your phone.">
+            <div class="compare-visual-row"><span class="compare-visual-icon" aria-hidden="true">⌘</span><span><small>OMP /COLLAB</small><strong>Join a running session</strong></span><span class="compare-visual-status">SHARE</span></div>
+            <div class="compare-visual-connector" aria-hidden="true"><span>VS</span></div>
+            <div class="compare-visual-row compare-visual-row-active"><span class="compare-visual-icon" aria-hidden="true">▣</span><span><small>PINKCOLLAB / ANDROID</small><strong>Start one from anywhere</strong></span><span class="compare-visual-status">CREATE</span></div>
+          </div>
+        </div>
+        <ol class="compare-list">
+          <li><span class="compare-number">01 / BEGIN</span><b>Start work, do not just watch it.</b><p><code>/collab</code> shares a session that is already running on a terminal you opened. PinkCollab creates the session itself and starts OMP in that directory, so a new task can begin without a keyboard in front of the host.</p></li>
+          <li><span class="compare-number">02 / RETURN</span><b>Persistent sessions.</b><p>A Collab room follows one process and ends when it does. PinkCollab keeps the session in your list after OMP exits, reloads its transcript, and starts a new runtime on the same conversation later.</p></li>
+          <li><span class="compare-number">03 / CONTROL</span><b>Attach files and choose the model.</b><p>A <code>/collab</code> guest can prompt and interrupt, but cannot change the model or upload a file. PinkCollab does both from the phone, then sends, steers, stops, or answers.</p></li>
+          <li><span class="compare-number">04 / CONNECT</span><b>Reachable without a relay.</b><p><code>/collab</code> reaches guests through OMP's hosted relay, and its production relay is not distributed for self-hosting. PinkCollab talks only to the Gateway you run: Tailscale Funnel, private Serve, or your own HTTPS proxy.</p></li>
+          <li><span class="compare-number">05 / MOVE</span><b>Swipe between live sessions.</b><p>A <code>/collab</code> link opens one session. PinkCollab keeps every session in one pager: swipe to read the next one and steer it, while the others keep running.</p></li>
+          <li class="compare-caveat"><span class="compare-number">06 / THE BOUNDARY</span><b>Gaps it does not close.</b><p>PinkCollab does not mirror the TUI, and OMP stays in control of tools, files, and credentials. Use <code>/collab</code> when you want a colleague inside your terminal session; use PinkCollab to run your own sessions from your phone.</p></li>
+        </ol>
       </section>
       <section class="getting-started section" id="get-started" aria-labelledby="start-title">
         <div class="start-copy">
@@ -143,17 +160,6 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
           <a class="architecture-detail-link" href="https://github.com/3xian/PinkCollab/blob/main/docs/architecture.md">Architecture <span aria-hidden="true">↗</span></a>
                   <div class="ownership-note"><span aria-hidden="true">⌁</span><p><strong>Your machines stay yours.</strong> OMP runs on your hosts. Model provider credentials are configured there, not on the phone; OMP may send them to your provider when making model requests. Pair devices with a single-use QR code and revoke access when you need to.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment guide <span aria-hidden="true">↗</span></a></div>
         </figure>
-      </section>
-      <section class="compare section" id="compare" aria-labelledby="compare-title">
-        <div class="section-heading"><p class="eyebrow">WHY A SEPARATE APP</p><h2 id="compare-title">OMP already has <code>/collab</code>.<br>Here is what PinkCollab adds.</h2><p>Both give a second screen on OMP. They solve different halves of the problem.</p></div>
-        <ul class="compare-list">
-          <li><b>Start work, do not just watch it.</b> <code>/collab</code> shares a session that is already running on a terminal you opened. PinkCollab creates the session itself and starts OMP in that directory, so a new task can begin without a keyboard in front of the host.</li>
-          <li><b>Persistent sessions.</b> A Collab room follows one process and ends when it does. PinkCollab keeps the session in your list after OMP exits, reloads its transcript, and starts a new runtime on the same conversation later.</li>
-          <li><b>Attach files and choose the model.</b> A <code>/collab</code> guest can prompt and interrupt, but cannot change the model or upload a file. PinkCollab does both from the phone, then sends, steers, stops, or answers.</li>
-          <li><b>Reachable without a relay.</b> <code>/collab</code> reaches guests through OMP's hosted relay, and its production relay is not distributed for self-hosting. PinkCollab talks only to the Gateway you run: Tailscale Funnel, private Serve, or your own HTTPS proxy.</li>
-          <li><b>Swipe between live sessions.</b> A <code>/collab</code> link opens one session. PinkCollab keeps every session in one pager: swipe to read the next one and steer it, while the others keep running.</li>
-          <li><b>Gaps it does not close.</b> PinkCollab does not mirror the TUI, and OMP stays in control of tools, files, and credentials. Use <code>/collab</code> when you want a colleague inside your terminal session; use PinkCollab to run your own sessions from your phone.</li>
-        </ul>
       </section>
       <section class="limits section" id="limits" aria-labelledby="limits-title">
         <div class="section-heading"><p class="eyebrow">BEFORE YOU START</p><h2 id="limits-title">What PinkCollab does not do yet.</h2><p>So the first surprise isn’t a surprise.</p></div>
