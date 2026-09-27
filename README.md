@@ -6,7 +6,7 @@
 
 [OMP](https://omp.sh/) runs on your computer or server. Use the PinkCollab mobile app to start sessions and steer their progress.
 
-<p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="640" alt="PinkCollab app showing an OMP session on a phone" /></p>
+<p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="480" alt="PinkCollab app showing an OMP session on a phone" /></p>
 
 ```mermaid
 flowchart TD
