@@ -2,7 +2,7 @@
 
 <h1 align="center">PinkCollab</h1>
 
-<p align="center"><strong>An awesome Android client for Oh My Pi (OMP).</strong></p>
+<p align="center"><a href="https://3xian.github.io/PinkCollab/">3xian.github.io/PinkCollab</a>, <strong>Android client for Oh My Pi (OMP).</strong></p>
 
 [OMP](https://omp.sh/) runs on your computer or server. Use the PinkCollab mobile app to start sessions and steer their progress.
 
@@ -58,8 +58,6 @@ Scan the QR in the app. Open **Workspaces**, choose one of the directories you a
 In a session, the right-hand composer controls are **Stop** (interrupt the current turn), **Exit** (confirm before ending the runtime), and **Send** (submit the prompt).
 
 The pairing code lasts five minutes and works once. If it expires, run `pair` again.
-
-From **Sessions**, open **Conf → Check for updates** to check the latest GitHub release manually or see the installed version. On normal startup the app checks at most once every 24 hours; an available update shows its release notes and opens the HTTPS APK link in a browser. Installation remains outside the app.
 
 If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attribute in the Tailscale admin console, then run it again.
 
