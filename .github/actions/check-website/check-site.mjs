@@ -209,8 +209,13 @@ check(robots.includes(`${ORIGIN}${BASE}/sitemap.xml`), 'robots.txt: sitemap URL 
 
 // --- stylesheet and font loading ----------------------------------------
 
+// Hash the text as stored, not as checked out: a Windows working tree has CRLF
+// endings and would otherwise disagree with CI over the same file.
+const contentHash = (text) =>
+  createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex').slice(0, 12);
+
 const css = readSite('styles.css');
-const cssVersion = createHash('sha256').update(css).digest('hex').slice(0, 12);
+const cssVersion = contentHash(css);
 for (const page of PAGES) {
   const prefix = page === '404.html' ? `${BASE}/` : '';
   check(
@@ -218,7 +223,7 @@ for (const page of PAGES) {
     `${page}: stylesheet URL must carry the current content hash`,
   );
 }
-const scriptVersion = createHash('sha256').update(readSite('app.js')).digest('hex').slice(0, 12);
+const scriptVersion = contentHash(readSite('app.js'));
 check(
   html['index.html'].includes(`src="app.js?v=${scriptVersion}"`),
   'index.html: script URL must carry the current content hash',
