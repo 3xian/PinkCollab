@@ -106,7 +106,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
             label = "startupContent",
         ) { ready ->
             if (!ready) {
-                StartupLoadingScreen()
+                StartupLoadingScreen(app)
             } else Box(Modifier.fillMaxSize().background(Base0)) {
             Scaffold(
                 containerColor = Color.Transparent,

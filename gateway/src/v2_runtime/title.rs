@@ -101,6 +101,7 @@ mod tests {
                 session,
                 runtime: None,
                 projection: None,
+                work_clock: None,
                 messages: Vec::new(),
                 finalized_messages: HashSet::new(),
                 pending_prompt_results: HashMap::new(),

@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,7 +48,6 @@ import dev.pinkcollab.data.TaskListLoadState
 import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.BrandPink
 import dev.pinkcollab.ui.theme.BrandPurple
-import dev.pinkcollab.ui.theme.TextMid
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
@@ -73,7 +74,7 @@ internal suspend fun awaitStartupReadiness(
 }
 
 @Composable
-internal fun StartupLoadingScreen() {
+internal fun StartupLoadingScreen(app: AppState) {
     val motion = rememberInfiniteTransition(label = "startup")
     val progress by motion.animateFloat(
         initialValue = -1f,
@@ -84,15 +85,6 @@ internal fun StartupLoadingScreen() {
         ),
         label = "loadingLine",
     )
-    val captionAlpha by motion.animateFloat(
-        initialValue = 0.48f,
-        targetValue = 0.88f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1050, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "caption",
-    )
     val loadingLineAlpha = ((1f - abs(progress)) / 0.28f).coerceIn(0f, 1f)
 
     Box(
@@ -101,6 +93,7 @@ internal fun StartupLoadingScreen() {
             .background(Base0),
         contentAlignment = Alignment.Center,
     ) {
+        StartupProgress(app, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 36.dp))
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -140,18 +133,12 @@ internal fun StartupLoadingScreen() {
                         ),
                 )
             }
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "Syncing OMP sessions…",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextMid.copy(alpha = captionAlpha),
-            )
         }
     }
 }
 
 @Composable
-internal fun AnimatedLoadingLogo(logoSize: Dp = 248.dp) {
+internal fun AnimatedLoadingLogo(logoSize: Dp = 248.dp, animateGlow: Boolean = true, glowScale: Float = 1f) {
     val context = LocalContext.current
     val movie = remember(context) {
         context.resources.openRawResource(R.raw.login_logo).use(Movie::decodeStream)
@@ -160,8 +147,11 @@ internal fun AnimatedLoadingLogo(logoSize: Dp = 248.dp) {
     val motion = rememberInfiniteTransition(label = "loadingCharacter")
     val frameProgress by motion.animateFloat(0f, 1f,
         infiniteRepeatable(tween(frameDuration, easing = LinearEasing)), label = "gifFrame")
-    val glowProgress by motion.animateFloat(0f, 1f,
-        infiniteRepeatable(tween(2800, easing = LinearEasing)), label = "glow")
+    val glowProgress = if (animateGlow) {
+        val phase by motion.animateFloat(0f, 1f,
+            infiniteRepeatable(tween(2800, easing = LinearEasing)), label = "glow")
+        phase
+    } else 0.25f
 
     Box(
         modifier = Modifier.size(logoSize),
@@ -172,7 +162,7 @@ internal fun AnimatedLoadingLogo(logoSize: Dp = 248.dp) {
             val wave = sin(PI * phase).toFloat()
             val breath = wave * wave
             val center = Offset(size.width * 0.51f, size.height * 0.5f)
-            val radius = size.width * 0.43f * (0.88f + 0.12f * breath)
+            val radius = size.width * 0.43f * glowScale * (0.88f + 0.12f * breath)
             val opacity = 0.62f * (0.58f + 0.42f * breath)
             drawCircle(
                 brush = Brush.radialGradient(

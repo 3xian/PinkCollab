@@ -190,6 +190,7 @@ struct ControllerState {
     session: SessionRecord,
     runtime: Option<RuntimeInstance>,
     projection: Option<RuntimeSnapshot>,
+    work_clock: Option<work_timing::WorkClock>,
     messages: Vec<TimelineItem>,
     finalized_messages: HashSet<String>,
     pending_prompt_results: HashMap<String, (String, String)>,
@@ -222,6 +223,7 @@ pub struct SessionDirectory {
 mod directory;
 mod startup;
 mod title;
+mod work_timing;
 
 enum CommandResult {
     Running,
@@ -250,9 +252,9 @@ impl CommandFailure {
 }
 impl SessionController {
     async fn view(&self) -> Result<SessionView> {
-        let state = self.state.lock().await;
+        let mut state = self.state.lock().await;
         let session = state.session.clone();
-        let runtime = state.projection.clone();
+        let runtime = state.capture_runtime().clone();
         let messages = state.messages.clone();
         drop(state);
         let session_id = session.id.clone();
@@ -523,11 +525,11 @@ impl SessionController {
                 let runtime = self.begin_stop(&expected_generation).await?;
                 receipt.runtime_generation = Some(expected_generation.clone());
                 {
-                    let state = self.state.lock().await;
+                    let mut state = self.state.lock().await;
                     self.publish(
                         &receipt.session_id,
                         "v2.runtime.updated",
-                        json!({"runtime":state.projection}),
+                        json!({"runtime":state.capture_runtime()}),
                     );
                 }
                 runtime
@@ -595,14 +597,15 @@ impl SessionController {
                         ));
                     }
                     snapshot.pending_inputs.remove(index);
+                    state.update_work_timing(false);
                     attention
                 };
                 {
-                    let state = self.state.lock().await;
+                    let mut state = self.state.lock().await;
                     self.publish(
                         &receipt.session_id,
                         "v2.runtime.updated",
-                        json!({"runtime":state.projection}),
+                        json!({"runtime":state.capture_runtime()}),
                     );
                 }
                 let mut frame = json!({"type":"extension_ui_response","id":attention.id});
@@ -775,11 +778,9 @@ impl SessionController {
             }
             .into();
         }
-        self.publish(
-            &state.session.id,
-            "v2.runtime.updated",
-            json!({"runtime":state.projection}),
-        );
+        state.update_work_timing(false);
+        let payload = json!({"runtime":state.capture_runtime()});
+        self.publish(&state.session.id, "v2.runtime.updated", payload);
         Ok(())
     }
     async fn set_prompt_active(&self, generation: &str, rpc_id: &str, settled_revision: u64) {
@@ -795,11 +796,12 @@ impl SessionController {
                 snapshot.execution = "active".into();
                 snapshot.activity = None;
             }
+            state.update_work_timing(true);
             let id = state.session.id.clone();
             self.publish(
                 &id,
                 "v2.runtime.updated",
-                json!({"runtime":state.projection}),
+                json!({"runtime":state.capture_runtime()}),
             );
         }
     }

@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
@@ -130,6 +131,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
             showVersion = actions.showVersion,
         )
         TasksPagerBar(
+            hosts = app.hosts,
             sessions = sessions,
             currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
             selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
@@ -415,6 +417,7 @@ private fun TopBarPill(icon: ImageVector, label: String, onClick: () -> Unit) {
 
 @Composable
 private fun TasksPagerBar(
+    hosts: Map<String, HostState>,
     sessions: List<Session>,
     currentPage: Int,
     selectPage: (Int) -> Unit,
@@ -445,6 +448,12 @@ private fun TasksPagerBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             itemsIndexed(sessions, key = { _, session -> SessionKey(session.hostId, session.id).pagerKey() }) { index, session ->
+                val cardStatus = sessionCardStatus(session, hosts[session.hostId]?.connection)
+                val cardColor = when (cardStatus) {
+                    SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired -> Amber300
+                    SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> Violet400
+                    else -> Gray400
+                }
                 val selected = index == currentPage
                 val fileName = session.cwd.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { session.cwd }
                 val shape = RoundedCornerShape(16.dp)
@@ -464,7 +473,7 @@ private fun TasksPagerBar(
                 ) {
                     Text(
                         session.title,
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         color = if (selected) TextHigh else TextMid,
                         maxLines = 1,
@@ -481,12 +490,12 @@ private fun TasksPagerBar(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Spacer(Modifier.width(8.dp))
-                        Box(Modifier.size(6.dp).background(statusColor(session.status), CircleShape))
+                        Box(Modifier.size(6.dp).background(cardColor, CircleShape))
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            statusLabel(session.status),
+                            cardStatus.label,
                             style = MaterialTheme.typography.labelSmall,
-                            color = statusColor(session.status),
+                            color = cardColor,
                             maxLines = 1,
                         )
                     }

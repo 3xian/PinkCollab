@@ -187,7 +187,7 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithText("Earlier question").assertIsDisplayed()
     }
 
-    @Test fun detached_session_without_saved_history_says_so() {
+    @Test fun detached_session_without_saved_history_has_no_empty_message() {
         val detail = SessionDetail(session.copy(status = SessionStatus.Idle, runtimeAttached = false,
             runtimeGeneration = null))
         compose.setContent {
@@ -195,7 +195,7 @@ class SessionHistoryDeviceTest {
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
-        compose.onNodeWithText("No saved messages yet").assertExists()
+        compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
     }
 
     @Test fun detached_session_displays_saved_transcript() {

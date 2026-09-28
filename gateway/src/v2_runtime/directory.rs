@@ -42,6 +42,7 @@ impl SessionDirectory {
                 session,
                 runtime: None,
                 projection: None,
+                work_clock: None,
                 messages: Vec::new(),
                 finalized_messages: HashSet::new(),
                 pending_prompt_results: HashMap::new(),
@@ -127,8 +128,8 @@ impl SessionDirectory {
         let mut result = Vec::with_capacity(sessions.len());
         for session in sessions {
             if let Some(controller) = self.active_controller(&session.id).await {
-                let state = controller.state.lock().await;
-                result.push(json!({"session":state.session,"runtime":state.projection}));
+                let mut state = controller.state.lock().await;
+                result.push(json!({"session":state.session,"runtime":state.capture_runtime()}));
             } else {
                 result.push(json!({"session":session,"runtime":null}));
             }

@@ -76,7 +76,7 @@ class TasksPagerBarDeviceTest {
                 emptyMap(), emptyMap(), key),
                 TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
         }
-        compose.onNodeWithText("No saved messages yet").assertIsDisplayed()
+        compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
         compose.runOnIdle { app = app.copy(details = mapOf(key to detail.copy(savedHistory = SavedHistory.Loading))) }
         compose.onNodeWithTag("historyLoading").assertIsDisplayed()
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
@@ -132,7 +132,7 @@ class TasksPagerBarDeviceTest {
         val strip = compose.onNodeWithTag("sessionCards").fetchSemanticsNode().boundsInRoot
         val first = compose.onNodeWithTag("sessionCard:s0").fetchSemanticsNode().boundsInRoot
         assertTrue("First card stays at the start", abs(first.left - strip.left - 12 * compose.density.density) <= 2f)
-        assertEquals(listOf("Session 0", "project-0", "Paused"),
+        assertEquals(listOf("Session 0", "project-0", "Connecting"),
             compose.onNodeWithTag("sessionCard:s0").fetchSemanticsNode().config[SemanticsProperties.Text].map { it.text })
         assertTrue("Compact two-line strip", abs(strip.height - 64 * compose.density.density) <= 2f)
 

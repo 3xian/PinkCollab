@@ -42,6 +42,15 @@ pub struct OperationRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Immutable work-time sample captured with the runtime projection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkTiming {
+    pub elapsed_ms: u64,
+    pub running: bool,
+    pub completed: bool,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
@@ -51,6 +60,7 @@ pub struct RuntimeSnapshot {
     pub activity: Option<String>,
     pub actual_model: Option<crate::model::ModelInfo>,
     pub pending_inputs: Vec<crate::model::Attention>,
+    pub work_timing: Option<WorkTiming>,
 }
 
 #[derive(Clone, Debug, Serialize)]

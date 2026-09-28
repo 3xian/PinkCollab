@@ -70,7 +70,9 @@ impl SessionController {
                 activity: None,
                 actual_model: None,
                 pending_inputs: Vec::new(),
+                work_timing: None,
             });
+            state.work_clock = None;
             state.settled_revision = 0;
             state.messages.clear();
             state.finalized_messages.clear();
@@ -79,11 +81,11 @@ impl SessionController {
             state.display_flush_scheduled = false;
         }
         {
-            let state = self.state.lock().await;
+            let mut state = self.state.lock().await;
             self.publish(
                 &session.id,
                 "v2.runtime.updated",
-                json!({"runtime":state.projection}),
+                json!({"runtime":state.capture_runtime()}),
             );
             self.publish(&session.id, "v2.timeline.reset", json!({}));
         }
@@ -202,6 +204,7 @@ impl SessionController {
                 .into();
                 snapshot.actual_model = model_info(data);
             }
+            state.update_work_timing(false);
             Ok::<(), anyhow::Error>(())
         }
         .await;
@@ -221,11 +224,11 @@ impl SessionController {
             );
         }
         {
-            let state = self.state.lock().await;
+            let mut state = self.state.lock().await;
             self.publish(
                 &session.id,
                 "v2.runtime.updated",
-                json!({"runtime":state.projection}),
+                json!({"runtime":state.capture_runtime()}),
             );
         }
         Ok((generation, runtime))

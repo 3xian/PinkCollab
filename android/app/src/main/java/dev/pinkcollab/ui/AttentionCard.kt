@@ -28,8 +28,6 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            GlowDot(attentionColor, pulse = true)
-            Spacer(Modifier.width(8.dp))
             Text("OMP needs your reply", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = attentionColor)
         }
         Text(attention.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
@@ -39,8 +37,7 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
             }
             AttentionType.Confirm -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 OutlinedButton(onClick = rememberHapticOnClick { respond(AttentionResponse.Confirmation(attention.id, false)) }, enabled = enabled) { Text("Decline") }
-                Spacer(Modifier.width(8.dp))
-                PrimaryButton(onClick = { respond(AttentionResponse.Confirmation(attention.id, true)) }, enabled = enabled) { Text("Confirm") }
+                    PrimaryButton(onClick = { respond(AttentionResponse.Confirmation(attention.id, true)) }, enabled = enabled) { Text("Confirm") }
             }
             else -> {
                 OutlinedTextField(answer, { answer = it }, label = { Text("Your answer") }, minLines = if (attention.type == AttentionType.Editor) 4 else 1, modifier = Modifier.fillMaxWidth(), enabled = enabled, colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple400, unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Purple400))

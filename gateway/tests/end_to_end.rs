@@ -99,6 +99,9 @@ async fn response_reaches_omp_while_prompt_ack_is_pending() {
                 .as_array()
                 .is_some_and(|items| !items.is_empty())
             {
+                assert_eq!(detail["runtime"]["workTiming"]["running"], false);
+                assert_eq!(detail["runtime"]["workTiming"]["completed"], false);
+                assert!(detail["runtime"]["workTiming"]["elapsedMs"].is_u64());
                 break detail["runtime"]["generation"].as_str().unwrap().to_owned();
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -393,6 +396,9 @@ async fn v2_lazy_session_prompt_receipt_and_generation_bound_stop() {
         .unwrap();
     assert_eq!(view["runtime"]["generation"], generation);
     assert_eq!(view["runtime"]["execution"], "quiescent");
+    assert_eq!(view["runtime"]["workTiming"]["completed"], true);
+    assert_eq!(view["runtime"]["workTiming"]["running"], false);
+    assert!(view["runtime"]["workTiming"]["elapsedMs"].is_u64());
     let tool = view["messages"]
         .as_array()
         .unwrap()

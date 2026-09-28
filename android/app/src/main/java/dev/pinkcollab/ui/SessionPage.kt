@@ -97,6 +97,11 @@ internal fun SessionPage(
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
+    val workStatus = if (load is LoadState.Ready) {
+        remember(session, detail.liveItems, detail.streaming.isNotBlank(), host?.connection) {
+            sessionWorkStatus(detail, host)
+        }
+    } else null
     val savedHistory = detail.savedHistory
     val historyItems = state.historyItems ?: savedHistory.items
     val historyTimeline = remember(historyItems) { projectSessionTimeline(historyItems) }
@@ -200,36 +205,17 @@ internal fun SessionPage(
                     HorizontalDivider(color = TextMid.copy(alpha = 0.4f))
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Live updates · saved messages above may repeat",
+                        "Live updates (saved messages above may repeat)",
                         style = PinkCollabTypography.labelMedium,
                         color = TextMid,
                     )
                 }
             }
             if (session.runtimeAttached) {
-                if (liveTimeline.isEmpty() && !hasSavedMessages && detail.streaming.isBlank() && session.attention == null &&
-                    savedHistory != SavedHistory.Loading && savedHistory != SavedHistory.Failed) item(key = "timeline-empty") {
-                    Text(
-                        when (session.status) {
-                            SessionStatus.Starting -> "Starting the agent…"
-                            SessionStatus.Running -> "The agent is working…"
-                            SessionStatus.Stopping -> "Stopping the agent…"
-                            SessionStatus.NeedsInput -> "The agent needs your input."
-                            SessionStatus.Idle -> "Send a message to start the conversation."
-                        },
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextMid,
-                    )
+                items(liveTimeline, key = { "live:${it.id}" }) { item ->
+                    DisplayItem(item, markwon, liveActivity = host?.connected == true &&
+                        session.runtimeExecution == RuntimeExecution.Active)
                 }
-                items(liveTimeline, key = { "live:${it.id}" }) { item -> DisplayItem(item, markwon) }
-            } else if (savedHistory.knownEmpty) item(key = "timeline-empty") {
-                Text(
-                    "No saved messages yet",
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMid,
-                )
             }
             if (session.runtimeAttached && detail.streaming.isNotBlank()) item {
                 Row(
@@ -239,8 +225,6 @@ internal fun SessionPage(
                         .padding(horizontal = 20.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    GlowDot(Purple400, pulse = true)
-                    Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         AgentHeader(detail.model, replying = true)
                         Spacer(Modifier.height(4.dp))
@@ -304,6 +288,7 @@ internal fun SessionPage(
                 .padding(horizontal = 12.dp, vertical = 6.dp)
                 .onSizeChanged { composerHeightPx = it.height },
         ) {
+            workStatus?.let { SessionWorkStatusStrip(it) }
             Row(
                 Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -400,7 +385,7 @@ internal fun SessionPage(
                     }
                     state.sendProgress?.let { progress ->
                         val status = when (progress) {
-                            is SendProgress.Uploading -> "Sending file ${progress.fileIndex} of ${progress.fileCount} · ${progress.fileName}"
+                            is SendProgress.Uploading -> "Sending file ${progress.fileIndex} of ${progress.fileCount}  ${progress.fileName}"
                             SendProgress.Submitting -> "Sending message…"
                         }
                         Column(

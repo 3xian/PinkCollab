@@ -7,6 +7,13 @@ import androidx.core.content.res.ResourcesCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,10 +103,10 @@ private fun Modifier.userMessageBand(
 
 
 @Composable
-internal fun DisplayItem(item: SessionDisplayItem, markwon: Markwon) {
+internal fun DisplayItem(item: SessionDisplayItem, markwon: Markwon, liveActivity: Boolean = false) {
     when (item) {
         is SessionDisplayItem.Message -> MessageCard(item, markwon)
-        is SessionDisplayItem.ActivityGroup -> ActivityGroupCard(item)
+        is SessionDisplayItem.ActivityGroup -> ActivityGroupCard(item, liveActivity)
         is SessionDisplayItem.Error -> ErrorCard(item)
         is SessionDisplayItem.Raw -> RawTimelineCard(item.item, markwon)
     }
@@ -146,6 +154,7 @@ private fun SpeakerTitle(text: String, color: Color, modifier: Modifier = Modifi
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.Bold,
         fontStyle = FontStyle.Italic,
+        fontFamily = FontFamily.SansSerif,
         color = color,
     )
 }
@@ -162,7 +171,7 @@ private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
 @Composable
 internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        SpeakerTitle(if (replying) "Agent · replying" else "Agent", BrandPink)
+        SpeakerTitle(if (replying) "Agent replying" else "Agent", BrandPink)
         model?.let {
             Spacer(Modifier.width(8.dp))
             Surface(
@@ -176,6 +185,7 @@ internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, mo
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.SansSerif,
                     color = Purple200,
                 )
             }
@@ -208,6 +218,7 @@ private fun MessageTime(label: String, modifier: Modifier = Modifier) {
         modifier = modifier,
         maxLines = 1,
         style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.SansSerif,
         color = TextMid,
     )
 }
@@ -239,67 +250,123 @@ private fun MarkdownBody(markdown: String, color: Color, markwon: Markwon) {
 }
 
 @Composable
-private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup) {
-
+private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean) {
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
-    val title = when (group.stage) {
-        ActivityStage.Explore -> "Exploring · ${group.operationCount} operations"
-        ActivityStage.Change -> if (group.files.isNotEmpty()) {
-            "Editing · ${group.files.size} files"
-        } else {
-            "Editing · ${group.operationCount} operations"
-        }
-        ActivityStage.Execute -> when (group.status) {
-            ActivityStatus.Running -> "Verifying"
-            ActivityStatus.Succeeded -> "✓ Verified"
-            ActivityStatus.Failed -> "Verification failed"
-        }
-    }
-    val activityTint = when (group.status) {
-        ActivityStatus.Failed -> Red400
-        ActivityStatus.Succeeded -> Teal300
-        ActivityStatus.Running -> Violet400
-    }
-    // The projection decides expandability: a group carries a detail kind exactly when it has
-    // details, so the view does not re-derive the rule from the stage and status.
-    val detailKind = group.detailKind
+    val activityTint = activityColor(group.status)
     Column(
         Modifier
             .fillMaxWidth()
-            .timelineBand(
-                tint = activityTint,
-                tintAlpha = if (group.status == ActivityStatus.Running) 0.05f else 0.035f,
-            )
-            .animatedNoiseGradient(
-                active = group.status == ActivityStatus.Running,
-                tint = activityTint,
-            )
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .timelineBand(tint = activityTint, tintAlpha = 0.025f)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-            fontStyle = FontStyle.Italic,
-            color = activityTint,
-        )
-        if (group.summary.isNotBlank()) Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid)
-        if (detailKind != null) {
-            TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Purple200)) {
-                Text(if (expanded) "Collapse" else detailKind.action)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ActivityStatusIcon(group.status, liveActivity)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    group.action,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.SansSerif,
+                    fontWeight = FontWeight.Medium,
+                    color = TextHigh,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (group.summary.isNotBlank()) {
+                    Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
             }
-            if (expanded) Text(group.details, style = MaterialTheme.typography.bodySmall, color = TextMid)
+        }
+        Row(Modifier.padding(start = 28.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                buildString {
+                    append(activityStatusLabel(group.status, liveActivity))
+                    append("  ${group.operationCount} ${if (group.operationCount == 1) "operation" else "operations"}")
+                    if (group.failureCount > 0 && group.status == ActivityStatus.Running) append("  ${group.failureCount} failed")
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = activityTint,
+                modifier = Modifier.weight(1f),
+            )
+            DetailToggle("Details", expanded, onClick = { expanded = !expanded })
+        }
+        if (expanded) {
+            group.operations.forEach { operation ->
+                key(operation.id) { ActivityOperationDetails(operation, initiallyExpanded = group.operationCount == 1, liveActivity = liveActivity) }
+            }
         }
     }
 }
 
+@Composable
+private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpanded: Boolean, liveActivity: Boolean) {
+    var expanded by rememberSaveable(operation.id) { mutableStateOf(initiallyExpanded) }
+    Column(
+        Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.025f), RoundedCornerShape(8.dp)).padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("${operation.name}  ${activityStatusLabel(operation.status, liveActivity)}", style = MaterialTheme.typography.labelSmall, color = activityColor(operation.status))
+        Text(operation.action, style = MaterialTheme.typography.bodySmall, color = TextHigh)
+        if (operation.target.isNotBlank()) {
+            Text(operation.target, style = MaterialTheme.typography.bodySmall, color = TextMid, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
+        operation.detailKind?.let { kind ->
+            DetailToggle(kind.action, expanded, onClick = { expanded = !expanded })
+            if (expanded) {
+                SelectionContainer {
+                    Text(
+                        operation.details,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMid,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean) {
+    if (status == ActivityStatus.Running && liveActivity) {
+        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = activityColor(status), strokeWidth = 2.dp)
+    } else {
+        Icon(
+            when (status) {
+                ActivityStatus.Failed -> Icons.Outlined.ErrorOutline
+                ActivityStatus.Succeeded -> Icons.Outlined.Check
+                ActivityStatus.Running -> Icons.Outlined.HourglassEmpty
+            },
+            contentDescription = activityStatusLabel(status, liveActivity),
+            modifier = Modifier.size(18.dp),
+            tint = activityColor(status),
+        )
+    }
+}
+
+private fun activityColor(status: ActivityStatus): Color = when (status) {
+    ActivityStatus.Running -> Violet400
+    ActivityStatus.Succeeded -> Teal300
+    ActivityStatus.Failed -> Red400
+}
+
+private fun activityStatusLabel(status: ActivityStatus, liveActivity: Boolean): String =
+    if (status == ActivityStatus.Running && !liveActivity) "Last seen running" else status.label
+
+private val ActivityStatus.label: String
+    get() = when (this) {
+        ActivityStatus.Running -> "Running"
+        ActivityStatus.Succeeded -> "Completed"
+        ActivityStatus.Failed -> "Failed"
+    }
+
 private val ActivityDetailKind.action: String
     get() = when (this) {
-        ActivityDetailKind.Diff -> "View diff"
-        ActivityDetailKind.Content -> "View content"
-        ActivityDetailKind.Changes -> "View changes"
-        ActivityDetailKind.Error -> "View error"
+        ActivityDetailKind.Diff -> "Diff"
+        ActivityDetailKind.Content -> "Content"
+        ActivityDetailKind.Changes -> "Changes"
+        ActivityDetailKind.Error -> "Error details"
+        ActivityDetailKind.Operation -> "Arguments & output"
     }
 
 @Composable
@@ -316,10 +383,10 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Error", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = Red400)
+        Text("Error", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = Red400)
         Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (item.details.isNotBlank() && item.details != item.text) {
-            TextButton(onClick = rememberHapticOnClick { expanded = !expanded }, contentPadding = PaddingValues(0.dp), colors = ButtonDefaults.textButtonColors(contentColor = Red400)) { Text(if (expanded) "Collapse" else "View error") }
+            DetailToggle("Error details", expanded, onClick = { expanded = !expanded }, tint = Red400)
             if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
     }
@@ -371,6 +438,7 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic,
+                    fontFamily = FontFamily.SansSerif,
                     color = if (item.kind == "error") Red400 else TextMid,
                 )
             }
@@ -387,13 +455,7 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
             )
         }
         if (isDetail && detail.isNotBlank()) {
-            TextButton(
-                onClick = rememberHapticOnClick { expanded = !expanded },
-                contentPadding = PaddingValues(0.dp),
-                colors = ButtonDefaults.textButtonColors(contentColor = Purple200),
-            ) {
-                Text(if (expanded) "Collapse details" else "Expand details")
-            }
+            DetailToggle("Details", expanded, onClick = { expanded = !expanded })
             if (expanded) {
                 Text(
                     detail,

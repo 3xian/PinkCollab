@@ -44,10 +44,21 @@ enum class RuntimeExecution(val wire: String) {
     }
 }
 
-data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val runtimeGeneration: String? = null, val runtimeExecution: RuntimeExecution = RuntimeExecution.Unknown) {
+data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val runtimeGeneration: String? = null, val runtimeExecution: RuntimeExecution = RuntimeExecution.Unknown, val workTiming: WorkTiming? = null) {
     /** A session is active while its OMP runtime is live, including the startup hand-off. */
     val isActive: Boolean get() = status == SessionStatus.Starting || runtimeAttached
 }
+/** Gateway sample anchored to the phone's monotonic clock, never its wall clock. */
+data class WorkTiming(
+    val elapsedMs: Long,
+    val running: Boolean,
+    val completed: Boolean,
+    val receivedAtNanos: Long = System.nanoTime(),
+) {
+    fun elapsedAt(nowNanos: Long = System.nanoTime()): Long = elapsedMs +
+        if (running && !completed) ((nowNanos - receivedAtNanos) / 1_000_000).coerceAtLeast(0) else 0
+}
+
 data class ToolArguments(
     val raw: String = "",
     val strings: Map<String, String> = emptyMap(),
@@ -219,7 +230,10 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
         SessionStatus.NeedsInput -> "Waiting for input"
         SessionStatus.Idle -> "Ready to continue"
     }
-    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() }, execution)
+    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() }, execution,
+        runtime?.optJSONObject("workTiming")?.takeIf { it.has("elapsedMs") }?.let {
+            WorkTiming(it.optLong("elapsedMs").coerceAtLeast(0), it.optBoolean("running"), it.optBoolean("completed"))
+        })
 }
 fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))
 fun JSONObject.cursor() = Cursor(getString("epoch"), getLong("revision"))

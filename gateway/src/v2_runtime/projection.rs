@@ -20,6 +20,7 @@ impl SessionController {
                     && let Some(snapshot) = state.projection.as_mut()
                 {
                     snapshot.execution = "quiescent".into();
+                    state.update_work_timing(false);
                     state.settled_revision = state.settled_revision.wrapping_add(1);
                 }
                 let status = match omp::string(&frame, "status") {
@@ -33,7 +34,7 @@ impl SessionController {
                     key,
                     status,
                     frame.get("error").cloned(),
-                    state.projection.clone(),
+                    state.capture_runtime().clone(),
                 )
             };
             self.publish(
@@ -82,6 +83,7 @@ impl SessionController {
                     snapshot.execution = "active".into();
                     changed_runtime = true;
                 }
+                state.update_work_timing(true);
             }
             "session_settled" => {
                 if let Some(snapshot) = state.projection.as_mut() {
@@ -263,10 +265,11 @@ impl SessionController {
             state.dirty_messages.insert(item);
         }
         if changed_runtime {
+            state.update_work_timing(false);
             self.publish(
                 &id,
                 "v2.runtime.updated",
-                json!({"runtime":state.projection}),
+                json!({"runtime":state.capture_runtime()}),
             );
         }
         let schedule_flush = !state.display_flush_scheduled
@@ -348,6 +351,7 @@ impl SessionController {
             }
             state.runtime = None;
             state.projection = None;
+            state.work_clock = None;
             state.messages.clear();
             state.finalized_messages.clear();
             state.pending_prompt_results.clear();

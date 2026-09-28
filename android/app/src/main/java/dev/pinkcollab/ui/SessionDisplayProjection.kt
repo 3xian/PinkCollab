@@ -5,11 +5,21 @@ import dev.pinkcollab.data.ToolTrace
 
 enum class SessionDisplayMode { Concise, Debug }
 
-enum class ActivityStage { Explore, Change, Execute }
+enum class ActivityStage { Explore, Change, Execute, Other }
 
 enum class ActivityStatus { Running, Succeeded, Failed }
 
-enum class ActivityDetailKind { Diff, Content, Changes, Error }
+enum class ActivityDetailKind { Diff, Content, Changes, Error, Operation }
+
+data class ActivityOperation(
+    val id: String,
+    val name: String,
+    val action: String,
+    val target: String,
+    val status: ActivityStatus,
+    val details: String,
+    val detailKind: ActivityDetailKind?,
+)
 
 sealed interface SessionDisplayItem {
     val id: String
@@ -27,9 +37,10 @@ sealed interface SessionDisplayItem {
         val operationCount: Int,
         val files: List<String>,
         val status: ActivityStatus,
+        val action: String,
         val summary: String,
-        val details: String,
-        val detailKind: ActivityDetailKind?,
+        val failureCount: Int,
+        val operations: List<ActivityOperation>,
     ) : SessionDisplayItem
 
     data class Error(
@@ -66,20 +77,17 @@ fun projectSessionTimeline(
     timeline.forEachIndexed { index, item ->
         if (item.kind == "tool") {
             val trace = item.tool
-            val stage = trace?.let(::activityStage)
-            if (trace != null && stage != null) {
+            if (trace != null) {
+                val stage = toolIdentity(trace.name).activityStage
                 if (group?.stage != stage) {
                     flushGroup()
                     group = MutableActivityGroup(stage, "activity:${item.id}:$index")
                 }
                 group?.add(trace)
-            } else if (trace?.isError == true || item.text.contains("failed", ignoreCase = true)) {
+            } else {
+                // Older or partial tool events still belong in the timeline; do not invent status.
                 flushGroup()
-                output += SessionDisplayItem.Error(
-                    id = "error:${item.id}:$index",
-                    text = conciseError(trace?.result.orEmpty().ifBlank { item.text }),
-                    details = trace?.result.orEmpty().ifBlank { item.detail },
-                )
+                output += SessionDisplayItem.Raw("tool:${item.id}:$index", item)
             }
             return@forEachIndexed
         }
@@ -113,65 +121,75 @@ private class MutableActivityGroup(
     }
 
     fun build(): SessionDisplayItem.ActivityGroup {
-        // Change groups scan each trace once: the same result feeds the file list and the details.
-        val scanned = if (stage == ActivityStage.Change) {
-            traces.map { trace -> trace to extractFiles(trace) }
-        } else {
-            emptyList()
+        val scanned = traces.map { trace ->
+            trace to if (stage == ActivityStage.Change) extractFiles(trace) else emptyList()
         }
         val files = scanned.flatMap { it.second }.distinct()
-        val failed = traces.any(ToolTrace::isError)
+        val operations = scanned.mapIndexed { index, (trace, paths) ->
+            val change = if (stage == ActivityStage.Change) changeDetail(trace, paths) else null
+            val details = operationDetails(trace, change)
+            ActivityOperation(
+                id = "${trace.callId}:$index",
+                name = trace.name,
+                action = operationAction(trace),
+                target = operationTarget(trace),
+                status = operationStatus(trace),
+                details = details,
+                detailKind = if (details.isBlank()) null else change?.kind
+                    ?: if (trace.isError) ActivityDetailKind.Error else ActivityDetailKind.Operation,
+            )
+        }
         val status = when {
-            failed -> ActivityStatus.Failed
-            traces.all(ToolTrace::completed) -> ActivityStatus.Succeeded
-            else -> ActivityStatus.Running
+            operations.any { it.status == ActivityStatus.Running } -> ActivityStatus.Running
+            operations.any { it.status == ActivityStatus.Failed } -> ActivityStatus.Failed
+            else -> ActivityStatus.Succeeded
         }
-        val summary = when (stage) {
-            ActivityStage.Explore -> ""
-            ActivityStage.Change -> files.joinToString(" · ")
-            ActivityStage.Execute -> (if (failed) traces.filter(ToolTrace::isError) else traces).asReversed()
-                .asSequence()
-                .map { conciseResult(it.result) }
-                .firstOrNull { it.isNotBlank() }
-                .orEmpty()
-        }
-        // One decision: a group carries details exactly when it has a detail kind, and the card only
-        // offers the expander when it does.
-        val details = when {
-            stage == ActivityStage.Change -> changeDetails(scanned)
-            stage == ActivityStage.Execute && failed -> traces
-                .filter(ToolTrace::isError)
-                .joinToString("\n\n", transform = ::failureDetails)
-                .takeIf(String::isNotBlank)
-                ?.let { GroupDetails(it, ActivityDetailKind.Error) }
-            else -> null
-        }
+        val focus = operations.lastOrNull { it.status == ActivityStatus.Running }
+            ?: operations.lastOrNull { it.status == ActivityStatus.Failed }
+            ?: operations.last()
         return SessionDisplayItem.ActivityGroup(
             id = id,
             stage = stage,
-            operationCount = traces.size,
+            operationCount = operations.size,
             files = files,
             status = status,
-            summary = summary,
-            details = details?.text.orEmpty(),
-            detailKind = details?.kind,
+            action = focus.action,
+            summary = focus.target.ifBlank { files.joinToString(", ") },
+            failureCount = operations.count { it.status == ActivityStatus.Failed },
+            operations = operations,
         )
     }
 }
 
-private data class GroupDetails(val text: String, val kind: ActivityDetailKind)
+private fun operationStatus(trace: ToolTrace): ActivityStatus = when {
+    !trace.completed -> ActivityStatus.Running
+    trace.isError -> ActivityStatus.Failed
+    else -> ActivityStatus.Succeeded
+}
 
-private fun activityStage(trace: ToolTrace): ActivityStage? {
-    val name = trace.name.lowercase().substringAfterLast('.').substringAfterLast('/')
-    return when {
-        name in setOf("read", "grep", "find", "lsp") ||
-            listOf("read_", "grep_", "find_", "lsp_").any(name::startsWith) -> ActivityStage.Explore
-        name in setOf("edit", "write", "ast_edit") ||
-            listOf("edit_", "write_", "ast_edit_").any(name::startsWith) -> ActivityStage.Change
-        name in setOf("bash", "test", "python") ||
-            listOf("bash_", "test_", "python_").any(name::startsWith) -> ActivityStage.Execute
-        else -> null
+private fun operationAction(trace: ToolTrace): String =
+    listOf("i", "description", "title").firstNotNullOfOrNull { key ->
+        trace.arguments.strings[key]?.takeIf(String::isNotBlank)
+    } ?: when (toolIdentity(trace.name).family) {
+        ToolFamily.Read -> "Read"
+        ToolFamily.Search -> "Search"
+        ToolFamily.Edit -> "Edit"
+        ToolFamily.Write -> "Write"
+        ToolFamily.Command -> "Run command"
+        ToolFamily.Code -> "Execute code"
+        ToolFamily.Delegate -> "Delegate work"
+        ToolFamily.Wait -> "Wait for work"
+        else -> trace.name.ifBlank { "Tool activity" }
     }
+
+private fun operationTarget(trace: ToolTrace): String {
+    val args = trace.arguments
+    val target = listOf("path", "file", "filePath", "file_path", "filename", "url", "uri", "cwd")
+        .firstNotNullOfOrNull { args.strings[it]?.takeIf(String::isNotBlank) }
+        ?: listOf("files", "paths").firstNotNullOfOrNull { args.stringLists[it]?.takeIf(List<String>::isNotEmpty)?.joinToString(", ") }
+    val subject = listOf("command", "cmd", "query", "pattern", "task", "code")
+        .firstNotNullOfOrNull { args.strings[it]?.takeIf(String::isNotBlank) }
+    return listOfNotNull(subject, target).distinct().joinToString(", ")
 }
 
 private val patchPath = Regex("""(?m)^(?:\+\+\+\s+b/|---\s+a/|\*\*\* (?:Update|Add|Delete) File:\s*)([^\r\n]+)""")
@@ -193,14 +211,6 @@ private fun extractFiles(trace: ToolTrace): List<String> {
 
 private data class ChangeDetails(val text: String, val kind: ActivityDetailKind)
 
-private fun changeDetails(scanned: List<Pair<ToolTrace, List<String>>>): GroupDetails? {
-    val entries = scanned.mapNotNull { (trace, paths) -> changeDetail(trace, paths) }
-    if (entries.isEmpty()) return null
-    return GroupDetails(
-        entries.joinToString("\n\n") { it.text },
-        entries.map(ChangeDetails::kind).distinct().singleOrNull() ?: ActivityDetailKind.Changes,
-    )
-}
 
 private fun changeDetail(trace: ToolTrace, paths: List<String>): ChangeDetails? {
     val arguments = trace.arguments
@@ -227,10 +237,18 @@ private fun fileDiff(path: String, old: String, new: String): String = buildStri
     new.lineSequence().forEach { appendLine("+$it") }
 }.trimEnd()
 
-private fun failureDetails(trace: ToolTrace): String = buildList {
-    if (trace.arguments.raw.isNotBlank()) add(trace.arguments.raw)
-    if (trace.result.isNotBlank()) add(trace.result)
-}.joinToString("\n")
+private fun operationDetails(trace: ToolTrace, change: ChangeDetails?): String = buildList {
+    if (change != null) {
+        add(change.text)
+    } else {
+        val arguments = trace.arguments.raw.ifBlank {
+            (trace.arguments.strings.map { (key, value) -> "$key: $value" } +
+                trace.arguments.stringLists.map { (key, value) -> "$key: ${value.joinToString()}" }).joinToString("\n")
+        }
+        if (arguments.isNotBlank() && arguments != "{}") add("Arguments\n$arguments")
+    }
+    if (trace.result.isNotBlank() && trace.result != change?.text) add("Output\n${trace.result}")
+}.joinToString("\n\n")
 
 private fun conciseResult(value: String): String = value
     .lineSequence()
