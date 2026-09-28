@@ -142,7 +142,10 @@ jobs:
           # The default AVD profile is a 320x640dp legacy screen. A modern phone
           # profile is what the UI tests describe, keyboard included.
           profile: pixel_6
-          ram-size: 2048M
+          # The keyboard tests pull in the on-device IME, which does not fit in
+          # the default 2 GB the way the rest of the suite does.
+          ram-size: 4096M
+          cores: 4
           working-directory: android
           script: |
             # The AVD's device profile declares a hardware keyboard, which hides
