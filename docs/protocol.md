@@ -21,7 +21,7 @@ V2 errors use `{code,message}`. Codes include `authentication_required`, `worksp
 | POST | `/api/v2/sessions/:id/commands` | `{operation,receiptStored}`; 202 for new, 200 for replay |
 | PUT | `/api/v2/sessions/:id/files/:fileId?name=...` | Upload raw bytes; `{fileId,name,size}` |
 | GET | `/api/v2/sessions/:id/operations/:commandId` | The authenticated client's durable receipt |
-| GET | `/api/v2/sessions/:id/models` | `{models,thinkingLevels}` for an attached runtime |
+| GET | `/api/v2/sessions/:id/models` | `{models,thinkingLevels}` for an attached runtime; each model includes its own `thinkingLevels` when OMP reports its thinking capabilities, while the top-level list describes the active model for older clients |
 | GET | `/api/v2/sessions/:id/history?limit=50&cursor=...` | `{items,source,nextCursor}`; limit 1–100 |
 | GET | `/api/v2/events` | WebSocket resource subscriptions |
 

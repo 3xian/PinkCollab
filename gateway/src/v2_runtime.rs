@@ -811,11 +811,24 @@ fn rpc_id(receipt: &OperationRecord) -> String {
 }
 fn model_info(data: &Value) -> Option<ModelInfo> {
     let model = &data["model"];
+    let thinking_levels = (model.get("thinking").is_some() || model.get("reasoning").is_some())
+        .then(|| {
+            let mut levels = vec!["off".to_owned()];
+            if let Some(efforts) = model["thinking"]["efforts"].as_array() {
+                for effort in efforts.iter().filter_map(Value::as_str) {
+                    if !levels.iter().any(|level| level == effort) {
+                        levels.push(effort.to_owned());
+                    }
+                }
+            }
+            levels
+        });
     Some(ModelInfo {
         provider: omp::string(model, "provider").into(),
         id: omp::string(model, "id").into(),
         name: omp::string(model, "name").into(),
         thinking_level: data["thinkingLevel"].as_str().map(str::to_owned),
+        thinking_levels,
     })
     .filter(|model| !model.provider.is_empty() && !model.id.is_empty())
 }

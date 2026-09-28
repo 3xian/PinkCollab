@@ -44,7 +44,7 @@ class TasksPagerBarDeviceTest {
             TasksScreen(
                 TasksScreenState(AppState(hosts = mapOf("host" to host)), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
             )
         }
         compose.waitForIdle()

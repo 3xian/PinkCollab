@@ -57,7 +57,7 @@ class AppUpdateDeviceTest {
                         TasksScreenState(AppState(hosts = mapOf("host" to host)), emptyMap(), emptyMap(),
                             emptySet(), emptyMap(), emptyMap(), emptyMap(), null),
                         TasksScreenActions({}, { openedWorkspaces++ }, {}, { checkedUpdates++ },
-                            { shownVersion++ }, { _, _ -> }),
+                            { shownVersion++ }, { _, _ -> }, { _, _ -> true }),
                     )
                 }
             }

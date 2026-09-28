@@ -3,8 +3,6 @@ package dev.pinkcollab.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandMore
@@ -23,7 +21,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.ModelInfo
-import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.ui.theme.*
 
 @Composable
@@ -191,125 +188,5 @@ internal fun ComposerModelButton(
         }
         Spacer(Modifier.width(4.dp))
         Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
-    }
-}
-
-internal fun isSelectedModel(current: ModelInfo?, candidate: ModelInfo): Boolean {
-    current ?: return false
-    return current.provider == candidate.provider && current.id == candidate.id
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun ModelPickerSheet(
-    state: LoadState<ModelCatalog>?,
-    current: ModelInfo?,
-    enabled: Boolean,
-    runtimeAttached: Boolean,
-    runtimeStarting: Boolean,
-    canStartRuntime: Boolean,
-    startRuntime: () -> Unit,
-    dismiss: () -> Unit,
-    retry: () -> Unit,
-    select: (ModelInfo) -> Unit,
-    selectThinkingLevel: (String) -> Unit,
-) {
-    ModalBottomSheet(onDismissRequest = dismiss, containerColor = MaterialTheme.colorScheme.surface) {
-        Column(
-            Modifier.fillMaxWidth().padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Column(Modifier.padding(horizontal = 24.dp)) {
-                Text("Models", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                current?.takeIf { runtimeAttached }?.let {
-                    Spacer(Modifier.height(10.dp))
-                    Text("Current · ${it.provider} · ${it.name}", style = MaterialTheme.typography.bodySmall, color = TextMid)
-                }
-            }
-            if (!runtimeAttached) {
-                Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        if (runtimeStarting) "Starting OMP…" else "Start OMP to choose a model before sending your next message.",
-                        color = TextMid,
-                    )
-                    if (runtimeStarting) {
-                        CircularProgressIndicator(color = Purple400)
-                    } else {
-                        Button(onClick = rememberHapticOnClick(startRuntime), enabled = canStartRuntime) {
-                            Text("Start runtime")
-                        }
-                    }
-                }
-            } else when (state) {
-                null, LoadState.Loading -> Box(
-                    Modifier.fillMaxWidth().height(160.dp),
-                    contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator(color = Purple400) }
-                is LoadState.Failed -> Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(state.message, color = MaterialTheme.colorScheme.error)
-                    OutlinedButton(onClick = rememberHapticOnClick(retry)) { Text("Retry") }
-                }
-                is LoadState.Ready -> if (state.value.models.isEmpty()) {
-                    Text(
-                        "No models are available from OMP.",
-                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 24.dp),
-                        color = TextMid,
-                    )
-                } else {
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                        itemsIndexed(
-                            state.value.models,
-                            key = { _, model -> "${model.provider}/${model.id}" },
-                        ) { _, model ->
-                            val selected = isSelectedModel(current, model)
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable(enabled = enabled) { select(model) }
-                                    .padding(horizontal = 20.dp, vertical = 11.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(model.name, style = MaterialTheme.typography.bodyLarge)
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        "${model.provider} · ${model.id}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextMid,
-                                    )
-                                }
-                                RadioButton(
-                                    selected = selected,
-                                    onClick = { if (enabled) select(model) },
-                                    enabled = enabled,
-                                    colors = RadioButtonDefaults.colors(selectedColor = Purple400),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            if (runtimeAttached && state is LoadState.Ready && state.value.thinkingLevels.isNotEmpty()) {
-                Text("Thinking level", modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MaterialTheme.typography.titleMedium)
-                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.value.thinkingLevels.forEach { level ->
-                        FilterChip(
-                            selected = current?.thinkingLevel == level,
-                            onClick = { selectThinkingLevel(level) },
-                            label = { Text(level) },
-                            enabled = enabled,
-                        )
-                    }
-                }
-            }
-        }
     }
 }

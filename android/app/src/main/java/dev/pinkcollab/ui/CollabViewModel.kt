@@ -15,7 +15,6 @@ import dev.pinkcollab.data.AppRelease
 import dev.pinkcollab.data.AppUpdateChecker
 import dev.pinkcollab.data.CredentialStore
 import dev.pinkcollab.data.GatewayRepository
-import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.AttentionResponse
 import dev.pinkcollab.data.ConnectionState
@@ -143,8 +142,8 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun sendPrompt(session: Session) = sessionCoordinator.send(session)
     internal fun sessionCommand(session: Session, command: SessionUserCommand) = sessionCoordinator.command(session, command)
     internal fun respond(session: Session, response: AttentionResponse) = sessionCoordinator.respond(session, response)
-    internal fun selectModel(session: Session, model: ModelInfo) = sessionCoordinator.selectModel(session, model)
-    internal fun setThinkingLevel(session: Session, level: String) = sessionCoordinator.setThinkingLevel(session, level)
+    internal fun applyModelSettings(session: Session, changes: ModelSettingsChanges) =
+        sessionCoordinator.applyModelSettings(session, changes)
     internal fun loadEarlierHistory(session: Session) = sessionCoordinator.loadEarlierHistory(session)
 
     internal fun onSessionAction(session: Session, action: SessionAction) {
@@ -158,8 +157,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             is SessionAction.Command -> sessionCommand(session, action.command)
             is SessionAction.Respond -> respond(session, action.response)
             is SessionAction.LoadModels -> loadModels(session, action.force)
-            is SessionAction.SelectModel -> selectModel(session, action.model)
-            is SessionAction.SetThinkingLevel -> setThinkingLevel(session, action.level)
             SessionAction.LoadEarlierHistory -> loadEarlierHistory(session)
         }
     }
@@ -223,5 +220,5 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     }
 
     internal fun loadDetail(session: Session, force: Boolean = false) = resourceLoader.loadDetail(session, force)
-    internal fun loadModels(session: Session, force: Boolean = true) = resourceLoader.loadModels(session, force)
+    internal fun loadModels(session: Session, force: Boolean = false) = resourceLoader.loadModels(session, force)
 }

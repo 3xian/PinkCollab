@@ -53,6 +53,7 @@ internal data class TasksScreenActions(
     val checkForUpdates: () -> Unit,
     val showVersion: () -> Unit,
     val session: (Session, SessionAction) -> Unit,
+    val applyModelSettings: (Session, ModelSettingsChanges) -> Boolean,
 )
 
 @Composable
@@ -155,6 +156,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                         model = modelLoads[key],
                     ),
                     onAction = { action -> actions.session(session, action) },
+                    onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
                 )
             }
         }

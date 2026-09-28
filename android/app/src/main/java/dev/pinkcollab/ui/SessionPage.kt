@@ -47,6 +47,7 @@ import io.noties.markwon.Markwon
 internal fun SessionPage(
     state: SessionPageState,
     onAction: (SessionAction) -> Unit,
+    onApplyModelSettings: (ModelSettingsChanges) -> Boolean,
 ) {
     val load = state.detail
     val host = state.host
@@ -62,8 +63,6 @@ internal fun SessionPage(
     val onCommand: (SessionUserCommand) -> Unit = { onAction(SessionAction.Command(it)) }
     val onRespond: (AttentionResponse) -> Unit = { onAction(SessionAction.Respond(it)) }
     val onLoadModels: (Boolean) -> Unit = { onAction(SessionAction.LoadModels(it)) }
-    val onSelectModel: (ModelInfo) -> Unit = { onAction(SessionAction.SelectModel(it)) }
-    val onSetThinkingLevel: (String) -> Unit = { onAction(SessionAction.SetThinkingLevel(it)) }
     val onLoadEarlier: () -> Unit = { onAction(SessionAction.LoadEarlierHistory) }
     when (load) {
         LoadState.Loading -> {
@@ -394,8 +393,8 @@ internal fun SessionPage(
             }
         }
     }
-    LaunchedEffect(showModels, attached) {
-        if (showModels && attached) onLoadModels(true)
+    LaunchedEffect(showModels, attached, session.runtimeGeneration) {
+        if (showModels && attached) onLoadModels(false)
     }
     if (showModels) {
         ModelPickerSheet(
@@ -408,13 +407,9 @@ internal fun SessionPage(
             startRuntime = { onCommand(SessionUserCommand.Start) },
             dismiss = { showModels = false },
             retry = { onLoadModels(true) },
-            select = { model ->
-                showModels = false
-                onSelectModel(model)
-            },
-            selectThinkingLevel = { level ->
-                showModels = false
-                onSetThinkingLevel(level)
+            refresh = { onLoadModels(true) },
+            apply = { changes ->
+                if (onApplyModelSettings(changes)) showModels = false
             },
         )
     }

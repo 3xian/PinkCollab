@@ -143,12 +143,13 @@ internal class SessionOperations(
         actions.respond(session, response)
     }
 
-    fun selectModel(session: Session, model: ModelInfo) = launch(session.key(), SessionLane.Action) {
-        actions.selectModel(session, model)
-    }
-
-    fun setThinkingLevel(session: Session, level: String) = launch(session.key(), SessionLane.Action) {
-        actions.setThinkingLevel(session, level)
+    /** One Action job keeps both commands ordered and prevents lane de-duplication dropping either. */
+    fun applyModelSettings(session: Session, changes: ModelSettingsChanges): Boolean {
+        if (changes.isEmpty) return false
+        return launch(session.key(), SessionLane.Action) {
+            changes.model?.let { actions.selectModel(session, it) }
+            changes.thinkingLevel?.let { actions.setThinkingLevel(session, it) }
+        }
     }
 
     fun loadEarlierHistory(session: Session) = launch(session.key(), SessionLane.History) {
@@ -164,10 +165,10 @@ internal class SessionOperations(
         synchronized(lock) { jobs[SessionOperationKey(key, SessionLane.Send)] }?.cancel()
     }
 
-    private fun launch(key: SessionKey, lane: SessionLane, action: suspend () -> Unit) {
+    private fun launch(key: SessionKey, lane: SessionLane, action: suspend () -> Unit): Boolean {
         val operation = SessionOperationKey(key, lane)
         val job = synchronized(lock) {
-            if (operation in jobs) return
+            if (operation in jobs) return false
             scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     action()
@@ -190,6 +191,7 @@ internal class SessionOperations(
             }
         }
         job.start()
+        return true
     }
 }
 

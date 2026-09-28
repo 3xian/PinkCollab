@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -64,7 +65,13 @@ class ComposerRailDeviceTest {
         var page by mutableStateOf(SessionPageState(LoadState.Ready(SessionDetail(exited)), host,
             SessionDraft(text = "hello again"), 0, SessionActivity(), null, null))
         val actions = mutableListOf<SessionAction>()
-        compose.setContent { SessionPage(page) { actions += it } }
+        var applied: ModelSettingsChanges? = null
+        compose.setContent {
+            SessionPage(page, onAction = { actions += it }, onApplyModelSettings = {
+                applied = it
+                true
+            })
+        }
 
         compose.onNodeWithContentDescription("Choose model: Not selected").performClick()
         compose.onNodeWithText("Start runtime").assertExists()
@@ -83,12 +90,14 @@ class ComposerRailDeviceTest {
         }
         compose.waitForIdle()
         compose.runOnIdle {
-            assertTrue(actions.contains(SessionAction.LoadModels(true)))
+            assertTrue(actions.contains(SessionAction.LoadModels(false)))
             page = page.copy(model = LoadState.Ready(ModelCatalog(listOf(selected), emptyList())))
         }
-        compose.onNodeWithText("Test model").performClick()
+        compose.onNodeWithTag("provider:provider").performClick()
+        compose.onNodeWithContentDescription("Test model, provider").performClick()
+        compose.onNodeWithText("Apply").performClick()
         compose.runOnIdle {
-            assertEquals(SessionAction.SelectModel(selected), actions.last())
+            assertEquals(ModelSettingsChanges(selected, null), applied)
             val detail = (page.detail as LoadState.Ready).value
             page = page.copy(detail = LoadState.Ready(detail.copy(model = selected)))
         }

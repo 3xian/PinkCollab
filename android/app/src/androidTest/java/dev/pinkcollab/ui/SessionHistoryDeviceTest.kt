@@ -38,7 +38,7 @@ class SessionHistoryDeviceTest {
             liveItems = listOf(live))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {})
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Load earlier messages"))
@@ -57,7 +57,7 @@ class SessionHistoryDeviceTest {
             runtimeGeneration = null), savedHistory = SavedHistory.Loading)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {})
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
@@ -68,7 +68,7 @@ class SessionHistoryDeviceTest {
             runtimeGeneration = null), savedHistory = SavedHistory.Failed)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {})
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
@@ -79,7 +79,7 @@ class SessionHistoryDeviceTest {
             runtimeGeneration = null))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {})
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
         compose.onNodeWithText("No saved messages yet").assertExists()
@@ -90,7 +90,7 @@ class SessionHistoryDeviceTest {
             runtimeGeneration = null), savedHistory = SavedHistory.Ready(null, listOf(saved), null))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {})
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
         compose.onNodeWithText("Earlier question").assertExists()

@@ -4,7 +4,6 @@ import android.net.Uri
 import dev.pinkcollab.data.AttentionResponse
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
-import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.OperationReceipt
 import dev.pinkcollab.data.OperationStatus
 import dev.pinkcollab.data.RuntimeExecution
@@ -30,8 +29,6 @@ internal sealed interface SessionAction {
     data class Command(val command: SessionUserCommand) : SessionAction
     data class Respond(val response: AttentionResponse) : SessionAction
     data class LoadModels(val force: Boolean) : SessionAction
-    data class SelectModel(val model: ModelInfo) : SessionAction
-    data class SetThinkingLevel(val level: String) : SessionAction
     data object LoadEarlierHistory : SessionAction
 }
 

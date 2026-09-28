@@ -31,6 +31,7 @@ data class ModelInfo(
     val id: String,
     val name: String,
     val thinkingLevel: String? = null,
+    val thinkingLevels: List<String>? = null,
 )
 data class ModelCatalog(val models: List<ModelInfo>, val thinkingLevels: List<String>)
 enum class SessionStatus { Starting, Running, NeedsInput, Stopping, Idle }
@@ -249,6 +250,7 @@ fun JSONObject.modelInfo() = ModelInfo(
     id = getString("id"),
     name = getString("name"),
     thinkingLevel = optString("thinkingLevel").takeIf { it.isNotBlank() },
+    thinkingLevels = optJSONArray("thinkingLevels")?.strings(),
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }

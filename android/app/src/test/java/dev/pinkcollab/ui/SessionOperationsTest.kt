@@ -25,6 +25,7 @@ class SessionOperationsTest {
         private val onPrompt: suspend () -> Unit = {},
         private val uncancellableUpload: Boolean = false,
         private val onUpload: (suspend (SelectedFile) -> Unit)? = null,
+        private val onSelectModel: (suspend () -> Unit)? = null,
     ) : SessionActions {
         val uploadStarted = CompletableDeferred<Unit>()
         val finishUpload = CompletableDeferred<Unit>()
@@ -47,8 +48,13 @@ class SessionOperationsTest {
         override suspend fun command(session: Session, command: SessionUserCommand) { commands += command.wire }
         override suspend fun respond(session: Session, response: AttentionResponse) { commands += "respond" }
 
-        override suspend fun selectModel(session: Session, model: ModelInfo) = Unit
-        override suspend fun setThinkingLevel(session: Session, level: String) = Unit
+        override suspend fun selectModel(session: Session, model: ModelInfo) {
+            commands += "select:${model.provider}/${model.id}"
+            onSelectModel?.invoke()
+        }
+        override suspend fun setThinkingLevel(session: Session, level: String) {
+            commands += "thinking:$level"
+        }
         override suspend fun loadEarlierHistory(session: Session) {
             historyStarted.complete(Unit)
             finishHistory.await()
@@ -201,5 +207,54 @@ class SessionOperationsTest {
         assertTrue(actions.commands.isEmpty())
         assertTrue(coordinator.operations.value.isEmpty())
         assertEquals("send me", drafts.state.value.getValue(key).text)
+    }
+
+    @Test fun apply_model_settings_sends_only_changed_commands() = runTest {
+        val current = ModelInfo("openai", "sol", "Sol", "low")
+        val next = ModelInfo("anthropic", "sonnet", "Sonnet")
+        val actions = FakeActions()
+        val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }) {}
+
+        assertTrue(!coordinator.applyModelSettings(session, modelSettingsChanges(current, ModelSettingsDraft.from(current))))
+        runCurrent()
+        assertTrue(actions.commands.isEmpty())
+
+        coordinator.applyModelSettings(session, modelSettingsChanges(current, ModelSettingsDraft(next, "low")))
+        runCurrent()
+        assertEquals(listOf("select:anthropic/sonnet"), actions.commands)
+
+        coordinator.applyModelSettings(session, modelSettingsChanges(current, ModelSettingsDraft(current, "high")))
+        runCurrent()
+        assertEquals(listOf("select:anthropic/sonnet", "thinking:high"), actions.commands)
+    }
+
+    @Test fun apply_model_and_thinking_shares_one_action_job_in_order() = runTest {
+        val firstFinished = CompletableDeferred<Unit>()
+        val actions = FakeActions(onSelectModel = { firstFinished.await() })
+        val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }) {}
+        val next = ModelInfo("anthropic", "sonnet", "Sonnet")
+
+        assertTrue(coordinator.applyModelSettings(session, ModelSettingsChanges(next, "high")))
+        runCurrent()
+        assertEquals(listOf("select:anthropic/sonnet"), actions.commands)
+        assertTrue(coordinator.operations.value.activity(key).action)
+        assertTrue(!coordinator.applyModelSettings(session, ModelSettingsChanges(next, "medium")))
+
+        firstFinished.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("select:anthropic/sonnet", "thinking:high"), actions.commands)
+        assertTrue(!coordinator.operations.value.activity(key).action)
+    }
+
+    @Test fun failed_model_selection_does_not_send_thinking_level() = runTest {
+        val actions = FakeActions(onSelectModel = { throw IllegalStateException("Model failed") })
+        val errors = mutableListOf<String>()
+        val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }, errors::add)
+
+        coordinator.applyModelSettings(session, ModelSettingsChanges(ModelInfo("anthropic", "sonnet", "Sonnet"), "high"))
+        runCurrent()
+
+        assertEquals(listOf("select:anthropic/sonnet"), actions.commands)
+        assertEquals(listOf("Model failed"), errors)
     }
 }

@@ -114,8 +114,10 @@ fn main() {
     }
     let mut parent = String::new();
     let all_models = [
-        json!({"provider":"fixture","id":"fast","name":"Fixture Fast"}),
-        json!({"provider":"fixture","id":"smart","name":"Fixture Smart"}),
+        json!({"provider":"fixture","id":"fast","name":"Fixture Fast","reasoning":true,
+            "thinking":{"mode":"effort","efforts":["low","high"]}}),
+        json!({"provider":"fixture","id":"smart","name":"Fixture Smart","reasoning":true,
+            "thinking":{"mode":"effort","efforts":["medium","high"]}}),
     ];
     // `--single-model` mirrors a host whose model scope has no alternative for `cycle_model` to pick.
     let models: &[Value] = if args.iter().any(|arg| arg == "--single-model") {
@@ -150,7 +152,17 @@ fn main() {
             "get_state" => ack(
                 json!({"sessionFile":log,"sessionId":"fixture","model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none(),"isStreaming":pending_prompt_id.is_some()}),
             ),
-            "get_available_thinking_levels" => ack(json!({"levels":["low","medium","high"]})),
+            "get_available_thinking_levels" => {
+                let mut levels = vec![json!("off")];
+                levels.extend(
+                    models[model_index]["thinking"]["efforts"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .cloned(),
+                );
+                ack(json!({"levels":levels}));
+            }
             "switch_session" => {
                 parent = std::fs::read_to_string(&log)
                     .unwrap_or_default()

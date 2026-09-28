@@ -34,6 +34,7 @@ internal class SessionResourceLoader(
     private val modelLoadLock = Any()
     private val modelJobs = mutableMapOf<SessionKey, Job>()
     private val modelVersions = mutableMapOf<SessionKey, Long>()
+    private val modelGenerations = mutableMapOf<SessionKey, String?>()
     private var nextModelVersion = 0L
 
     fun loadDetail(session: Session, force: Boolean = false) {
@@ -73,18 +74,24 @@ internal class SessionResourceLoader(
         job.start()
     }
 
-    fun loadModels(session: Session, force: Boolean = true) {
+    fun loadModels(session: Session, force: Boolean = false) {
         val key = SessionKey(session.hostId, session.id)
-        val version = synchronized(modelLoadLock) {
+        val request = synchronized(modelLoadLock) {
             val current = mutableModelLoads.value[key]
-            if (current == LoadState.Loading || (!force && current is LoadState.Ready)) {
+            val sameGeneration = key in modelGenerations && modelGenerations[key] == session.runtimeGeneration
+            if (((current == LoadState.Loading || (current is LoadState.Ready && current.refreshing)) && sameGeneration) ||
+                (!force && current is LoadState.Ready && sameGeneration)) {
                 null
             } else {
-                mutableModelLoads.value += key to LoadState.Loading
-                (++nextModelVersion).also { modelVersions[key] = it }
+                val cached = (current as? LoadState.Ready)?.takeIf { sameGeneration }
+                mutableModelLoads.value += key to (cached?.copy(refreshing = true) ?: LoadState.Loading)
+                modelGenerations[key] = session.runtimeGeneration
+                val version = (++nextModelVersion).also { modelVersions[key] = it }
+                version to cached
             }
         }
-        if (version == null) return
+        if (request == null) return
+        val (version, cached) = request
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val models = actions.models(session)
@@ -94,11 +101,14 @@ internal class SessionResourceLoader(
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
-                synchronized(modelLoadLock) {
-                    if (modelVersions[key] == version) {
-                        mutableModelLoads.value += key to LoadState.Failed(failure.message ?: "Unable to load models")
+                val message = failure.message ?: "Unable to load models"
+                val current = synchronized(modelLoadLock) {
+                    if (modelVersions[key] != version) false else {
+                        mutableModelLoads.value += key to (cached ?: LoadState.Failed(message))
+                        true
                     }
                 }
+                if (current && cached != null) reportError(message)
             }
         }
         synchronized(modelLoadLock) {
@@ -118,6 +128,7 @@ internal class SessionResourceLoader(
         }
         val modelToCancel = synchronized(modelLoadLock) {
             modelVersions.keys.removeAll { it.hostId == hostId }
+            modelGenerations.keys.removeAll { it.hostId == hostId }
             mutableModelLoads.value = mutableModelLoads.value.filterKeys { it.hostId != hostId }
             modelJobs.filterKeys { it.hostId == hostId }.values.toList().also {
                 modelJobs.keys.removeAll { key -> key.hostId == hostId }

@@ -643,6 +643,14 @@ async fn v2_resume_keeps_transcript_and_uses_new_generation() {
         .await
         .unwrap();
     assert_eq!(catalog["models"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        catalog["models"][0]["thinkingLevels"],
+        json!(["off", "low", "high"])
+    );
+    assert_eq!(
+        catalog["models"][1]["thinkingLevels"],
+        json!(["off", "medium", "high"])
+    );
     assert!(
         catalog["thinkingLevels"]
             .as_array()
