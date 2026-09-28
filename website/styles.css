@@ -121,18 +121,15 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 @media(max-width:380px){.powered-brand-capabilities{font-size:8px;letter-spacing:-.04em}}
 /* The large section surfaces are square; nested controls and detail cards retain their radii. */
 .compare,.architecture,.powered-card,.install-panel{border-radius:0}
-.header-omp-mobile{display:none}
-/* On phones, give the brand its own row and keep navigation labels unwrapped. */
+/* On phones, the top-right keeps Get started and GitHub only. */
 @media(max-width:680px){
-  .site-header{position:relative;height:auto;display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:16px 0 13px}
-  .site-header .brand{width:max-content}
-  .site-header nav{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;font-size:12px}
-  .site-header nav a:not(.nav-wide){display:inline-flex;align-items:center;justify-content:center;min-height:42px;white-space:nowrap}
-  .site-header nav .nav-wide{display:none}
-  .site-header nav .nav-source{gap:7px;padding:8px 12px}
-  .site-header nav .nav-architecture{padding:8px 4px}
-  .site-header nav a.nav-omp{display:none}
-  .site-header .header-omp-mobile{display:inline-flex;align-items:center;position:absolute;top:16px;right:0;min-height:42px;color:#d8c4e8;font-size:12px}
+  .site-header{height:auto;align-items:center;gap:12px;padding:16px 0 13px}
+  .site-header .brand{width:max-content;flex:none}
+  .site-header nav{width:auto;margin-left:auto;justify-content:flex-end;gap:16px;font-size:12px}
+  .site-header nav .nav-architecture,
+  .site-header nav .nav-wide,
+  .site-header nav .nav-omp{display:none}
+  .site-header nav .nav-source{display:inline-flex;align-items:center;min-height:42px;white-space:nowrap}
 }
 @media(max-width:360px){.site-header nav{font-size:11px;gap:6px}.site-header nav .nav-source{padding:8px 9px}}
 /* Page-wide dividers belong only below the header and above the footer. */
@@ -140,8 +137,7 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 /* Header navigation is one text treatment, not a mix of links and button shells. */
 .site-header nav a{padding:0;border:0;border-radius:0;background:none;color:var(--text-primary);font-weight:600;gap:5px}
 .site-header nav .nav-source{min-height:44px;align-items:center}
-.site-header .header-omp-mobile{color:var(--text-primary);font-weight:600}
-.site-header nav a:hover,.site-header .header-omp-mobile:hover{color:var(--amber-soft)}
+.site-header nav a:hover{color:var(--amber-soft)}
 @media(max-width:680px){.site-header nav .nav-source{min-height:42px}}
 /* Keep model imagery beside the introduction on wide screens. */
 .model-control-heading{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);align-items:end;gap:40px;margin-bottom:34px}
@@ -235,3 +231,12 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 }
 
 .powered-foundation{max-width:590px;margin-top:18px;color:#a99eaf;font-size:14px;line-height:1.75}
+
+/* Hero actions under the introduction are capsules, not the square buttons used elsewhere. */
+.hero-pills{flex-wrap:wrap;gap:10px}
+.hero-pills .pill{display:inline-flex;align-items:center;gap:8px;min-height:42px;padding:0 16px;border:1px solid #4a3e57;border-radius:999px;background:#1c1724;color:#efe6f4;font-size:14px;font-weight:600;line-height:1;white-space:nowrap}
+.hero-pills .pill svg{display:block;width:16px;height:16px;flex:none}
+.hero-pills .pill:hover{border-color:#8a6aaa;color:var(--amber-soft)}
+.hero-pills .pill-primary{border-color:transparent;background:linear-gradient(105deg,#7b46dd,#a548c0);color:#fff;box-shadow:0 10px 26px #7a45bb35}
+.hero-pills .pill-primary:hover{background:linear-gradient(105deg,#8450e2,#a94bc5);color:#fff}
+@media(max-width:480px){.hero-pills{gap:8px}.hero-pills .pill{min-height:40px;padding:0 13px;font-size:13px}}
