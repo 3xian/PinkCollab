@@ -1,5 +1,5 @@
 use super::ControllerState;
-use crate::v2_model::{RuntimeSnapshot, WorkTiming};
+use crate::domain::{RuntimeSnapshot, WorkTiming};
 use std::time::{Duration, Instant};
 
 /// Monotonic, generation-scoped authority. Never cloned into a snapshot.
@@ -82,7 +82,7 @@ impl ControllerState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{model::Attention, v2_model::SessionRecord};
+    use crate::{domain::SessionRecord, model::Attention};
     use serde_json::json;
 
     fn state() -> ControllerState {
@@ -210,7 +210,7 @@ mod tests {
             .unwrap();
         let expected = json!({"elapsedMs":5000,"running":true,"completed":false});
         assert_eq!(
-            serde_json::to_value(&captured).unwrap()["workTiming"],
+            serde_json::to_value(crate::protocol::RuntimeDto::from(&captured)).unwrap()["workTiming"],
             expected
         );
         assert_eq!(
@@ -220,7 +220,7 @@ mod tests {
             10_000
         );
         assert_eq!(
-            serde_json::to_value(&captured).unwrap()["workTiming"],
+            serde_json::to_value(crate::protocol::RuntimeDto::from(&captured)).unwrap()["workTiming"],
             expected
         );
         state
@@ -235,11 +235,11 @@ mod tests {
             .clone()
             .unwrap();
         assert_eq!(
-            serde_json::to_value(&paused).unwrap()["workTiming"],
+            serde_json::to_value(crate::protocol::RuntimeDto::from(&paused)).unwrap()["workTiming"],
             json!({"elapsedMs":15000,"running":false,"completed":false})
         );
         assert_eq!(
-            serde_json::to_value(&captured).unwrap()["workTiming"],
+            serde_json::to_value(crate::protocol::RuntimeDto::from(&captured)).unwrap()["workTiming"],
             expected
         );
         assert!(captured.pending_inputs.is_empty());

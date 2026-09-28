@@ -15,7 +15,7 @@ internal class DirectoryGateway(
     suspend fun listing(hostId: String, path: String, forceRefresh: Boolean = false): Listing =
         listings.getOrLoad(DirectoryListingKey(hostId, path), forceRefresh) {
             val host = paired(hostId)
-            JSONObject(api.request(host.url, host.credential, "/api/v2/fs/list", query = "path" to path)).listing()
+            JSONObject(api.request(host.url, host.credential, "/api/v3/fs/list", query = "path" to path)).listing()
         }
 
     fun prefetch(hostId: String, paths: List<String>) {

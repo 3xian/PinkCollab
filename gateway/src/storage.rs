@@ -1,4 +1,4 @@
-use crate::v2_model::{OperationRecord, SessionRecord};
+use crate::domain::{OperationRecord, SessionRecord};
 use anyhow::{Context, Result, ensure};
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;

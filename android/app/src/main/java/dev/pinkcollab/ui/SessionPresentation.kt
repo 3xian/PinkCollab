@@ -6,7 +6,6 @@ import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.OperationReceipt
 import dev.pinkcollab.data.OperationStatus
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
@@ -59,8 +58,7 @@ internal fun sessionControls(
     val connected = host?.connected == true
     val attached = session.runtimeAttached && connected
     val inputEnabled = connected && !activity.inputBusy && session.attention == null &&
-        session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping &&
-        (!session.runtimeAttached || session.runtimeExecution != RuntimeExecution.Unknown)
+        session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping
     val hasMessages = detail.savedHistory.items.isNotEmpty() || detail.liveItems.isNotEmpty()
     val placeholder = when {
         !hasMessages -> "What should OMP do?"

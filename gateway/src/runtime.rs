@@ -1,10 +1,11 @@
 use crate::{
+    domain::{OperationRecord, RuntimeSnapshot, SessionRecord, SessionView},
     events::Bus,
     model::{Attention, ModelInfo, TimelineItem},
     omp::{self, Runtime},
+    protocol::{OperationDto, RuntimeDto, ServerEvent, SessionDto, SessionSummary},
     storage::Store,
     uploads,
-    v2_model::{OperationRecord, RuntimeSnapshot, SessionRecord, SessionView},
     workspace::Browser,
 };
 use anyhow::{Result, ensure};
@@ -37,14 +38,6 @@ fn live_preview(value: &str) -> (String, bool) {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Delivery {
-    Start,
-    Steer,
-    FollowUp,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "snake_case",
@@ -53,21 +46,20 @@ pub enum Delivery {
 pub enum Command {
     StartRuntime,
     Prompt {
-        delivery: Delivery,
         message: String,
         #[serde(default)]
         file_ids: Vec<String>,
         #[serde(default)]
-        expected_generation: Option<String>,
+        generation: Option<String>,
     },
     Interrupt {
-        expected_generation: String,
+        generation: String,
     },
     StopRuntime {
-        expected_generation: String,
+        generation: String,
     },
     Respond {
-        expected_generation: String,
+        generation: String,
         input_request_id: String,
         #[serde(default)]
         value: Option<String>,
@@ -77,12 +69,12 @@ pub enum Command {
         cancelled: bool,
     },
     SelectModel {
-        expected_generation: String,
+        generation: String,
         provider: String,
         model_id: String,
     },
     SetThinkingLevel {
-        expected_generation: String,
+        generation: String,
         level: String,
     },
 }
@@ -102,10 +94,7 @@ impl Command {
     fn validate(&self) -> Result<()> {
         match self {
             Self::Prompt {
-                delivery,
-                message,
-                file_ids,
-                expected_generation,
+                message, file_ids, ..
             } => {
                 ensure!(
                     (!message.trim().is_empty() || !file_ids.is_empty()) && message.len() <= 262144,
@@ -116,30 +105,18 @@ impl Command {
                         && file_ids.iter().all(|id| uploads::valid_file_id(id)),
                     "Invalid file IDs"
                 );
-                if !matches!(delivery, Delivery::Start) {
-                    ensure!(
-                        expected_generation.as_ref().is_some_and(|s| !s.is_empty()),
-                        "expectedGeneration required"
-                    );
-                }
             }
-            Self::Interrupt {
-                expected_generation,
+            Self::Interrupt { generation } | Self::StopRuntime { generation } => {
+                ensure!(!generation.is_empty(), "generation required")
             }
-            | Self::StopRuntime {
-                expected_generation,
-            } => ensure!(
-                !expected_generation.is_empty(),
-                "expectedGeneration required"
-            ),
             Self::Respond {
-                expected_generation,
+                generation,
                 input_request_id,
                 value,
                 ..
             } => {
                 ensure!(
-                    !expected_generation.is_empty() && !input_request_id.is_empty(),
+                    !generation.is_empty() && !input_request_id.is_empty(),
                     "generation and input request required"
                 );
                 ensure!(
@@ -148,18 +125,15 @@ impl Command {
                 );
             }
             Self::SelectModel {
-                expected_generation,
+                generation,
                 provider,
                 model_id,
             } => ensure!(
-                !expected_generation.is_empty() && !provider.is_empty() && !model_id.is_empty(),
+                !generation.is_empty() && !provider.is_empty() && !model_id.is_empty(),
                 "generation, provider and model required"
             ),
-            Self::SetThinkingLevel {
-                expected_generation,
-                level,
-            } => ensure!(
-                !expected_generation.is_empty() && !level.is_empty(),
+            Self::SetThinkingLevel { generation, level } => ensure!(
+                !generation.is_empty() && !level.is_empty(),
                 "generation and level required"
             ),
             Self::StartRuntime => {}
@@ -229,6 +203,7 @@ enum CommandResult {
     Running,
     Succeeded(Value),
 }
+#[derive(Debug)]
 struct CommandFailure {
     code: &'static str,
     message: String,
@@ -256,12 +231,12 @@ impl SessionController {
         let session = state.session.clone();
         let runtime = state.capture_runtime().clone();
         let messages = state.messages.clone();
-        drop(state);
         let session_id = session.id.clone();
         let recent_operations = self
             .store
             .run(move |store| store.recent_operations(&session_id, 20))
             .await?;
+        drop(state);
         let history_ref = session
             .engine_session_ref
             .as_ref()
@@ -274,14 +249,16 @@ impl SessionController {
             history_ref,
         })
     }
-    fn publish(&self, id: &str, kind: &str, payload: Value) {
-        self.bus.publish_resource(
-            &format!("session/{id}"),
-            json!([{"type":kind,"value":payload}]),
-        );
-        if kind.starts_with("v2.runtime") || kind == "v2.metadata.updated" {
-            self.bus.publish_resource("host/sessions",json!([{"type":"summary.changed","changeKind":kind,"sessionId":id,"value":payload}]));
-        }
+    fn publish_state(&self, state: &mut ControllerState) {
+        let runtime = state.capture_runtime().as_ref().map(RuntimeDto::from);
+        self.bus.publish(ServerEvent::SessionState {
+            session_id: state.session.id.clone(),
+            summary: SessionSummary {
+                session: SessionDto::from(&state.session),
+                runtime,
+            },
+            has_history: state.session.engine_session_ref.is_some(),
+        });
     }
     async fn persist_receipt(&self, receipt: &OperationRecord) -> Result<bool> {
         let receipt = receipt.clone();
@@ -296,12 +273,16 @@ impl SessionController {
         result: Option<Value>,
         error: Option<Value>,
     ) -> Result<()> {
+        let _state = self.state.lock().await;
         receipt.status = status.into();
         receipt.result = result;
         receipt.error = error;
         receipt.updated_at = Utc::now();
         if self.persist_receipt(receipt).await? {
-            self.publish(&receipt.session_id, "v2.operation.updated", json!(receipt));
+            self.bus.publish(ServerEvent::Operation {
+                session_id: receipt.session_id.clone(),
+                operation: OperationDto::from(&*receipt),
+            });
         }
         Ok(())
     }
@@ -367,85 +348,38 @@ impl SessionController {
             Command::StartRuntime => {
                 let (generation, _) = self.ensure_runtime().await.map_err(start_failure)?;
                 self.bind_generation(receipt, &generation).await?;
-                Ok(CommandResult::Succeeded(
-                    json!({"runtimeGeneration":generation}),
-                ))
+                Ok(CommandResult::Succeeded(json!({"generation":generation})))
             }
             Command::Prompt {
-                delivery,
                 message,
                 file_ids,
-                expected_generation,
+                generation,
             } => {
+                // None means the client observed no process. Ordinary dispatch serializes starts.
+                if generation.is_none() && self.state.lock().await.runtime.is_some() {
+                    return Err(CommandFailure::failed(
+                        "generation_mismatch",
+                        "Runtime generation changed",
+                    ));
+                }
                 let store = self.store.clone();
                 let session_id = receipt.session_id.clone();
-                let file_mode = match delivery {
-                    Delivery::Start => uploads::PromptFileMode::Direct,
-                    Delivery::Steer | Delivery::FollowUp => uploads::PromptFileMode::Queued,
-                };
-                let (file_note, images) = tokio::task::spawn_blocking(move || {
-                    uploads::prompt_files(&store, &session_id, &file_ids, file_mode)
+                let files = tokio::task::spawn_blocking(move || {
+                    uploads::prompt_files(&store, &session_id, &file_ids)
                 })
                 .await
                 .map_err(|err| CommandFailure::failed("invalid_file", err.to_string()))?
                 .map_err(|err| CommandFailure::failed("invalid_file", err.to_string()))?;
                 let rpc_id = rpc_id(receipt);
-                let mut frame =
-                    json!({"type":"prompt","message":format!("{message}{file_note}"),"id":rpc_id});
-                if !images.is_empty() {
-                    frame["images"] = json!(images);
-                }
-                match delivery {
-                    Delivery::Start => {}
-                    Delivery::Steer => frame["streamingBehavior"] = json!("steer"),
-                    Delivery::FollowUp => frame["streamingBehavior"] = json!("followUp"),
+                let prepared = prompt::PreparedPrompt::new(&rpc_id, &message, files)?;
+                // Invalid attachments and oversized frames must not allocate a process slot.
+                let generation = match generation {
+                    Some(generation) => generation,
+                    None => self.ensure_runtime().await.map_err(start_failure)?.0,
                 };
-                if serde_json::to_vec(&frame).map_or(true, |bytes| bytes.len() >= omp::MAX_LINE) {
-                    return Err(CommandFailure::failed(
-                        "invalid_request",
-                        "Prompt and attachments exceed OMP input frame limit",
-                    ));
-                }
-                let (generation, runtime) = match delivery {
-                    Delivery::Start if expected_generation.is_some() => {
-                        self.dispatchable_runtime(
-                            expected_generation.as_deref().unwrap_or_default(),
-                        )
-                        .await?
-                    }
-                    Delivery::Start => self.ensure_runtime().await.map_err(start_failure)?,
-                    _ => {
-                        self.dispatchable_runtime(
-                            expected_generation.as_deref().unwrap_or_default(),
-                        )
-                        .await?
-                    }
-                };
+                // Reject known-invalid targets before recording a possible external write.
+                Self::prompt_target(&*self.state.lock().await, &generation)?;
                 self.bind_generation(receipt, &generation).await?;
-                {
-                    let state = self.state.lock().await;
-                    let snapshot = state.projection.as_ref().ok_or_else(|| {
-                        CommandFailure::failed("runtime_required", "Runtime is unavailable")
-                    })?;
-                    if !matches!(delivery, Delivery::Start) && snapshot.execution != "active" {
-                        return Err(CommandFailure::failed(
-                            "session_not_busy",
-                            "No active execution to steer",
-                        ));
-                    }
-                    if matches!(delivery, Delivery::Start) && snapshot.execution != "quiescent" {
-                        return Err(CommandFailure::failed(
-                            "session_busy",
-                            "Session is not settled",
-                        ));
-                    }
-                    if !snapshot.pending_inputs.is_empty() {
-                        return Err(CommandFailure::failed(
-                            "input_pending",
-                            "Answer the pending input first",
-                        ));
-                    }
-                }
                 // Commit the safety marker before any prompt bytes can reach OMP.
                 // A failed/aborted/no-op RPC may still leave this mapping protected.
                 let reference = self
@@ -478,13 +412,17 @@ impl SessionController {
                         "OMP history mapping changed before prompt",
                     ));
                 }
-                let settled_revision = {
+                let (runtime, frame, settled_revision) = {
                     let mut state = self.state.lock().await;
+                    // All slow preparation/persistence is done. Validate and choose the route
+                    // together, without an await between admission and handing the frame to OMP.
+                    let (runtime, steer) = Self::prompt_target(&state, &generation)?;
+                    let frame = prepared.frame(steer);
                     state.pending_prompt_results.insert(
                         rpc_id.clone(),
                         (receipt.client_id.clone(), receipt.command_id.clone()),
                     );
-                    state.settled_revision
+                    (runtime, frame, state.settled_revision)
                 };
                 let response = runtime
                     .request_with_id_after_write(rpc_id.clone(), frame, || drop(admission.take()))
@@ -501,7 +439,7 @@ impl SessionController {
                                 .pending_prompt_results
                                 .remove(&rpc_id);
                             return Ok(CommandResult::Succeeded(
-                                json!({"runtimeGeneration":generation,"agentInvoked":false}),
+                                json!({"generation":generation,"agentInvoked":false}),
                             ));
                         }
                         self.set_prompt_active(&generation, &rpc_id, settled_revision)
@@ -519,50 +457,40 @@ impl SessionController {
                     Err(err) => Err(CommandFailure::uncertain(err.to_string())),
                 }
             }
-            Command::StopRuntime {
-                expected_generation,
-            } => {
-                let runtime = self.begin_stop(&expected_generation).await?;
-                receipt.runtime_generation = Some(expected_generation.clone());
+            Command::StopRuntime { generation } => {
+                let runtime = self.begin_stop(&generation).await?;
+                receipt.runtime_generation = Some(generation.clone());
                 {
                     let mut state = self.state.lock().await;
-                    self.publish(
-                        &receipt.session_id,
-                        "v2.runtime.updated",
-                        json!({"runtime":state.capture_runtime()}),
-                    );
+                    self.publish_state(&mut state);
                 }
                 runtime
                     .stop_confirmed()
                     .await
                     .map_err(|err| CommandFailure::uncertain(err.to_string()))?;
-                self.apply_exit(&expected_generation, None).await;
+                self.apply_exit(&generation, None).await;
                 Ok(CommandResult::Succeeded(
-                    json!({"stoppedGeneration":expected_generation}),
+                    json!({"stoppedGeneration":generation}),
                 ))
             }
-            Command::Interrupt {
-                expected_generation,
-            } => {
-                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
-                self.bind_generation(receipt, &expected_generation).await?;
+            Command::Interrupt { generation } => {
+                let (_, runtime) = self.dispatchable_runtime(&generation).await?;
+                self.bind_generation(receipt, &generation).await?;
                 runtime
                     .request_after_write(json!({"type":"abort"}), || drop(admission.take()))
                     .await
                     .map_err(rpc_failure)?;
-                Ok(CommandResult::Succeeded(
-                    json!({"runtimeGeneration":expected_generation}),
-                ))
+                Ok(CommandResult::Succeeded(json!({"generation":generation})))
             }
             Command::Respond {
-                expected_generation,
+                generation,
                 input_request_id,
                 value,
                 confirmed,
                 cancelled,
             } => {
-                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
-                self.bind_generation(receipt, &expected_generation).await?;
+                let (_, runtime) = self.dispatchable_runtime(&generation).await?;
+                self.bind_generation(receipt, &generation).await?;
                 let attention = {
                     let mut state = self.state.lock().await;
                     let snapshot = state.projection.as_mut().ok_or_else(|| {
@@ -602,11 +530,7 @@ impl SessionController {
                 };
                 {
                     let mut state = self.state.lock().await;
-                    self.publish(
-                        &receipt.session_id,
-                        "v2.runtime.updated",
-                        json!({"runtime":state.capture_runtime()}),
-                    );
+                    self.publish_state(&mut state);
                 }
                 let mut frame = json!({"type":"extension_ui_response","id":attention.id});
                 if cancelled {
@@ -625,31 +549,26 @@ impl SessionController {
                 ))
             }
             Command::SelectModel {
-                expected_generation,
+                generation,
                 provider,
                 model_id,
             } => {
-                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
-                self.bind_generation(receipt, &expected_generation).await?;
+                let (_, runtime) = self.dispatchable_runtime(&generation).await?;
+                self.bind_generation(receipt, &generation).await?;
                 runtime
                     .request(json!({"type":"set_model","provider":provider,"modelId":model_id}))
                     .await
                     .map_err(rpc_failure)?;
-                self.refresh_state(&expected_generation, &runtime)
+                self.refresh_state(&generation, &runtime)
                     .await
                     .map_err(|err| {
                         CommandFailure::uncertain(format!("Model set; state refresh failed: {err}"))
                     })?;
-                Ok(CommandResult::Succeeded(
-                    json!({"runtimeGeneration":expected_generation}),
-                ))
+                Ok(CommandResult::Succeeded(json!({"generation":generation})))
             }
-            Command::SetThinkingLevel {
-                expected_generation,
-                level,
-            } => {
-                let (_, runtime) = self.dispatchable_runtime(&expected_generation).await?;
-                self.bind_generation(receipt, &expected_generation).await?;
+            Command::SetThinkingLevel { generation, level } => {
+                let (_, runtime) = self.dispatchable_runtime(&generation).await?;
+                self.bind_generation(receipt, &generation).await?;
                 let available = runtime
                     .request(json!({"type":"get_available_thinking_levels"}))
                     .await
@@ -673,16 +592,14 @@ impl SessionController {
                     .request(json!({"type":"set_thinking_level","level":level}))
                     .await
                     .map_err(rpc_failure)?;
-                self.refresh_state(&expected_generation, &runtime)
+                self.refresh_state(&generation, &runtime)
                     .await
                     .map_err(|err| {
                         CommandFailure::uncertain(format!(
                             "Thinking level set; state refresh failed: {err}"
                         ))
                     })?;
-                Ok(CommandResult::Succeeded(
-                    json!({"runtimeGeneration":expected_generation}),
-                ))
+                Ok(CommandResult::Succeeded(json!({"generation":generation})))
             }
         }
     }
@@ -719,7 +636,7 @@ impl SessionController {
             .ok_or_else(|| CommandFailure::failed("runtime_required", "No attached runtime"))?;
         if current.generation != expected {
             return Err(CommandFailure::failed(
-                "stale_runtime",
+                "generation_mismatch",
                 "Runtime generation changed",
             ));
         }
@@ -779,8 +696,7 @@ impl SessionController {
             .into();
         }
         state.update_work_timing(false);
-        let payload = json!({"runtime":state.capture_runtime()});
-        self.publish(&state.session.id, "v2.runtime.updated", payload);
+        self.publish_state(&mut state);
         Ok(())
     }
     async fn set_prompt_active(&self, generation: &str, rpc_id: &str, settled_revision: u64) {
@@ -797,16 +713,12 @@ impl SessionController {
                 snapshot.activity = None;
             }
             state.update_work_timing(true);
-            let id = state.session.id.clone();
-            self.publish(
-                &id,
-                "v2.runtime.updated",
-                json!({"runtime":state.capture_runtime()}),
-            );
+            self.publish_state(&mut state);
         }
     }
 }
 mod projection;
+mod prompt;
 
 fn rpc_id(receipt: &OperationRecord) -> String {
     let raw = format!(

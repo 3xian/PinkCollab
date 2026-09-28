@@ -41,7 +41,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.HostState
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.ToolArguments
@@ -51,7 +50,7 @@ import dev.pinkcollab.ui.theme.Purple400
 import dev.pinkcollab.ui.theme.TextHigh
 import dev.pinkcollab.ui.theme.TextMid
 
-internal enum class WorkStatusKind { Working, Starting, Stopping, Attention, Offline, Unknown, Ready }
+internal enum class WorkStatusKind { Working, Starting, Stopping, Attention, Offline, Ready }
 
 internal data class SessionWorkStatus(
     val kind: WorkStatusKind,
@@ -65,7 +64,7 @@ internal fun sessionWorkStatus(detail: SessionDetail, host: HostState?): Session
     val status = deriveSessionWorkStatus(detail, host)
     val timing = detail.session.workTiming?.takeIf {
         host?.connected == true && detail.session.runtimeAttached &&
-            detail.session.runtimeExecution != RuntimeExecution.Unknown
+            detail.session.status != SessionStatus.Starting
     } ?: return status
     return if (timing.completed && status.kind == WorkStatusKind.Ready) {
         status.copy(title = "Worked for ${workDurationLabel(timing.elapsedMs)}")
@@ -90,7 +89,7 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
         return SessionWorkStatus(WorkStatusKind.Offline, title, "Current work cannot be confirmed")
     }
     val session = detail.session
-    val active = session.runtimeExecution == RuntimeExecution.Active
+    val active = session.status == SessionStatus.Running
     if (session.status == SessionStatus.Starting) {
         return SessionWorkStatus(WorkStatusKind.Starting, "Starting agent", active = active)
     }
@@ -105,9 +104,6 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
         )
     }
     if (!session.runtimeAttached) return SessionWorkStatus(WorkStatusKind.Ready, "Ready for a message")
-    if (session.runtimeExecution == RuntimeExecution.Unknown) {
-        return SessionWorkStatus(WorkStatusKind.Unknown, "Agent status unknown", "Current work cannot be confirmed")
-    }
     if (!active) return SessionWorkStatus(WorkStatusKind.Ready, "Ready for a message")
 
     // A new user turn invalidates any unfinished traces left behind by an interrupted turn.
@@ -193,7 +189,6 @@ internal fun SessionWorkStatusStrip(status: SessionWorkStatus, modifier: Modifie
                 imageVector = when (status.kind) {
                     WorkStatusKind.Attention -> Icons.Outlined.ErrorOutline
                     WorkStatusKind.Offline -> Icons.Outlined.WifiOff
-                    WorkStatusKind.Unknown -> Icons.Outlined.Info
                     WorkStatusKind.Starting, WorkStatusKind.Stopping -> Icons.Outlined.HourglassEmpty
                     else -> Icons.Outlined.ChatBubbleOutline
                 },

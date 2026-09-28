@@ -39,7 +39,7 @@ pinkcollab pair
    ```
 
    Set `public_url: https://<hostname>.ts.net` in `~/.pinkcollab/config.yaml`, replacing the placeholder with the **actual URL printed by Funnel**. Direct `tailscale funnel` does not update Gateway config; use the same data directory as `init`.
-4. In another terminal, from `gateway/`, run `cargo run -- pair` and scan the QR on the phone. From a network outside the tailnet, an unauthenticated request to `https://<hostname>.ts.net/api/v2/host` should return `401 authentication_required`. A request from the host may resolve through its private tailnet route, so it does not prove public reachability.
+4. In another terminal, from `gateway/`, run `cargo run -- pair` and scan the QR on the phone. From a network outside the tailnet, an unauthenticated request to `https://<hostname>.ts.net/api/v3/host` should return `401 authentication_required`. A request from the host may resolve through its private tailnet route, so it does not prove public reachability.
 
 `tailscale funnel --https=443 off` removes the public mapping. Stopping the Gateway leaves the mapping with no backend; `tailscale down` disconnects the node without stopping `tailscaled`. Funnel supports public HTTPS ports 443, 8443, and 10000. Funnel and Serve share configuration, so publishing on the same port can replace an existing Serve mapping.
 
@@ -50,7 +50,7 @@ pinkcollab pair
 
 ## Pairing and access
 
-`pair` uses `public_url` or an explicit `--url`; it will not guess a Tailscale hostname. Its token works once for five minutes. Only `/api/v2/pair` is accessible without a credential; other API requests and WebSocket upgrades require a paired Bearer token. To remove a phone's **host-side** access, run `pinkcollab clients`, then `pinkcollab revoke --client <clientId>` (from source: `cargo run -- clients` / `cargo run -- revoke --client <clientId>`). Removing a host in the app alone does not revoke it.
+`pair` uses `public_url` or an explicit `--url`; it will not guess a Tailscale hostname. Its token works once for five minutes. Only `/api/v3/pair` is accessible without a credential; other API requests and WebSocket upgrades require a paired Bearer token. To remove a phone's **host-side** access, run `pinkcollab clients`, then `pinkcollab revoke --client <clientId>` (from source: `cargo run -- clients` / `cargo run -- revoke --client <clientId>`). Removing a host in the app alone does not revoke it.
 
 OMP runs with the Gateway user's filesystem permissions; the workspace allowlist is not an OS sandbox. OMP sends model traffic under its own provider configuration.
 

@@ -3,7 +3,6 @@ package dev.pinkcollab.ui
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.AttentionResponse
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -18,7 +17,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class SessionOperationsTest {
     private val session = Session("session", "host", "/tmp", "Work", SessionStatus.Running, "Working", false, null,
-        "2026-01-01", "2026-01-01", true, "generation", RuntimeExecution.Active)
+        "2026-01-01", "2026-01-01", true, "generation")
     private val key = SessionKey("host", "session")
 
     private class FakeActions(

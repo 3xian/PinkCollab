@@ -16,7 +16,7 @@ internal class CommandDispatcher(
     private val pendingCommands = DurableCommandOutbox(storage)
     private data class RuntimeTarget(val generation: String) {
         fun action(requested: String) = "$requested:generation:$generation"
-        fun fields() = JSONObject().put("expectedGeneration", generation)
+        fun fields() = JSONObject().put("generation", generation)
     }
 
     suspend fun removeHost(hostId: String) = pendingCommands.removeHost(hostId)
@@ -55,10 +55,9 @@ internal class CommandDispatcher(
             when (command) {
                 "prompt" -> {
                     val session = currentSession(hostId, id)
-                    val delivery = if (session?.runtimeExecution == RuntimeExecution.Active) "steer" else "start"
-                    JSONObject().put("delivery", delivery).put("message", input.getString("message"))
+                    JSONObject().put("message", input.getString("message"))
                         .also { if (input.has("fileIds")) it.put("fileIds", input.getJSONArray("fileIds")) }
-                        .also { if (session?.runtimeAttached == true) it.put("expectedGeneration", requireNotNull(session.runtimeGeneration) { "Runtime required" }) }
+                        .also { if (session?.runtimeAttached == true) it.put("generation", requireNotNull(session.generation) { "Runtime required" }) }
                 }
                 "start" -> JSONObject()
                 "interrupt", "stop" -> requireNotNull(target).fields()
@@ -80,7 +79,7 @@ internal class CommandDispatcher(
     }
 
     private fun runtimeTarget(hostId: String, id: String) =
-        RuntimeTarget(requireNotNull(currentSession(hostId, id)?.runtimeGeneration) { "Runtime required" })
+        RuntimeTarget(requireNotNull(currentSession(hostId, id)?.generation) { "Runtime required" })
 
     private suspend fun sendCommand(hostId: String, id: String, action: String, type: String, intentId: String? = null, fields: () -> JSONObject) {
         hostGate.withHost(hostId) {
@@ -106,7 +105,7 @@ internal class CommandDispatcher(
     }
 
     private fun commandTransport(host: PairedHost, sessionId: String) = CommandTransport(
-        post = { body -> JSONObject(api.request(host.url, host.credential, "/api/v2/sessions/$sessionId/commands", "POST", body)) },
-        lookup = { commandId -> JSONObject(api.request(host.url, host.credential, "/api/v2/sessions/$sessionId/operations/$commandId")) },
+        post = { body -> JSONObject(api.request(host.url, host.credential, "/api/v3/sessions/$sessionId/commands", "POST", body)) },
+        lookup = { commandId -> JSONObject(api.request(host.url, host.credential, "/api/v3/sessions/$sessionId/operations/$commandId")) },
     )
 }

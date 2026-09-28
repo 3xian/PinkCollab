@@ -59,15 +59,30 @@ flowchart TD
 | --- | --- | --- |
 | Saved history | OMP JSONL, reconstructed for the selected branch | Display retained messages and tool results; never infer live execution |
 | Live items | Gateway projection for the current runtime generation | Upsert previews and tools by ID; preserve the supplied order |
-| Runtime phase and execution | Gateway runtime snapshot | Establish lifecycle and execution evidence |
+| Runtime state | Gateway runtime snapshot | Establish lifecycle and execution evidence |
 | Pending inputs | Runtime snapshot | Present the first pending request and its response controls |
 | Connection state | Android host connection | Qualify whether current work can be confirmed |
 | Receipts | Gateway command records | Report command failure or uncertain outcome separately from tool activity |
 | Draft, expansion, and scroll state | Android UI | Preserve local interaction state without becoming execution authority |
 
+### Protocol 3 boundary
+
+Android consumes the flat protocol 3 events through `ProtocolReducer`; OMP frame names in section 3.2 describe Gateway inputs, not Android wire events.
+
+| Wire input | Presentation update |
+| --- | --- |
+| `host_snapshot` | Replace host summaries; invalidate old details and take fresh snapshots for the visible session |
+| `session_snapshot` | Replace session detail, model, live timeline, and recent receipts; load saved history when `hasHistory` is true |
+| `session_state` | Replace session metadata and all runtime facts in the host list and subscribed detail |
+| `session_upsert` | Insert or replace the session summary; update an already subscribed detail when present |
+| `timeline` | Apply reset, removals, and upserts to live items only |
+| `operation` | Replace a receipt by its `id`; interpret public `state`, never internal dispatch stages |
+
+`runtime.state` is the sole wire status: `starting`, `idle`, `running`, `waiting_input`, or `stopping`. A null runtime clears generation, model, pending input, and work timing. Generation changes clear the live tail and invalidate in-flight history reads; saved history reloads when a mapping exists. Local snapshot tokens and history epochs reject stale responses and are never sent over the wire. The UI does not parse runtime `phase` or `execution`, or choose prompt delivery; the Gateway chooses normal versus steering at dispatch.
+
 ### Session switcher status
 
-The top session cards derive status from the host connection and session runtime summary. Connection states take precedence over retained execution evidence. Online cards show Starting or Stopping during lifecycle transitions, Inactive when no runtime is attached, Needs you for pending input, Working for active execution, Ready for quiescent execution, and Unknown when execution is unconfirmed. Ready does not claim task completion; Inactive does not imply the session has never run. Cards do not infer status from transcript text or tool results.
+The top session cards derive status from the host connection and session runtime summary. Connection states take precedence over retained execution evidence. Online cards show Starting or Stopping during lifecycle transitions, Inactive when no runtime is attached, Needs you for pending input, `Working` for `running`, `Ready` for attached `idle`, and `Starting` for `starting` (including execution not yet confirmed by the Gateway). Ready does not claim task completion; Inactive does not imply the session has never run. Cards do not infer status from transcript text or tool results.
 
 ### 2.1 Ordering and source boundaries
 
@@ -197,7 +212,7 @@ Groups start collapsed. Opening a single-operation group opens that operation's 
 
 ## 6. Current-work contract
 
-The work-status title is followed by a muted duration separated by whitespace, without a dot. Optional Gateway `workTiming` is the sole duration authority: Android adds local monotonic time only while the sample is running and the host is online. Pending input freezes the duration; disconnection hides it. A settled sample replaces Ready with `Worked for 1m 23s`, without claiming success. This summary remains until new work or runtime exit; it is not a durable transcript entry. Missing timing (including older Gateways) displays no fabricated counter. UI metadata uses spacing, commas, or parentheses instead of middle-dot separators; authored message content is unchanged.
+The work-status title is followed by a muted duration separated by whitespace, without a dot. Optional Gateway `workTiming` is the sole duration authority: Android adds local monotonic time only while the sample is running and the host is online. Pending input freezes the duration; disconnection hides it. A settled sample replaces Ready with `Worked for 1m 23s`, without claiming success. This summary remains until new work or runtime exit; it is not a durable transcript entry. Missing timing displays no fabricated counter. UI metadata uses spacing, commas, or parentheses instead of middle-dot separators; authored message content is unchanged.
 
 ### 6.1 Placement and inputs
 
@@ -212,15 +227,14 @@ Evaluate top to bottom; the first matching row wins.
 | Priority | Condition | `WorkStatusKind` | Meaning / title | Active indicator |
 | --- | --- | --- | --- | --- |
 | 1 | Host absent or not connected | `Offline` | Connecting, syncing, reconnecting, sign-in/update required, or offline; current work cannot be confirmed | No |
-| 2 | Session starting | `Starting` | Starting agent | Only if execution is active |
-| 3 | Session stopping | `Stopping` | Stopping agent | Only if execution is active |
+| 2 | Session starting | `Starting` | Starting agent | No |
+| 3 | Session stopping | `Stopping` | Stopping agent | No |
 | 4 | Attention object, attention flag, or needs-input status | `Attention` | Waiting for your input; show request text or direct the user to the conversation | No |
 | 5 | Runtime detached | `Ready` | Ready for a message | No |
-| 6 | Attached runtime execution unknown | `Unknown` | Agent status unknown; current work cannot be confirmed | No |
-| 7 | Execution not active | `Ready` | Ready for a message | No |
-| 8 | Current live turn contains unfinished structured tools | `Working` | Tool intent and target; concurrent count when applicable | Yes |
-| 9 | No unfinished tool and `detail.streaming` nonblank | `Working` | Writing reply | Yes |
-| 10 | Active execution with none of the above | `Working` | Thinking | Yes |
+| 6 | Attached runtime is idle | `Ready` | Ready for a message | No |
+| 7 | Current live turn contains unfinished structured tools | `Working` | Tool intent and target; concurrent count when applicable | Yes |
+| 8 | No unfinished tool and `detail.streaming` nonblank | `Working` | Writing reply | Yes |
+| 9 | Runtime state is running with none of the above | `Working` | Thinking | Yes |
 
 `Thinking` is a generic active-work fallback, not evidence of a particular reasoning event. `Ready` is availability for another message, not a task-success verdict. There is no `Completed` or `Failed` work-status kind; errors and tool outcomes have their own surfaces.
 
@@ -244,7 +258,7 @@ The strip and timeline share a normalized, typed tool identity; target selection
 
 ### 6.4 Streaming support boundary
 
-The UI can render nonblank `SessionDetail.streaming` as a reply band and label it `Writing reply`. **Current limitation:** the v2 Android reducer does not populate this separate field. Current Gateway text deltas arrive as updates to `liveItems` of kind `assistant`. Thus the separate streaming band and status branch are not guaranteed to appear during a real v2 reply; the active fallback can remain `Thinking` while assistant text grows.
+The UI can render nonblank `SessionDetail.streaming` as a reply band and label it `Writing reply`. **Current limitation:** the Android reducer does not populate this separate field. Current Gateway text deltas arrive as updates to `liveItems` of kind `assistant`. Thus the separate streaming band and status branch are not guaranteed to appear during a real reply; the active fallback can remain `Thinking` while assistant text grows.
 
 ## 7. Attention, command notices, and loading states
 
@@ -266,12 +280,12 @@ The Gateway currently admits `select`, `confirm`, `input`, and `editor` requests
 
 Only the last receipt is considered for the page's notice:
 
-| Receipt state | Presentation |
+| Protocol 3 receipt state (Android status) | Presentation |
 | --- | --- |
-| `OutcomeUnknown` or unrecognized status | Result cannot be confirmed; inspect the conversation before trying again |
-| `Failed`, prompt command | Message could not be sent |
-| `Failed`, other command | Action could not be completed |
-| Other states | No receipt notice |
+| `unknown` (`OutcomeUnknown`) or unrecognized status | Result cannot be confirmed; inspect the conversation before trying again |
+| `failed` (`Failed`), prompt command | Message could not be sent |
+| `failed` (`Failed`), other command | Action could not be completed |
+| `pending`, `succeeded`, `cancelled` | No receipt notice |
 
 Receipt notices must not be interpreted as individual tool outcomes or as automatic retry instructions.
 
@@ -299,7 +313,7 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 | Unconfirmed unfinished tool | Hourglass plus Last seen running; no spinner |
 | Work-status strip | One-line action and up to two lines of detail; ellipsis for overflow |
 | Attention | Amber status cue and explicit response controls |
-| Offline / unknown / ready strip | Distinct icon and text; no active indicator |
+| Offline / ready strip | Distinct icon and text; no active indicator |
 | Backgrounds | Static fills/tints; no animated noise or moving background effects |
 
 - Color is supplementary; state remains distinguishable through text and icons.
@@ -326,7 +340,7 @@ These are behavior checks, not requirements to pin exact wording in tests.
 | Load history containing incomplete tools | Historical tools do not animate or drive current work |
 | Lose history connectivity after showing messages | Keep retained content and expose recovery, not false emptiness |
 | Scroll back while new work arrives | Reading position is respected; current-work strip remains visible |
-| Receive assistant text deltas through v2 | Existing assistant content updates; no duplicate final message or invented streaming event |
+| Receive assistant text deltas through protocol 3 | Existing assistant content updates; no duplicate final message or invented streaming event |
 
 ## 10. Extension checklist and implementation map
 
@@ -343,10 +357,10 @@ Before adding a new presentation type or changing a mapping:
 | Responsibility | Implementation |
 | --- | --- |
 | Gateway timeline/tool payload and merging | [model.rs](../gateway/src/model.rs) |
-| Live runtime-to-display projection | [projection.rs](../gateway/src/v2_runtime/projection.rs) |
+| Live runtime-to-display projection | [projection.rs](../gateway/src/runtime/projection.rs) |
 | Saved-history reconstruction | [history.rs](../gateway/src/history.rs) |
 | Android models and runtime interpretation | [Models.kt](../android/app/src/main/java/dev/pinkcollab/data/Models.kt) |
-| Snapshot and patch application | [V2Reducer.kt](../android/app/src/main/java/dev/pinkcollab/data/V2Reducer.kt) |
+| Snapshot and patch application | [ProtocolReducer.kt](../android/app/src/main/java/dev/pinkcollab/data/ProtocolReducer.kt) |
 | Display types, grouping, and details | [SessionDisplayProjection.kt](../android/app/src/main/java/dev/pinkcollab/ui/SessionDisplayProjection.kt) |
 | Timeline rendering | [SessionTimeline.kt](../android/app/src/main/java/dev/pinkcollab/ui/SessionTimeline.kt) |
 | Work-status derivation and strip | [SessionWorkStatus.kt](../android/app/src/main/java/dev/pinkcollab/ui/SessionWorkStatus.kt) |

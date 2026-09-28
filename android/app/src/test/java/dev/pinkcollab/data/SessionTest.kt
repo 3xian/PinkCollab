@@ -15,9 +15,9 @@ class SessionTest {
         assertFalse(session(status = SessionStatus.Idle, runtimeAttached = false).isActive)
     }
 
-    @Test fun `timing parses from runtime and remains optional for older gateways`() {
+    @Test fun `timing parses from runtime and remains optional when work start is unknown`() {
         val record = JSONObject("""{"id":"s","hostId":"h","cwd":"/w","title":"Work","createdAt":"","updatedAt":""}""")
-        val runtime = JSONObject("""{"phase":"ready","execution":"active","workTiming":{"elapsedMs":83000,"running":true,"completed":false}}""")
+        val runtime = JSONObject("""{"state":"running","generation":"g","workTiming":{"elapsedMs":83000,"running":true,"completed":false}}""")
         val timing = record.session(runtime).workTiming!!
         assertEquals(83_000L, timing.elapsedMs)
         assertTrue(timing.running)

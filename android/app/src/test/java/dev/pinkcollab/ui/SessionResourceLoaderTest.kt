@@ -81,7 +81,7 @@ class SessionResourceLoaderTest {
             }
         }
         val loader = SessionResourceLoader(backgroundScope, actions, {})
-        val firstRuntime = session.copy(runtimeGeneration = "generation-1")
+        val firstRuntime = session.copy(generation = "generation-1")
 
         loader.loadModels(firstRuntime)
         runCurrent()
@@ -95,7 +95,7 @@ class SessionResourceLoaderTest {
         assertEquals(2, calls)
         assertEquals(listOf("version-2"), (loader.modelLoads.value[key] as LoadState.Ready).value.thinkingLevels)
 
-        loader.loadModels(firstRuntime.copy(runtimeGeneration = "generation-2"))
+        loader.loadModels(firstRuntime.copy(generation = "generation-2"))
         runCurrent()
         assertEquals(3, calls)
         assertEquals(listOf("version-3"), (loader.modelLoads.value[key] as LoadState.Ready).value.thinkingLevels)

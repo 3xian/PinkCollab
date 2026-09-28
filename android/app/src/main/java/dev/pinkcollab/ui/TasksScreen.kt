@@ -99,7 +99,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
         snapshotFlow {
             if (pagerState.isScrollInProgress) null else {
                 latestSessions.getOrNull(pagerState.settledPage)?.let {
-                    SessionKey(it.hostId, it.id) to latestHosts[it.hostId]?.subscriptionId
+                    SessionKey(it.hostId, it.id) to latestHosts[it.hostId]?.snapshotToken
                 }
             }
         }.collectLatest { target ->

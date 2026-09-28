@@ -169,11 +169,3 @@ impl TimelineItem {
         *self = update;
     }
 }
-#[derive(Clone, Debug, Serialize)]
-pub struct Event {
-    pub sequence: u64,
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub timestamp: DateTime<Utc>,
-    pub payload: serde_json::Value,
-}

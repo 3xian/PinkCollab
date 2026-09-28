@@ -6,7 +6,6 @@ import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.PairedHost
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.SavedHistory
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionDetail
@@ -27,7 +26,7 @@ class SessionWorkStatusTest {
     )
     private val session = Session(
         "session", "host", "/work", "Work", SessionStatus.Running, "Working", false, null,
-        "", "", true, "generation", RuntimeExecution.Active,
+        "", "", true, "generation",
     )
     private val user = TimelineItem("user", "user", "Read the source", "", "")
     private fun tool(
@@ -43,8 +42,7 @@ class SessionWorkStatusTest {
         assertEquals(timing, sessionWorkStatus(detail, online).timing)
         assertEquals(timing, sessionWorkStatus(detail.copy(liveItems = listOf(tool())), online).timing)
         assertEquals(null, sessionWorkStatus(detail, online.copy(connection = ConnectionState.Offline())).timing)
-        val finished = detail.copy(session = session.copy(status = SessionStatus.Idle,
-            runtimeExecution = RuntimeExecution.Quiescent, workTiming = WorkTiming(83_000, false, true)))
+        val finished = detail.copy(session = session.copy(status = SessionStatus.Idle, workTiming = WorkTiming(83_000, false, true)))
         assertEquals("Worked for 1m 23s", sessionWorkStatus(finished, online).title)
         assertEquals(null, sessionWorkStatus(finished, online).timing)
     }
@@ -81,14 +79,14 @@ class SessionWorkStatusTest {
         assertEquals(WorkStatusKind.Offline, sessionWorkStatus(detail, null).kind)
     }
 
-    @Test fun unknown_execution_never_reuses_cached_active_work() {
+    @Test fun starting_state_never_reuses_cached_active_work() {
         val detail = SessionDetail(
-            session.copy(runtimeExecution = RuntimeExecution.Unknown),
+            session.copy(status = SessionStatus.Starting),
             streaming = "Cached reply",
             liveItems = listOf(user, tool()),
         )
         val status = sessionWorkStatus(detail, online)
-        assertEquals(WorkStatusKind.Unknown, status.kind)
+        assertEquals(WorkStatusKind.Starting, status.kind)
         assertFalse(status.active)
         assertFalse(status.detail.contains("Session.kt"))
     }
@@ -99,7 +97,7 @@ class SessionWorkStatusTest {
             SessionStatus.Stopping to WorkStatusKind.Stopping,
         )) {
             val detail = SessionDetail(
-                session.copy(status = phase, runtimeExecution = RuntimeExecution.Unknown,
+                session.copy(status = phase,
                     attention = Attention("confirm", AttentionType.Confirm, "Continue?", emptyList())),
                 liveItems = listOf(tool()),
             )
@@ -180,9 +178,9 @@ class SessionWorkStatusTest {
 
     @Test fun search_keeps_query_and_scope_and_unknown_tools_keep_their_name() {
         val search = sessionWorkStatus(SessionDetail(session, liveItems = listOf(tool(
-            name = "grep", arguments = mapOf("pattern" to "runtimeExecution", "path" to "src/data"),
+            name = "grep", arguments = mapOf("pattern" to "runtimeState", "path" to "src/data"),
         ))), online)
-        assertTrue(search.detail.contains("runtimeExecution"))
+        assertTrue(search.detail.contains("runtimeState"))
         assertTrue(search.detail.contains("src/data"))
         val custom = sessionWorkStatus(SessionDetail(session, liveItems = listOf(tool(
             name = "custom.inspect", arguments = mapOf("url" to "https://example.com/spec"),
@@ -219,8 +217,8 @@ class SessionWorkStatusTest {
     @Test fun idle_and_detached_are_ready_not_stale_work_or_completion() {
         val detail = SessionDetail(session, streaming = "Old partial reply", liveItems = listOf(tool()))
         for (readySession in listOf(
-            session.copy(status = SessionStatus.Idle, runtimeExecution = RuntimeExecution.Quiescent),
-            session.copy(status = SessionStatus.Idle, runtimeAttached = false, runtimeExecution = RuntimeExecution.Unknown),
+            session.copy(status = SessionStatus.Idle),
+            session.copy(status = SessionStatus.Idle, runtimeAttached = false),
         )) {
             val status = sessionWorkStatus(detail.copy(session = readySession), online)
             assertEquals(WorkStatusKind.Ready, status.kind)

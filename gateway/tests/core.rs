@@ -1,10 +1,11 @@
 use pinkcollab_gateway::{
     config::Config,
-    events::Bus,
+    domain::{OperationRecord, SessionRecord},
+    events::{Bus, Event},
     funnel,
     model::TimelineItem,
+    protocol::ServerEvent,
     storage::Store,
-    v2_model::{OperationRecord, SessionRecord},
     workspace::Browser,
 };
 use rusqlite::Connection;
@@ -177,7 +178,12 @@ async fn slow_event_clients_must_resynchronize() {
     let bus = Bus::default();
     let mut client = bus.subscribe();
     for _ in 0..300 {
-        bus.publish("test", json!({}));
+        bus.publish(ServerEvent::Timeline {
+            session_id: "example".into(),
+            upsert: vec![],
+            remove: vec![],
+            reset: false,
+        });
     }
     assert!(matches!(
         client.recv().await,
@@ -188,14 +194,15 @@ async fn slow_event_clients_must_resynchronize() {
 async fn oversized_resource_change_requests_resynchronization() {
     let bus = Bus::default();
     let mut client = bus.subscribe();
-    bus.publish_resource(
-        "session/example",
-        json!([{"type":"large","value":"x".repeat(300 * 1024)}]),
-    );
+    bus.publish(ServerEvent::Timeline {
+        session_id: "example".into(),
+        upsert: vec![],
+        remove: vec!["x".repeat(300 * 1024)],
+        reset: false,
+    });
     let event = client.recv().await.unwrap();
-    assert_eq!(event.kind, "resource_resync");
-    assert_eq!(event.payload["resource"], "session/example");
-    assert_eq!(bus.cursor("session/example").revision, 1);
+    assert!(matches!(event, Event::Disconnect));
+    assert_eq!(bus.sequence(Some("example")), 1);
 }
 #[test]
 fn config_rejects_non_loopback_listeners() {
@@ -350,7 +357,8 @@ fn v2_migration_keeps_identity_authorization_and_engine_mapping() {
         Some("omp-session.jsonl")
     );
     assert_eq!(migrated.title, "Old task");
-    let wire = serde_json::to_value(migrated).unwrap();
+    let wire =
+        serde_json::to_value(pinkcollab_gateway::protocol::SessionDto::from(&migrated)).unwrap();
     assert!(wire.get("status").is_none());
     assert!(wire.get("engineSessionRef").is_none());
     assert_eq!(

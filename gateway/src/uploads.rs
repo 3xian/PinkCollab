@@ -12,12 +12,6 @@ pub const MAX_FILE_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_FILES_PER_PROMPT: usize = 5;
 const MAX_INLINE_IMAGE_BYTES: usize = 512 * 1024;
 
-#[derive(Clone, Copy)]
-pub enum PromptFileMode {
-    Direct,
-    Queued,
-}
-
 pub fn valid_file_id(id: &str) -> bool {
     id.len() == 37 && id.starts_with("file_") && id[5..].bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -152,14 +146,16 @@ fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-pub fn prompt_files(
-    store: &Store,
-    session_id: &str,
-    file_ids: &[String],
-    mode: PromptFileMode,
-) -> Result<(String, Vec<Value>)> {
+/// Disk access is independent of dispatch routing; both representations are ready before admission.
+pub struct PromptFiles {
+    pub direct_note: String,
+    pub queued_note: String,
+    pub images: Vec<Value>,
+}
+pub fn prompt_files(store: &Store, session_id: &str, file_ids: &[String]) -> Result<PromptFiles> {
     ensure!(file_ids.len() <= MAX_FILES_PER_PROMPT, "Too many files");
-    let mut note = String::new();
+    let mut direct_note = String::new();
+    let mut queued_note = String::new();
     let mut images = Vec::new();
     let mut inline_bytes = 0;
     for id in file_ids {
@@ -167,14 +163,9 @@ pub fn prompt_files(
         let path_text = path
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("File path is not UTF-8"))?;
-        let displayed = match mode {
-            PromptFileMode::Direct => file_mention(path_text)?,
-            PromptFileMode::Queued => serde_json::to_string(path_text)?,
-        };
-        note.push_str(&format!("\n- {displayed}"));
-        if matches!(mode, PromptFileMode::Queued)
-            && path.metadata()?.len() as usize <= MAX_INLINE_IMAGE_BYTES - inline_bytes
-        {
+        direct_note.push_str(&format!("\n- {}", file_mention(path_text)?));
+        queued_note.push_str(&format!("\n- {}", serde_json::to_string(path_text)?));
+        if path.metadata()?.len() as usize <= MAX_INLINE_IMAGE_BYTES - inline_bytes {
             let bytes = fs::read(&path)?;
             if let Some(mime) = image_mime(&bytes) {
                 images.push(json!({"type":"image","data":STANDARD.encode(&bytes),"mimeType":mime}));
@@ -182,16 +173,17 @@ pub fn prompt_files(
             }
         }
     }
-    if !note.is_empty() {
-        let introduction = match mode {
-            PromptFileMode::Direct => "Files uploaded from the phone:",
-            PromptFileMode::Queued => {
-                "Files uploaded from the phone and available on this host. Read these paths when needed:"
-            }
-        };
-        note = format!("\n\n{introduction}{note}");
+    if !direct_note.is_empty() {
+        direct_note = format!("\n\nFiles uploaded from the phone:{direct_note}");
+        queued_note = format!(
+            "\n\nFiles uploaded from the phone and available on this host. Read these paths when needed:{queued_note}"
+        );
     }
-    Ok((note, images))
+    Ok(PromptFiles {
+        direct_note,
+        queued_note,
+        images,
+    })
 }
 
 fn file_mention(path: &str) -> Result<String> {

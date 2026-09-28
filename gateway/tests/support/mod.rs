@@ -12,6 +12,8 @@ pub(crate) struct Harness {
     pub(crate) dir: tempfile::TempDir,
     pub(crate) store: Arc<Store>,
     pub(crate) host: Host,
+    #[allow(dead_code)]
+    pub(crate) bus: Arc<Bus>,
     pub(crate) url: String,
     server: tokio::task::JoinHandle<()>,
 }
@@ -31,7 +33,7 @@ impl Harness {
             omp_version: "fixture".into(),
             gateway_version: "0.1.0".into(),
         };
-        let v2 = pinkcollab_gateway::v2_runtime::SessionDirectory::new(
+        let sessions = pinkcollab_gateway::runtime::SessionDirectory::new(
             store.clone(),
             browser.clone(),
             bus.clone(),
@@ -43,8 +45,8 @@ impl Harness {
             host: host.clone(),
             store: store.clone(),
             browser,
-            bus,
-            v2,
+            bus: bus.clone(),
+            sessions,
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -55,6 +57,7 @@ impl Harness {
             dir,
             store,
             host,
+            bus,
             url,
             server,
         }
@@ -67,14 +70,14 @@ impl Harness {
     pub(crate) async fn pair(&self) -> String {
         let token = self.store.new_pairing().unwrap();
         let response = reqwest::Client::new()
-            .post(format!("{}/api/v2/pair", self.url))
+            .post(format!("{}/api/v3/pair", self.url))
             .json(&json!({"token":token,"name":"phone"}))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), 201);
         let body: Value = response.json().await.unwrap();
-        assert_eq!(body["protocolVersion"], 2);
+        assert_eq!(body["protocolVersion"], 3);
         assert_eq!(body["host"]["id"], self.host.id);
         body["credential"].as_str().unwrap().into()
     }
@@ -102,16 +105,62 @@ pub(crate) async fn wait_operation(
                 .json()
                 .await
                 .unwrap();
-            if receipt["status"] == status {
+            if receipt["state"] == status {
                 return receipt;
             }
-            if ["failed", "outcome_unknown", "cancelled"]
+            if ["failed", "unknown", "cancelled"]
                 .iter()
-                .any(|terminal| receipt["status"] == *terminal)
+                .any(|terminal| receipt["state"] == *terminal)
             {
                 panic!("unexpected receipt: {receipt}");
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+#[allow(dead_code)]
+pub(crate) async fn runtime_generation(
+    client: &reqwest::Client,
+    session: &str,
+    credential: &str,
+) -> String {
+    let value: Value = client
+        .get(session)
+        .bearer_auth(credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    value["runtime"]["generation"].as_str().unwrap().to_owned()
+}
+
+#[allow(dead_code)]
+pub(crate) async fn wait_runtime(
+    client: &reqwest::Client,
+    session: &str,
+    credential: &str,
+    state: &str,
+) -> Value {
+    tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let value: Value = client
+                .get(session)
+                .bearer_auth(credential)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if value["runtime"]["state"] == state {
+                return value["runtime"].clone();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await

@@ -8,7 +8,7 @@ async fn fresh_session_without_transcript_has_empty_history_before_and_after_sto
     let h = Harness::new(1, vec!["--lazy-history".into()]).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let sessions = format!("{}/api/v2/sessions", h.url);
+    let sessions = format!("{}/api/v3/sessions", h.url);
     let cwd = h.cwd("empty-history");
     let record: Value = client
         .post(&sessions)
@@ -33,7 +33,7 @@ async fn fresh_session_without_transcript_has_empty_history_before_and_after_sto
             .status(),
         202
     );
-    let started = wait_operation(
+    let _receipt = wait_operation(
         &client,
         &format!("{session}/operations/start"),
         &credential,
@@ -54,7 +54,7 @@ async fn fresh_session_without_transcript_has_empty_history_before_and_after_sto
         assert!(page["source"].is_null());
     }
     assert_eq!(client.post(&commands).bearer_auth(&credential)
-        .json(&json!({"commandId":"stop","type":"stop_runtime","expectedGeneration":started["runtimeGeneration"]}))
+        .json(&json!({"commandId":"stop","type":"stop_runtime","generation":support::runtime_generation(&client, &session, &credential).await}))
         .send().await.unwrap().status(), 202);
     wait_operation(
         &client,
@@ -82,7 +82,7 @@ async fn fresh_session_without_transcript_has_empty_history_before_and_after_sto
             .status(),
         202
     );
-    let resumed = wait_operation(
+    let _receipt = wait_operation(
         &client,
         &format!("{session}/operations/resume-empty"),
         &credential,
@@ -98,7 +98,7 @@ async fn fresh_session_without_transcript_has_empty_history_before_and_after_sto
     assert_eq!(response.status(), 200);
     assert_eq!(response.json::<Value>().await.unwrap()["items"], json!([]));
     assert_eq!(client.post(&commands).bearer_auth(&credential)
-        .json(&json!({"commandId":"first","type":"prompt","delivery":"start","message":"hello","expectedGeneration":resumed["runtimeGeneration"]}))
+        .json(&json!({"commandId":"first","type":"prompt","message":"hello","generation":support::runtime_generation(&client, &session, &credential).await}))
         .send().await.unwrap().status(), 202);
     wait_operation(
         &client,
@@ -145,7 +145,7 @@ async fn aborted_prompt_with_missing_transcript_does_not_lose_history_mapping() 
     let client = reqwest::Client::new();
     let credential = h.pair().await;
     let cwd = h.cwd("aborted-history");
-    let sessions = format!("{}/api/v2/sessions", h.url);
+    let sessions = format!("{}/api/v3/sessions", h.url);
     let record: Value = client
         .post(&sessions)
         .bearer_auth(&credential)
@@ -170,19 +170,19 @@ async fn aborted_prompt_with_missing_transcript_does_not_lose_history_mapping() 
             .status(),
         202
     );
-    let started = wait_operation(
+    let _receipt = wait_operation(
         &client,
         &format!("{session}/operations/start"),
         &credential,
         "succeeded",
     )
     .await;
-    let generation = started["runtimeGeneration"].as_str().unwrap();
+    let generation = support::runtime_generation(&client, &session, &credential).await;
     assert_eq!(
         client
             .post(&commands)
             .bearer_auth(&credential)
-            .json(&json!({"commandId":"hold","type":"prompt","delivery":"start","message":"hold","expectedGeneration":generation}))
+            .json(&json!({"commandId":"hold","type":"prompt","message":"hold","generation":generation}))
             .send()
             .await
             .unwrap()
@@ -193,14 +193,14 @@ async fn aborted_prompt_with_missing_transcript_does_not_lose_history_mapping() 
         &client,
         &format!("{session}/operations/hold"),
         &credential,
-        "running",
+        "pending",
     )
     .await;
     assert_eq!(
         client
             .post(&commands)
             .bearer_auth(&credential)
-            .json(&json!({"commandId":"abort","type":"interrupt","expectedGeneration":generation}))
+            .json(&json!({"commandId":"abort","type":"interrupt","generation":generation}))
             .send()
             .await
             .unwrap()
@@ -225,9 +225,7 @@ async fn aborted_prompt_with_missing_transcript_does_not_lose_history_mapping() 
         client
             .post(&commands)
             .bearer_auth(&credential)
-            .json(
-                &json!({"commandId":"stop","type":"stop_runtime","expectedGeneration":generation})
-            )
+            .json(&json!({"commandId":"stop","type":"stop_runtime","generation":generation}))
             .send()
             .await
             .unwrap()

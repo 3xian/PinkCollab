@@ -8,7 +8,7 @@ class SessionDisplayCacheTest {
     private val session = Session("session", "host", "/work", "Work", SessionStatus.Idle,
         "", false, null, "", "", false)
     private val message = TimelineItem("old", "user", "Cached message", "", "")
-    private val cached = sessionDetailForDisplay(SessionDetail(session, subscriptionId = "old-subscription",
+    private val cached = sessionDetailForDisplay(SessionDetail(session, snapshotToken = "old-subscription",
         savedHistory = SavedHistory.Ready("source", listOf(message), "old-cursor")), null)!!
 
     @Test fun cache_survives_detail_refresh_without_reusing_subscription_or_pagination() {
@@ -16,13 +16,13 @@ class SessionDisplayCacheTest {
         assertEquals(listOf(message), displayed.historyItems)
         assertEquals(SavedHistory.Loading, displayed.detail.savedHistory)
         assertNull(displayed.detail.savedHistory.nextCursor)
-        assertNull(displayed.detail.subscriptionId)
+        assertNull(displayed.detail.snapshotToken)
     }
 
     @Test fun loading_or_failed_history_keeps_messages_with_fresh_session_state() {
         for (history in listOf(SavedHistory.Loading, SavedHistory.Failed)) {
             val current = SessionDetail(session.copy(title = "Fresh title"),
-                subscriptionId = "new-subscription", savedHistory = history)
+                snapshotToken = "new-subscription", savedHistory = history)
             val displayed = sessionDetailForDisplay(current, cached)!!
             assertEquals(current, displayed.detail)
             assertEquals(listOf(message), displayed.historyItems)

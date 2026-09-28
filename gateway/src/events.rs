@@ -1,59 +1,122 @@
-use crate::{model::Event, storage::id, v2_model::Cursor};
-use chrono::Utc;
+use crate::protocol::ServerEvent;
 use parking_lot::Mutex;
-use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::broadcast;
 
-const MAX_CHANGE_BYTES: usize = 256 * 1024;
-
+#[derive(Clone, Debug)]
+pub enum Event {
+    Update {
+        sequence: u64,
+        event: Arc<ServerEvent>,
+    },
+    Disconnect,
+}
+struct State {
+    sequence: u64,
+    host: u64,
+    sessions: HashMap<String, u64>,
+    sender: broadcast::Sender<Event>,
+}
 pub struct Bus {
-    state: Mutex<(u64, broadcast::Sender<Event>)>,
-    resources: Mutex<(String, HashMap<String, u64>)>,
+    state: Mutex<State>,
 }
 impl Default for Bus {
     fn default() -> Self {
-        let (tx, _) = broadcast::channel(32);
+        let (sender, _) = broadcast::channel(32);
         Self {
-            state: Mutex::new((0, tx)),
-            resources: Mutex::new((id("view_"), HashMap::new())),
+            state: Mutex::new(State {
+                sequence: 0,
+                host: 0,
+                sessions: HashMap::new(),
+                sender,
+            }),
         }
     }
 }
 impl Bus {
-    pub fn publish(&self, kind: &str, payload: Value) {
+    pub fn publish(&self, event: ServerEvent) {
         let mut state = self.state.lock();
-        state.0 += 1;
-        let _ = state.1.send(Event {
-            sequence: state.0,
-            kind: kind.into(),
-            timestamp: Utc::now(),
-            payload,
+        state.sequence += 1;
+        let sequence = state.sequence;
+        if event.updates_host() {
+            state.host = sequence;
+        }
+        if let Some(id) = event.session_id() {
+            state.sessions.insert(id.into(), sequence);
+        }
+        let oversized = serde_json::to_vec(&event).map_or(true, |v| v.len() > 256 * 1024);
+        let _ = state.sender.send(if oversized {
+            Event::Disconnect
+        } else {
+            Event::Update {
+                sequence,
+                event: Arc::new(event),
+            }
         });
     }
+    /// Only mutations represented by this snapshot invalidate it. Markers stay server-local.
+    pub fn sequence(&self, session_id: Option<&str>) -> u64 {
+        let state = self.state.lock();
+        match session_id {
+            Some(id) => state.sessions.get(id).copied().unwrap_or(0),
+            None => state.host,
+        }
+    }
+    pub fn disconnect(&self) {
+        let _ = self.state.lock().sender.send(Event::Disconnect);
+    }
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
-        self.state.lock().1.subscribe()
+        self.state.lock().sender.subscribe()
     }
-    pub fn cursor(&self, resource: &str) -> Cursor {
-        let resources = self.resources.lock();
-        Cursor {
-            epoch: resources.0.clone(),
-            revision: *resources.1.get(resource).unwrap_or(&0),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::{SessionDto, SessionSummary};
+    #[test]
+    fn snapshots_are_invalidated_only_by_mutations_they_represent() {
+        let bus = Bus::default();
+        for _ in 0..100 {
+            bus.publish(ServerEvent::Timeline {
+                session_id: "a".into(),
+                upsert: vec![],
+                remove: vec![],
+                reset: false,
+            });
         }
-    }
-    pub fn publish_resource(&self, resource: &str, changes: Value) {
-        let oversized =
-            serde_json::to_vec(&changes).map_or(true, |encoded| encoded.len() > MAX_CHANGE_BYTES);
-        let mut resources = self.resources.lock();
-        let epoch = resources.0.clone();
-        let current = resources.1.entry(resource.into()).or_insert(0);
-        let base = *current;
-        *current += 1;
-        if oversized {
-            self.publish("resource_resync", json!({"resource":resource}));
-        } else {
-            let payload = json!({"resource":resource,"epoch":epoch,"baseRevision":base,"revision":*current,"changes":changes});
-            self.publish("change", payload);
-        }
+        assert_eq!(
+            bus.sequence(None),
+            0,
+            "timeline is not part of a host snapshot"
+        );
+        assert_eq!(
+            bus.sequence(Some("b")),
+            0,
+            "another session cannot invalidate b"
+        );
+        assert_eq!(bus.sequence(Some("a")), 100);
+        bus.publish(ServerEvent::SessionState {
+            session_id: "a".into(),
+            has_history: false,
+            summary: SessionSummary {
+                runtime: None,
+                session: SessionDto {
+                    id: "a".into(),
+                    host_id: "h".into(),
+                    cwd: "/work".into(),
+                    title: "a".into(),
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                },
+            },
+        });
+        assert_eq!(
+            bus.sequence(None),
+            101,
+            "state changes invalidate the host snapshot"
+        );
+        assert_eq!(bus.sequence(Some("a")), 101);
+        assert_eq!(bus.sequence(Some("b")), 0);
     }
 }

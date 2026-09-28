@@ -112,7 +112,7 @@ class TasksPagerBarDeviceTest {
         compose.mainClock.advanceTimeBy(1000)
         compose.runOnIdle {
             assertEquals(listOf("s0", "s1", "s0"), requests)
-            host = host.copy(subscriptionId = "new-subscription")
+            host = host.copy(snapshotToken = "new-subscription")
         }
         compose.mainClock.advanceTimeBy(400)
         compose.runOnIdle { assertEquals(listOf("s0", "s1", "s0", "s0"), requests) }

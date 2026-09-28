@@ -1,10 +1,11 @@
 use crate::{
-    events::Bus,
+    domain::SessionRecord,
+    events::{Bus, Event},
     model::Host,
+    protocol::{GATEWAY_PROTOCOL_VERSION, OperationDto, ServerEvent, SessionDto, SessionSnapshot},
+    runtime::{Command as ApiCommand, SessionDirectory, SubmitError},
     storage::Store,
     uploads,
-    v2_model::{GATEWAY_PROTOCOL_VERSION, SessionRecord},
-    v2_runtime::{Command as V2Command, SessionDirectory, SubmitError},
     workspace::Browser,
 };
 use axum::{
@@ -32,31 +33,32 @@ pub struct App {
     pub store: Arc<Store>,
     pub browser: Arc<Browser>,
     pub bus: Arc<Bus>,
-    pub v2: Arc<SessionDirectory>,
+    pub sessions: Arc<SessionDirectory>,
 }
 pub fn router(app: App) -> Router {
     let protected = Router::new()
-        .route("/api/v2/host", get(v2_host))
-        .route("/api/v2/workspaces", get(workspaces))
-        .route("/api/v2/fs/list", get(list))
-        .route("/api/v2/sessions", get(v2_sessions).post(v2_create))
-        .route("/api/v2/sessions/{id}", get(v2_detail))
-        .route("/api/v2/sessions/{id}/commands", post(v2_command))
+        .route("/api/v3/host", get(api_host))
+        .route("/api/v3/workspaces", get(workspaces))
+        .route("/api/v3/fs/list", get(list))
+        .route("/api/v3/sessions", get(api_sessions).post(api_create))
+        .route("/api/v3/sessions/{id}", get(api_detail))
+        .route("/api/v3/sessions/{id}/commands", post(api_command))
         .route(
-            "/api/v2/sessions/{id}/files/{file_id}",
-            put(v2_upload).layer(DefaultBodyLimit::max(uploads::MAX_FILE_BYTES)),
+            "/api/v3/sessions/{id}/files/{file_id}",
+            put(api_upload).layer(DefaultBodyLimit::max(uploads::MAX_FILE_BYTES)),
         )
         .route(
-            "/api/v2/sessions/{id}/operations/{command_id}",
-            get(v2_operation),
+            "/api/v3/sessions/{id}/operations/{command_id}",
+            get(api_operation),
         )
-        .route("/api/v2/sessions/{id}/models", get(v2_models))
-        .route("/api/v2/sessions/{id}/history", get(v2_history))
-        .route("/api/v2/events", get(v2_stream))
+        .route("/api/v3/sessions/{id}/models", get(api_models))
+        .route("/api/v3/sessions/{id}/history", get(api_history))
+        .route("/api/v3/events", get(api_stream))
         .route_layer(middleware::from_fn_with_state(app.clone(), authenticate));
     Router::new()
-        .route("/api/v2/pair", post(v2_pair))
+        .route("/api/v3/pair", post(api_pair))
         .route("/api/v1/{*path}", any(upgrade_required))
+        .route("/api/v2/{*path}", any(upgrade_required))
         .merge(protected)
         .layer(DefaultBodyLimit::max(512 * 1024))
         .layer(middleware::from_fn(security_headers))
@@ -64,13 +66,13 @@ pub fn router(app: App) -> Router {
         .with_state(app)
 }
 
-struct V2Error(StatusCode, &'static str, String);
-impl IntoResponse for V2Error {
+struct ApiError(StatusCode, &'static str, String);
+impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.0, Json(json!({"code":self.1,"message":self.2}))).into_response()
     }
 }
-async fn v2_client(app: &App, headers: &HeaderMap) -> Result<String, V2Error> {
+async fn api_client(app: &App, headers: &HeaderMap) -> Result<String, ApiError> {
     let token = credential(headers).unwrap_or_default().to_owned();
     let client = app
         .store
@@ -79,19 +81,19 @@ async fn v2_client(app: &App, headers: &HeaderMap) -> Result<String, V2Error> {
         .ok()
         .flatten();
     client.ok_or_else(|| {
-        V2Error(
+        ApiError(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
             "Paired client credential required".into(),
         )
     })
 }
-async fn v2_pair(
+async fn api_pair(
     State(app): State<App>,
     Json(body): Json<Pair>,
-) -> Result<(StatusCode, Json<Value>), V2Error> {
+) -> Result<(StatusCode, Json<Value>), ApiError> {
     if body.token.len() != 48 || body.name.trim().is_empty() || body.name.len() > 100 {
-        return Err(V2Error(
+        return Err(ApiError(
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Token and client name required".into(),
@@ -102,7 +104,7 @@ async fn v2_pair(
         .run(move |store| store.pair(&body.token, &body.name))
         .await
         .map_err(|_| {
-            V2Error(
+            ApiError(
                 StatusCode::UNAUTHORIZED,
                 "invalid_pairing_token",
                 "Invalid or expired pairing token".into(),
@@ -115,28 +117,28 @@ async fn v2_pair(
         ),
     ))
 }
-async fn v2_host(State(app): State<App>) -> Json<Value> {
+async fn api_host(State(app): State<App>) -> Json<Value> {
     Json(
         json!({"host":app.host,"protocolVersion":GATEWAY_PROTOCOL_VERSION,"capabilities":{"ompRpcTransport":1,"modelSelection":true,"thinkingLevels":true,"historyPaging":true,"resume":true,"fileUploads":true}}),
     )
 }
 #[derive(Deserialize)]
-struct V2SessionsQuery {
+struct ApiSessionsQuery {
     cursor: Option<String>,
     limit: Option<usize>,
 }
 #[derive(Serialize, Deserialize)]
-struct V2SessionsCursor {
+struct ApiSessionsCursor {
     created_at: String,
     id: String,
 }
-async fn v2_sessions(
+async fn api_sessions(
     State(app): State<App>,
-    Query(query): Query<V2SessionsQuery>,
-) -> Result<Json<Value>, V2Error> {
+    Query(query): Query<ApiSessionsQuery>,
+) -> Result<Json<Value>, ApiError> {
     let limit = query.limit.unwrap_or(50);
     if !(1..=100).contains(&limit) {
-        return Err(V2Error(
+        return Err(ApiError(
             StatusCode::BAD_REQUEST,
             "invalid_page_limit",
             "Limit must be 1..100".into(),
@@ -148,9 +150,9 @@ async fn v2_sessions(
             let decoded = (raw.len() <= 1024)
                 .then(|| hex::decode(raw).ok())
                 .flatten()
-                .and_then(|bytes| serde_json::from_slice::<V2SessionsCursor>(&bytes).ok());
+                .and_then(|bytes| serde_json::from_slice::<ApiSessionsCursor>(&bytes).ok());
             Some(decoded.ok_or_else(|| {
-                V2Error(
+                ApiError(
                     StatusCode::BAD_REQUEST,
                     "invalid_cursor",
                     "Invalid sessions cursor".into(),
@@ -159,7 +161,7 @@ async fn v2_sessions(
         }
     };
     let (sessions, has_more) = app
-        .v2
+        .sessions
         .list_page(
             cursor
                 .as_ref()
@@ -168,88 +170,84 @@ async fn v2_sessions(
         )
         .await
         .map_err(|_| {
-            V2Error(
+            ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "persistence_unavailable",
                 "Session records unavailable".into(),
             )
         })?;
     let next_cursor = if has_more {
-        sessions
-            .last()
-            .and_then(|summary| summary.get("session"))
-            .and_then(|session| {
-                Some(hex::encode(
-                    serde_json::to_vec(&V2SessionsCursor {
-                        created_at: chrono::DateTime::parse_from_rfc3339(
-                            session.get("createdAt")?.as_str()?,
-                        )
-                        .ok()?
-                        .to_rfc3339(),
-                        id: session.get("id")?.as_str()?.to_owned(),
-                    })
-                    .ok()?,
-                ))
-            })
+        sessions.last().map(|summary| {
+            hex::encode(
+                serde_json::to_vec(&ApiSessionsCursor {
+                    created_at: summary.session.created_at.to_rfc3339(),
+                    id: summary.session.id.clone(),
+                })
+                .expect("serializable cursor"),
+            )
+        })
     } else {
         None
     };
     Ok(Json(json!({"sessions":sessions,"nextCursor":next_cursor})))
 }
-async fn v2_detail(State(app): State<App>, Path(id): Path<String>) -> Result<Json<Value>, V2Error> {
+async fn api_detail(
+    State(app): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<SessionSnapshot>, ApiError> {
     let view = app
-        .v2
+        .sessions
         .view(&id)
         .await
         .map_err(|_| {
-            V2Error(
+            ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "persistence_unavailable",
                 "Session record unavailable".into(),
             )
         })?
         .ok_or_else(|| {
-            V2Error(
+            ApiError(
                 StatusCode::NOT_FOUND,
                 "session_not_found",
                 "Session not found".into(),
             )
         })?;
-    Ok(Json(json!(view)))
+    Ok(Json(view.dto()))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct V2CommandBody {
+struct ApiCommandBody {
     command_id: String,
     #[serde(flatten)]
-    command: V2Command,
+    command: ApiCommand,
 }
-async fn v2_command(
+async fn api_command(
     State(app): State<App>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(body): Json<V2CommandBody>,
-) -> Result<(StatusCode, Json<Value>), V2Error> {
-    let client_id = v2_client(&app, &headers).await?;
+    Json(body): Json<ApiCommandBody>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let client_id = api_client(&app, &headers).await?;
     let submitted = app
-        .v2
+        .sessions
         .submit(client_id, id, body.command_id, body.command)
         .await
         .map_err(|err| match err {
-            SubmitError::NotFound => V2Error(
+            SubmitError::NotFound => ApiError(
                 StatusCode::NOT_FOUND,
                 "session_not_found",
                 "Session not found".into(),
             ),
             SubmitError::Invalid(message) => {
-                V2Error(StatusCode::BAD_REQUEST, "invalid_request", message)
+                ApiError(StatusCode::BAD_REQUEST, "invalid_request", message)
             }
-            SubmitError::Conflict => V2Error(
+            SubmitError::Conflict => ApiError(
                 StatusCode::CONFLICT,
                 "idempotency_conflict",
                 "Command ID was already used for a different request".into(),
             ),
-            SubmitError::Persistence => V2Error(
+            SubmitError::Persistence => ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "persistence_unavailable",
                 "Could not store command receipt".into(),
@@ -261,33 +259,35 @@ async fn v2_command(
         } else {
             StatusCode::ACCEPTED
         },
-        Json(json!({"operation":submitted.receipt,"receiptStored":submitted.receipt_stored})),
+        Json(
+            json!({"operation":OperationDto::from(&submitted.receipt),"receiptStored":submitted.receipt_stored}),
+        ),
     ))
 }
 #[derive(Deserialize)]
 struct UploadQuery {
     name: String,
 }
-async fn v2_upload(
+async fn api_upload(
     State(app): State<App>,
     Path((id, file_id)): Path<(String, String)>,
     Query(query): Query<UploadQuery>,
     bytes: Bytes,
-) -> Result<(StatusCode, Json<Value>), V2Error> {
+) -> Result<(StatusCode, Json<Value>), ApiError> {
     let read_id = id.clone();
     let exists = app
         .store
         .run(move |store| Ok(store.v2_session(&read_id)?.is_some()))
         .await
         .map_err(|_| {
-            V2Error(
+            ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "persistence_unavailable",
                 "Session record unavailable".into(),
             )
         })?;
     if !exists {
-        return Err(V2Error(
+        return Err(ApiError(
             StatusCode::NOT_FOUND,
             "session_not_found",
             "Session not found".into(),
@@ -302,7 +302,7 @@ async fn v2_upload(
     })
     .await
     .map_err(|_| {
-        V2Error(
+        ApiError(
             StatusCode::SERVICE_UNAVAILABLE,
             "upload_failed",
             "Upload worker stopped".into(),
@@ -310,13 +310,17 @@ async fn v2_upload(
     })?;
     let path = result.map_err(|err| {
         if err.downcast_ref::<std::io::Error>().is_some() {
-            V2Error(
+            ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "upload_failed",
                 "Could not store uploaded file".into(),
             )
         } else {
-            V2Error(StatusCode::BAD_REQUEST, "invalid_file", err.to_string())
+            ApiError(
+                StatusCode::BAD_REQUEST,
+                "invalid_file",
+                "Invalid upload request".into(),
+            )
         }
     })?;
     Ok((
@@ -326,69 +330,76 @@ async fn v2_upload(
         ),
     ))
 }
-async fn v2_operation(
+async fn api_operation(
     State(app): State<App>,
     headers: HeaderMap,
     Path((id, command_id)): Path<(String, String)>,
-) -> Result<Json<Value>, V2Error> {
-    let client_id = v2_client(&app, &headers).await?;
+) -> Result<Json<Value>, ApiError> {
+    let client_id = api_client(&app, &headers).await?;
     let operation = app
-        .v2
+        .sessions
         .operation(&client_id, &id, &command_id)
         .await
         .map_err(|_| {
-            V2Error(
+            ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "persistence_unavailable",
                 "Command receipt unavailable".into(),
             )
         })?
         .ok_or_else(|| {
-            V2Error(
+            ApiError(
                 StatusCode::NOT_FOUND,
                 "operation_not_found",
                 "Command receipt not found".into(),
             )
         })?;
-    Ok(Json(json!(operation)))
+    Ok(Json(json!(OperationDto::from(&operation))))
 }
-async fn v2_models(State(app): State<App>, Path(id): Path<String>) -> Result<Json<Value>, V2Error> {
-    let (models, thinking_levels) = app.v2.models(&id).await.map_err(|err| {
+async fn api_models(
+    State(app): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (models, thinking_levels) = app.sessions.models(&id).await.map_err(|err| {
         let code = if err.to_string().contains("runtime") {
             "runtime_required"
         } else {
             "unsupported_capability"
         };
-        V2Error(StatusCode::CONFLICT, code, err.to_string())
+        ApiError(
+            StatusCode::CONFLICT,
+            code,
+            "Model catalog unavailable".into(),
+        )
     })?;
     Ok(Json(
         json!({"models":models,"thinkingLevels":thinking_levels}),
     ))
 }
 #[derive(Deserialize)]
-struct V2HistoryQuery {
+struct ApiHistoryQuery {
     cursor: Option<String>,
     limit: Option<usize>,
 }
-async fn v2_history(
+async fn api_history(
     State(app): State<App>,
     Path(id): Path<String>,
-    Query(query): Query<V2HistoryQuery>,
-) -> Result<Json<Value>, V2Error> {
+    Query(query): Query<ApiHistoryQuery>,
+) -> Result<Json<Value>, ApiError> {
     let read_id = id.clone();
     let session = app
         .store
         .run(move |store| store.v2_session(&read_id))
         .await
         .map_err(|_| {
-            V2Error(
+            ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "persistence_unavailable",
                 "Session record unavailable".into(),
             )
         })?
         .ok_or_else(|| {
-            V2Error(
+            ApiError(
                 StatusCode::NOT_FOUND,
                 "session_not_found",
                 "Session not found".into(),
@@ -409,7 +420,7 @@ async fn v2_history(
             .run(move |store| store.reference_is_unwritten(&prompt_session, &missing_reference))
             .await
             .map_err(|_| {
-                V2Error(
+                ApiError(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "persistence_unavailable",
                     "Session record unavailable".into(),
@@ -429,19 +440,19 @@ async fn v2_history(
     .map_err(|err| {
         let raw = format!("{err:#}");
         if raw.contains("stale_cursor") {
-            V2Error(
+            ApiError(
                 StatusCode::CONFLICT,
                 "stale_cursor",
                 "History changed; reload from the first page".into(),
             )
         } else if raw.contains("invalid_page_limit") {
-            V2Error(
+            ApiError(
                 StatusCode::BAD_REQUEST,
                 "invalid_page_limit",
                 "Limit must be 1..100".into(),
             )
         } else {
-            V2Error(
+            ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "history_unavailable",
                 "OMP history is unavailable".into(),
@@ -452,19 +463,19 @@ async fn v2_history(
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct V2Create {
+struct ApiCreate {
     command_id: String,
     host_id: String,
     cwd: String,
     #[serde(default)]
     title: String,
 }
-async fn v2_create(
+async fn api_create(
     State(app): State<App>,
     headers: HeaderMap,
-    Json(body): Json<V2Create>,
-) -> Result<(StatusCode, Json<Value>), V2Error> {
-    let client_id = v2_client(&app, &headers).await?;
+    Json(body): Json<ApiCreate>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let client_id = api_client(&app, &headers).await?;
     if body.host_id != app.host.id
         || body.command_id.is_empty()
         || body.command_id.len() > 128
@@ -473,14 +484,14 @@ async fn v2_create(
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
     {
-        return Err(V2Error(
+        return Err(ApiError(
             StatusCode::BAD_REQUEST,
             "invalid_request",
             "Valid hostId and commandId required".into(),
         ));
     }
     let cwd = app.browser.validate(FsPath::new(&body.cwd)).map_err(|_| {
-        V2Error(
+        ApiError(
             StatusCode::FORBIDDEN,
             "workspace_forbidden",
             "Workspace is outside the allowed roots".into(),
@@ -513,13 +524,13 @@ async fn v2_create(
         .await
         .map_err(|err| {
             if err.to_string().contains("idempotency_conflict") {
-                V2Error(
+                ApiError(
                     StatusCode::CONFLICT,
                     "idempotency_conflict",
                     "Command ID was already used for a different session request".into(),
                 )
             } else {
-                V2Error(
+                ApiError(
                     StatusCode::SERVICE_UNAVAILABLE,
                     "persistence_unavailable",
                     "Could not save session".into(),
@@ -527,10 +538,7 @@ async fn v2_create(
             }
         })?;
     if !replayed {
-        app.bus.publish_resource(
-            "host/sessions",
-            json!([{"type":"session.created","value":record}]),
-        );
+        app.sessions.publish_created(&record).await;
     }
     Ok((
         if replayed {
@@ -538,7 +546,7 @@ async fn v2_create(
         } else {
             StatusCode::CREATED
         },
-        Json(json!(record)),
+        Json(json!(SessionDto::from(&record))),
     ))
 }
 fn credential(headers: &HeaderMap) -> Option<&str> {
@@ -560,7 +568,7 @@ async fn authenticate(
         .await
         .unwrap_or(false)
     {
-        return V2Error(
+        return ApiError(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
             "paired client credential required".into(),
@@ -571,7 +579,7 @@ async fn authenticate(
 }
 async fn security_headers(request: axum::extract::Request, next: Next) -> Response {
     if request.headers().contains_key("origin") {
-        return V2Error(
+        return ApiError(
             StatusCode::FORBIDDEN,
             "browser_origin_forbidden",
             "browser origins are not supported".into(),
@@ -594,10 +602,10 @@ struct Pair {
     name: String,
 }
 async fn upgrade_required() -> Response {
-    V2Error(
+    ApiError(
         StatusCode::UPGRADE_REQUIRED,
         "protocol_upgrade_required",
-        "Gateway API v1 is no longer supported; update PinkCollab".into(),
+        "This Gateway API version is no longer supported; update PinkCollab".into(),
     )
     .into_response()
 }
@@ -611,13 +619,13 @@ struct ListQuery {
 async fn list(
     State(app): State<App>,
     Query(query): Query<ListQuery>,
-) -> Result<Json<Value>, V2Error> {
+) -> Result<Json<Value>, ApiError> {
     let listing = app
         .browser
         .list(FsPath::new(&query.path))
         .await
         .map_err(|_| {
-            V2Error(
+            ApiError(
                 StatusCode::FORBIDDEN,
                 "workspace_forbidden",
                 "Directory is outside the allowed roots or unavailable".into(),
@@ -625,7 +633,7 @@ async fn list(
         })?;
     Ok(Json(json!(listing)))
 }
-async fn v2_stream(
+async fn api_stream(
     State(app): State<App>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
@@ -633,11 +641,11 @@ async fn v2_stream(
     let token = credential(&headers).unwrap_or_default().to_owned();
     upgrade
         .max_message_size(4096)
-        .on_upgrade(move |socket| events_v2(socket, app, token))
+        .on_upgrade(move |socket| events(socket, app, token))
 }
 async fn send_value(
     tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    value: &Value,
+    value: &impl Serialize,
 ) -> bool {
     let Ok(encoded) = serde_json::to_string(value) else {
         return false;
@@ -651,52 +659,37 @@ async fn send_value(
         Ok(Ok(()))
     )
 }
-struct Subscription {
-    id: String,
-    cursor: crate::v2_model::Cursor,
-}
-async fn v2_snapshot(
-    app: &App,
-    resource: &str,
-    subscription_id: &str,
-) -> Option<(crate::v2_model::Cursor, Value)> {
-    // The receiver is registered before this function. Retrying a changing resource avoids a
-    // snapshot with a cursor newer than the payload; changes after the cursor stay queued.
+// The fence is server-local. A snapshot supersedes queued events up to this sequence.
+async fn snapshot(app: &App, session_id: Option<&str>) -> Option<(u64, ServerEvent)> {
     for _ in 0..5 {
-        let before = app.bus.cursor(resource);
-        let payload = if resource == "host/sessions" {
-            json!({"host":app.host,"sessions":app.v2.list().await.ok()?,"workspaces":app.browser.roots(),"protocolVersion":GATEWAY_PROTOCOL_VERSION})
+        let before = app.bus.sequence(session_id);
+        let payload = if let Some(id) = session_id {
+            ServerEvent::SessionSnapshot {
+                session_id: id.into(),
+                snapshot: app.sessions.view(id).await.ok()??.dto(),
+            }
         } else {
-            let id = resource.strip_prefix("session/")?;
-            json!(app.v2.view(id).await.ok()??)
+            ServerEvent::HostSnapshot {
+                protocol_version: GATEWAY_PROTOCOL_VERSION,
+                host: app.host.clone(),
+                sessions: app.sessions.list().await.ok()?,
+                workspaces: app.browser.roots(),
+            }
         };
-        let after = app.bus.cursor(resource);
-        if before.epoch == after.epoch && before.revision == after.revision {
-            return Some((
-                before.clone(),
-                json!({"type":"snapshot","subscriptionId":subscription_id,"resource":resource,"cursor":before,"payload":payload}),
-            ));
+        if before == app.bus.sequence(session_id) {
+            return Some((before, payload));
         }
     }
     None
 }
-async fn events_v2(socket: WebSocket, app: App, token: String) {
+async fn events(socket: WebSocket, app: App, token: String) {
     let mut receiver = app.bus.subscribe();
     let (mut tx, mut rx) = socket.split();
-    let mut subscriptions = HashMap::<String, Subscription>::new();
-    let host_resource = "host/sessions";
-    let host_id = crate::storage::id("sub_");
-    let Some((cursor, snapshot)) = v2_snapshot(&app, host_resource, &host_id).await else {
+    let mut sessions = HashMap::<String, u64>::new();
+    let Some((host_fence, initial)) = snapshot(&app, None).await else {
         return;
     };
-    subscriptions.insert(
-        host_resource.into(),
-        Subscription {
-            id: host_id,
-            cursor,
-        },
-    );
-    if !send_value(&mut tx, &snapshot).await {
+    if !send_value(&mut tx, &initial).await {
         return;
     }
     let mut ticker = tokio::time::interval(Duration::from_secs(25));
@@ -704,32 +697,11 @@ async fn events_v2(socket: WebSocket, app: App, token: String) {
     loop {
         tokio::select! {
             event=receiver.recv()=>{
-                let event=match event {Ok(event)=>event,Err(_)=>{
-                    let _=send_value(&mut tx,&json!({"type":"resync_required","reason":"subscription_backlog"})).await;
-                    break
-                }};
-                if event.kind=="gateway.shutdown" {break}
-                if event.kind=="resource_resync" {
-                    if let Some(resource)=event.payload["resource"].as_str()
-                        && let Some(subscription)=subscriptions.remove(resource)
-                        && !send_value(&mut tx,&json!({"type":"resync_required","subscriptionId":subscription.id,"resource":resource})).await {break}
-                    continue;
-                }
-                if event.kind!="change" {continue}
-                let Some(resource)=event.payload["resource"].as_str() else {continue};
-                let Some(subscription)=subscriptions.get_mut(resource) else {continue};
-                let epoch=event.payload["epoch"].as_str().unwrap_or_default();
-                let base=event.payload["baseRevision"].as_u64().unwrap_or(0);
-                let revision=event.payload["revision"].as_u64().unwrap_or(0);
-                if epoch!=subscription.cursor.epoch || base!=subscription.cursor.revision {
-                    if revision<=subscription.cursor.revision && epoch==subscription.cursor.epoch {continue}
-                    if !send_value(&mut tx,&json!({"type":"resync_required","subscriptionId":subscription.id,"resource":resource})).await {break}
-                    subscriptions.remove(resource);
-                    continue;
-                }
-                let outbound=json!({"type":"change","subscriptionId":subscription.id,"resource":resource,"epoch":epoch,"baseRevision":base,"revision":revision,"changes":event.payload["changes"]});
-                if !send_value(&mut tx,&outbound).await {break}
-                subscription.cursor.revision=revision;
+                let (sequence, event) = match event { Ok(Event::Update { sequence, event }) => (sequence, event), _ => break };
+                let Some(id) = event.session_id() else {continue};
+                let fence = if event.updates_host() { Some(host_fence) } else { sessions.get(id).copied() };
+                if fence.is_none_or(|f| sequence <= f) || sessions.get(id).is_some_and(|f| sequence <= *f) {continue}
+                if !send_value(&mut tx,event.as_ref()).await {break}
             }
             _=ticker.tick()=>{
                 let check_token = token.clone();
@@ -745,17 +717,14 @@ async fn events_v2(socket: WebSocket, app: App, token: String) {
                     }
                     Some(Ok(Message::Text(raw)))=>{
                         let Ok(command)=serde_json::from_str::<Value>(&raw) else {break};
-                        let resource=command["resource"].as_str().unwrap_or_default();
-                        if command["type"]=="subscribe" && resource.starts_with("session/") && resource.len()<160 {
-                            let subscription_id=crate::storage::id("sub_");
-                            let Some((cursor,snapshot))=v2_snapshot(&app,resource,&subscription_id).await else {
-                                if !send_value(&mut tx,&json!({"type":"subscription_error","resource":resource,"code":"session_not_found"})).await {break}
-                                continue
-                            };
-                            subscriptions.insert(resource.into(),Subscription{id:subscription_id,cursor});
-                            if !send_value(&mut tx,&snapshot).await {break}
-                        } else if command["type"]=="unsubscribe" && resource.starts_with("session/") {
-                            subscriptions.remove(resource);
+                        let id=command["sessionId"].as_str().unwrap_or_default();
+                        if id.is_empty() || id.len()>128 {break}
+                        if command["type"]=="subscribe" {
+                            let Some((fence, value))=snapshot(&app,Some(id)).await else {break};
+                            sessions.insert(id.into(),fence);
+                            if !send_value(&mut tx,&value).await {break}
+                        } else if command["type"]=="unsubscribe" {
+                            sessions.remove(id);
                         } else {break}
                     }
                     Some(Ok(Message::Close(_)))|None|Some(Err(_))=>break,
@@ -765,4 +734,97 @@ async fn events_v2(socket: WebSocket, app: App, token: String) {
         }
     }
     let _ = tokio::time::timeout(Duration::from_secs(2), tx.send(Message::Close(None))).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unrelated_timeline_during_database_read_does_not_invalidate_snapshots() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let store = Arc::new(Store::open(&dir.path().join("data")).unwrap());
+            let browser = Arc::new(Browser::new(&[dir.path().to_owned()]).unwrap());
+            let bus = Arc::new(Bus::default());
+            let now = chrono::Utc::now();
+            let host = Host {
+                id: store.host_id().unwrap(),
+                name: "test".into(),
+                os: "test".into(),
+                status: "online".into(),
+                omp_version: "test".into(),
+                gateway_version: "test".into(),
+            };
+            store
+                .create_v2(
+                    "client",
+                    "create",
+                    "create",
+                    SessionRecord {
+                        id: "quiet".into(),
+                        host_id: host.id.clone(),
+                        cwd: crate::workspace::display(dir.path()),
+                        title: "Quiet".into(),
+                        metadata_revision: 1,
+                        created_at: now,
+                        updated_at: now,
+                        archived_at: None,
+                        engine_session_ref: None,
+                    },
+                )
+                .unwrap();
+            let sessions = SessionDirectory::new(
+                store.clone(),
+                browser.clone(),
+                bus.clone(),
+                "unused".into(),
+                vec![],
+                1,
+            );
+            let app = App {
+                host,
+                store,
+                browser,
+                bus: bus.clone(),
+                sessions,
+            };
+            for scope in [None, Some("quiet")] {
+                // Hold the only blocking worker to force the event between snapshot's
+                // first marker read and its database result, without sleeps or timing guesses.
+                let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+                let (release_tx, release_rx) = std::sync::mpsc::channel();
+                let blocker = tokio::task::spawn_blocking(move || {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                });
+                started_rx.await.unwrap();
+                let before = bus.sequence(scope);
+                let capture = snapshot(&app, scope);
+                tokio::pin!(capture);
+                assert!(futures_util::poll!(&mut capture).is_pending());
+                bus.publish(ServerEvent::Timeline {
+                    session_id: "noisy".into(),
+                    upsert: vec![],
+                    remove: vec![],
+                    reset: false,
+                });
+                release_tx.send(()).unwrap();
+                let (fence, payload) = capture
+                    .await
+                    .expect("unrelated output must not prevent capture");
+                assert_eq!(
+                    fence, before,
+                    "capture must not retry against unrelated events"
+                );
+                assert_eq!(payload.session_id(), scope);
+                blocker.await.unwrap();
+            }
+        });
+    }
 }

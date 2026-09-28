@@ -1,76 +1,90 @@
-# PinkCollab Gateway API v2
+# PinkCollab protocol 3
 
-This API is independent of OMP's RPC transport version.
+## Overview and pairing
 
-## Authentication and errors
+The sole client API is `/api/v3`. Pairing and host snapshots declare `protocolVersion:3`; older API routes return HTTP 426 (`protocol_upgrade_required`). Upgrade Android and Gateway together. OMP's local RPC version and the database schema version are independent.
 
-`POST /api/v2/pair` accepts `{token,name}` and returns `{clientId,credential,host,protocolVersion:2}`. The token is single use and expires after five minutes. Every other v2 route, including WebSocket upgrade, requires `Authorization: Bearer <credential>`. Credentials are never accepted in a URL. Requests with an `Origin` header are rejected. Host-side revocation invalidates the credential.
+`POST /pair` accepts `{token,name}` and returns `{clientId,credential,host,protocolVersion}`. A pairing token expires after five minutes and is single use. All other routes, including WebSocket upgrade, require `Authorization: Bearer <credential>`. Credentials never appear in URLs. Browser `Origin` headers are rejected; host-side revocation terminates access.
 
-V2 errors use `{code,message}`. Codes include `authentication_required`, `workspace_forbidden`, `session_not_found`, `runtime_required`, `session_busy`, `input_expired`, `idempotency_conflict`, `invalid_file`, `upload_failed`, `stale_cursor`, `history_unavailable`, `unsupported_capability`, and `persistence_unavailable`. Unconfirmed external effects appear as an Operation with `status: outcome_unknown`.
+Paths below are relative to `/api/v3`. JSON fields use camelCase.
 
-## REST resources
+## Core models
 
-| Method | Path | Result |
-| --- | --- | --- |
-| GET | `/api/v2/host` | `{host,protocolVersion:2,capabilities}`; `fileUploads:true` when supported |
-| GET | `/api/v2/workspaces` | `{workspaces:[...]}` |
-| GET | `/api/v2/fs/list?path=...` | Directory listing within configured roots |
-| POST | `/api/v2/sessions` | Idempotently creates a persistent session; does not start OMP |
-| GET | `/api/v2/sessions?limit=50&cursor=...` | `{sessions:[{session,runtime}],nextCursor}`; creation-order keyset, limit 1–100 |
-| GET | `/api/v2/sessions/:id` | `{session,runtime,messages,recentOperations,historyRef}` |
-| POST | `/api/v2/sessions/:id/commands` | `{operation,receiptStored}`; 202 for new, 200 for replay |
-| PUT | `/api/v2/sessions/:id/files/:fileId?name=...` | Upload raw bytes; `{fileId,name,size}` |
-| GET | `/api/v2/sessions/:id/operations/:commandId` | The authenticated client's durable receipt |
-| GET | `/api/v2/sessions/:id/models` | `{models,thinkingLevels}` for an attached runtime; each model includes its own `thinkingLevels` when OMP reports its thinking capabilities, while the top-level list describes the active model for older clients |
-| GET | `/api/v2/sessions/:id/history?limit=50&cursor=...` | `{items,source,nextCursor}`; limit 1–100 |
-| GET | `/api/v2/events` | WebSocket resource subscriptions |
+- **Session**: `{id,hostId,cwd,title,createdAt,updatedAt}`. Persistent conversation metadata, independent of the process. Titles default to `New session`; an accepted prompt replaces the title with its normalized first 80 characters. Attachment-only prompts retain the title.
+- **Runtime**: `null`, or `{generation,state,activity,model,pendingInputs,workTiming}`. `state` is `starting`, `idle`, `running`, `waiting_input`, or `stopping`. Completing a prompt can leave an idle runtime attached. `model` contains `{provider,id,name,thinkingLevel,thinkingLevels}`; unavailable values can be null. Input requests contain `{id,type,text,options}`.
+- **Operation**: `{id,kind,state,error}`. `id` is the submitted commandId; `kind` is its command type. `state` is `pending`, `succeeded`, `failed`, `cancelled`, or `unknown`. `error` is null or `{code,message}`. Persistence fingerprints, dispatch stages and result objects are private.
+- **Timeline item**: `{id,kind,text,detail,timestamp,tool?}`. Tool traces contain `{callId,name,arguments,result,isError,completed}`. Live IDs are generation-scoped; live previews are bounded to 64 items with bounded text. Full text belongs to history.
 
-Creation body: `{commandId,hostId,cwd,title?}`. The Gateway canonicalizes and checks `cwd`. Creation idempotency is scoped to `(clientId,commandId)`; the session row and receipt commit together. The same key with different semantic input returns `idempotency_conflict`. A successful create returns the SessionRecord directly. `engineSessionRef` is private and never accepted from a client.
+`workTiming` is null if the start of work is unknown. Otherwise `{elapsedMs,running,completed}` samples Gateway monotonic work time: pending inputs pause it, settlement freezes it, and a new round resets it. `completed` means settled, not successful. Clients anchor samples to their own monotonic clock and extrapolate only while online. It is display timing, not precision profiling.
 
-`SessionRecord` owns `id`, `hostId`, `cwd`, `title`, `metadataRevision`, `createdAt`, `updatedAt`, and `archivedAt`. It contains no runtime status. `runtime: null` means no attached process. An attached runtime has a unique `generation`, `phase` (`starting`, `ready`, `stopping`), `execution` (`unknown`, `active`, `quiescent`), `actualModel`, and `pendingInputs`. Completion of one prompt does not detach the runtime or end the conversation.
+## WebSocket
 
-`runtime.workTiming` is optional/null for compatibility and when the start of work is unknown. When present it contains `elapsedMs` (monotonic work time sampled under the controller state lock when the snapshot is captured), `running` (whether it currently accumulates), and `completed` (execution settled, not task success). The Gateway starts timing on `agent_start` or an accepted active prompt, preserves it across steering/tool changes, pauses while any pending input exists, and freezes it on settlement. A fresh observed round resets it. Unknown execution clears timing rather than inventing continuity. Timing belongs to the runtime generation and is not persisted across runtime exit or Gateway restart. The mutable monotonic clock remains controller-owned. Fresh snapshots resample it under the state lock, so resubscribing does not restart it; captured samples remain unchanged when cloned or serialized later, even if the controller clock continues or pauses. Clients anchor the sample to a local monotonic clock, extrapolate only while online, and hide the timer while disconnected or unknown. Transport latency is not included in the sample; this is a user-facing duration, not precision profiling.
-
-The initial `title` defaults to `New session`. After OMP accepts a user prompt (including steer and follow-up prompts), the Gateway replaces it with the latest message prefix: whitespace normalized to a single line, capped at 80 Unicode characters. Attachment-only prompts retain the previous title. Duplicate command replays and rejected prompts do not change it. The title is persisted and published as `v2.metadata.updated` to the session and `summary.changed` to the host list. OMP-generated names do not override it; no title-generation model request or OMP modification is required.
-
-## Commands and receipts
-
-Every command has a client-generated `commandId`, unique within `(clientId,sessionId)`. Retrying the same ID and semantic body returns the current receipt without another dispatch. Receipts are retained with the session management record. Android stores each pending command and its encrypted payload in a separate SQLite row before sending it. A conditional update claims the row before POST, so an unsent row deleted by a newer draft cannot later be posted by recovery. On app restart Android queries pending receipts and, when safe, resends only the original ID and payload. Each prompt draft has a stable intent ID used directly as its `commandId`: even when a terminal receipt removes the local row, an older restored draft checks that ID on the Gateway before posting. Android checks unresolved earlier prompts before sending an edited draft. A Stop whose response may have been lost remains lookup-only and is never automatically resent. During receipt lookup, only an exact `operation_not_found` response counts as absence; other failures preserve the pending command.
+Connect to `WS /events`. The first frame is:
 
 ```json
-{"commandId":"example-1","type":"prompt","delivery":"start","message":"Check the build"}
+{"type":"host_snapshot","protocolVersion":3,"host":{},"sessions":[{"session":{},"runtime":null}],"workspaces":[]}
 ```
 
-| Type | Additional fields | Meaning |
+The host list receives creation and authoritative state updates without subscribing to details. For the visible session, send `{"type":"subscribe","sessionId":"..."}`; to stop receiving its timeline and operations, send `{"type":"unsubscribe","sessionId":"..."}`. Each subscribe replaces its view with:
+
+```json
+{"type":"session_snapshot","sessionId":"...","session":{},"runtime":null,"timeline":[],"operations":[],"hasHistory":false}
+```
+
+`operations` contains up to 20 recent receipts. Use receipt lookup for older pending commands. `hasHistory` indicates a server-side history mapping, not a guarantee that the transcript is already available.
+
+| Event | Fields besides `type` | Apply |
 | --- | --- | --- |
-| `start_runtime` | none | Attach an idle OMP process without a prompt |
-| `prompt` | `delivery`, `message`, `fileIds?`, `expectedGeneration?` | `start` needs a settled runtime or starts one lazily; `steer` and `follow_up` target an active generation |
-| `interrupt` | `expectedGeneration` | Ask OMP to abort current execution; keep the process |
-| `stop_runtime` | `expectedGeneration` | Stop and confirm process exit; a database failure may return `receiptStored:false` |
-| `respond` | `expectedGeneration`, `inputRequestId`, and `value` / `confirmed` / `cancelled` | Answer one pending OMP input request |
-| `select_model` | `expectedGeneration`, `provider`, `modelId` | Select an OMP model without local role or Ctrl+P interpretation |
-| `set_thinking_level` | `expectedGeneration`, `level` | Set thinking independently; actual state comes from OMP |
+| `session_upsert` | `sessionId`, `session`, `runtime` | Insert/replace a host-list entry |
+| `session_state` | `sessionId`, `session`, `runtime`, `hasHistory` | Replace metadata and runtime in host list and any open detail |
+| `timeline` | `sessionId`, `upsert`, `remove`, optional `reset` | If reset, clear live items; remove IDs; then insert/replace items by ID |
+| `operation` | `sessionId`, `operation` | Replace receipt by its ID |
 
-Operations progress through `accepted`, `dispatching`, optionally `running`, then `succeeded`, `failed`, `cancelled`, or `outcome_unknown`. `accepted` means a required receipt was persisted, not that OMP received the command. `dispatching` is saved before the external send boundary. A Stop response with `receiptStored:false` means termination was requested but no durable receipt exists; clients must verify the runtime state instead of resending Stop automatically. After a Gateway restart, accepted commands are cancelled and dispatching/running commands become outcome unknown; neither is automatically replayed. A late OMP acknowledgement cannot turn an already settled execution back into `active`. The Gateway cannot promise exactly once execution across a crash. `runtimeGeneration` and `commandId` serve different purposes.
+A null runtime clears all runtime facts. There is no separate exit event. Runtime start/exit resets the live tail; history is unaffected. Metadata updates also contain the complete runtime. Unknown frame types are protocol errors.
 
-### File uploads
+The ordered socket is the event stream. Clients maintain no wire subscription IDs or revision cursors. Gateway registers its receiver before capturing a snapshot and uses private sequence fences to discard superseded queued events. Snapshot validation tracks only mutations represented by that snapshot: timeline/operation changes do not invalidate the host list, and one session cannot invalidate another session’s snapshot. If it cannot capture a stable snapshot, loses broadcast events, encounters an oversized event, or cannot deliver promptly, it closes the connection. Reconnect takes a fresh host snapshot and resubscribes to the visible session; there is no durable event replay. In-flight history responses from a previous local view must be discarded. Host and session snapshots are separate reads, not a global transaction.
 
-Upload up to five files before submitting a prompt. A `fileId` is `file_` followed by 32 hex digits; retrying a PUT with the same ID, name, and bytes returns the same file. Each file must be 1 byte to 10 MiB. The raw request body is `application/octet-stream`, and `name` is a URL query parameter containing a filename without path separators. Files are published atomically under the Gateway data directory at `uploads/<sessionId>/<fileId>/<name>`, private to the Gateway OS user. `fileIds` in a prompt may refer only to files uploaded for that session. A prompt may contain files with an empty `message`.
+## Commands and generation safety
 
-For a settled `start` prompt, the Gateway adds quoted `@` file mentions with absolute host paths to OMP's RPC `prompt.message`. OMP reads those mentions into the new turn, subject to its own file-type and size rules. Running `steer` and `follow_up` prompts enter OMP's queue, where file mentions are not auto-read; the Gateway passes plain host paths for its tools and attaches recognized PNG, JPEG, GIF, or WebP images through OMP's `images: ImageContent[]` field up to 512 KiB total per prompt. Larger queued images remain available through their host paths. An RPC frame over the 1 MiB transport limit fails explicitly. OMP RPC has no generic binary attachment field; `@file` command-line arguments are unavailable in RPC mode, although `@` mentions inside direct prompt text work. Uploaded files remain on the host until removed from the Gateway data directory.
+`POST /sessions` accepts `{commandId,hostId,cwd,title?}` and returns a Session. It checks the workspace and creates no process. Creation is idempotent within `(clientId,commandId)`.
 
-## WebSocket synchronization
+`POST /sessions/:id/commands` returns `{operation,receiptStored}`: HTTP 202 for a new command, 200 for an identical replay.
 
-The server sends a `host/sessions` snapshot when the socket opens. A client may send `{"type":"subscribe","resource":"session/<id>"}` or `{"type":"unsubscribe","resource":"session/<id>"}`. Session detail is sent only for subscribed sessions. Each snapshot has `subscriptionId`, `resource`, `cursor:{epoch,revision}`, and `payload`. Changes have the same subscription and resource plus `epoch`, `baseRevision`, `revision`, and domain `changes`.
+```json
+{"commandId":"intent-1","type":"prompt","generation":"run-1","message":"Check the build","fileIds":[]}
+```
 
-Apply a change only when its subscription and epoch match the current snapshot and `baseRevision` equals the current revision. Ignore an already applied revision. A gap, epoch change, or `resync_required` requires a fresh subscription and snapshot. Reconnect replaces the live projection; the server does not replay events persistently. Snapshot registration precedes reading the view, and changes queued after its cursor follow the snapshot. Slow clients and oversized changes are told to resynchronize. The host list and each session detail have separate cursors; they are not a global transaction.
+| Type | Fields besides `commandId`, `type` |
+| --- | --- |
+| `start_runtime` | none; attach without a prompt |
+| `prompt` | `message`, optional `fileIds`, optional `generation` |
+| `interrupt`, `stop_runtime` | `generation` |
+| `respond` | `generation`, `inputRequestId`, optional `value`, `confirmed`, `cancelled` |
+| `select_model` | `generation`, `provider`, `modelId` |
+| `set_thinking_level` | `generation`, `level` |
 
-Live messages carry IDs scoped to a runtime generation. `v2.timeline.reset` clears the live tail when a runtime starts; `v2.timeline.patch` upserts `items` by ID and removes `removedIds`. The Gateway coalesces display changes briefly and bounds each patch. Under backpressure it may skip replaceable text deltas, while the final OMP message restores the complete live preview. A final message replaces the matching draft, and older deltas cannot append to it. The live preview is bounded; full durable text is read from OMP history. A runtime in `stopping` rejects new commands until its process tree exit is confirmed.
+Generation guards target one process lifetime. A mismatch fails without affecting a newer runtime. A prompt with no generation means the caller observed **no runtime**: Gateway starts one only if still absent. An attached runtime requires its generation. Gateway routes idle prompts normally and running prompts as steering; Android sends no delivery choice. Starting/stopping runtimes and pending input reject inappropriate work. Stop confirms process-tree exit before releasing its slot; Interrupt keeps the process.
 
-Android's interpretation of timeline kinds, tool groups, current-work status, and pending input is defined in the [Session Presentation Contract](session-presentation.md). Display types are not additional wire event types.
+## Idempotency and operation recovery
 
-## History and recovery
+Command identity is `(clientId,sessionId,commandId)`. Repeating the same semantic request returns its receipt without dispatching again; changing its body returns `idempotency_conflict`. `GET /sessions/:id/operations/:commandId` reads the authenticated client's durable receipt even when the original HTTP response was lost.
 
-OMP's JSONL transcript is the authority. The history source identifies the current branch leaf and content. A cursor binds to that source; if the file or branch changes, the server returns `stale_cursor` and the client restarts pagination. Before sending any prompt RPC, the Gateway durably marks its mapped OMP reference as possibly written. If that file later disappears, history returns `history_unavailable` and resume cannot replace the mapping, regardless of whether the prompt ultimately succeeded, aborted, failed, or had an unknown outcome. Even a prompt later acknowledged with `agentInvoked:false` remains conservatively marked, since the marker cannot be cleared safely after a possible write. Only a mapped reference never exposed to a prompt may return an empty page with `source:null` when its JSONL file is absent; a session without a mapping is also empty. Migrated legacy mappings and older mappings with prompt receipts are protected. `nextCursor:null` means pagination is complete.
+Gateway persists a receipt before dispatch and records the external-send boundary. Public `pending` covers its internal accepted/dispatching/running stages. On restart, accepted work is cancelled; work that may have reached OMP becomes `unknown`. Neither is automatically replayed. Unknown means the effect cannot be proven; it must not be presented as successful or safe to retry.
 
-History pages and live WebSocket updates are separate reads without cross-source atomicity. Android displays saved history before the attached runtime's live updates in one scrollable timeline, with a divider warning that messages may repeat. It does not merge OMP file entries into the live tail by guessing whether their text or IDs match. Resume uses the stored server-side OMP mapping, except an unwritten, unprompted session whose absent JSONL starts a new OMP session and atomically replaces the old mapping only while it remains marked unwritten. Each resume starts a new runtime generation and never replays old Operations.
+Android persists encrypted commands before POST, recovers by receipt lookup, and retains a stable ID for each prompt intent. Stop is lookup-only after its first send attempt. A storage failure may allow emergency Stop with `receiptStored:false`; inspect runtime state, never automatically resend it. Only HTTP 404 with `operation_not_found` proves a receipt is absent. During the protocol upgrade, Android discards never-sent old payloads and makes all previously sent outbox entries lookup-only.
+
+## History and files
+
+`GET /sessions/:id/history?limit=50&cursor=...` returns `{items,source,nextCursor}` (limit 1–100). Cursors are opaque and bound to a transcript source/branch; `stale_cursor` restarts pagination. `nextCursor:null` ends pagination. History stays separate from the WebSocket live preview; clients must not guess cross-source deduplication from text.
+
+Before a prompt can reach OMP, Gateway durably marks its mapped transcript as possibly written. A missing or corrupt transcript then fails explicitly (`history_unavailable`); resume cannot silently replace it, even after an aborted/failed/unknown prompt. Only an unwritten mapping with no file can return empty history (`source:null`) and be safely replaced. Resume always gets a new generation.
+
+`PUT /sessions/:id/files/:fileId?name=...` uploads raw `application/octet-stream` bytes. IDs are `file_` plus 32 hex digits; each file is 1 byte–10 MiB, with up to five files per prompt. Identical retries are idempotent. References are scoped to the session. Idle prompts use quoted host file mentions; steering uses host paths and embeds recognized images up to 512 KiB. Frames exceeding the 1 MiB OMP limit fail. Uploaded files remain in the Gateway data directory until removed there.
+
+Other core reads: `GET /fs/list?path=...` returns `{path,parent,directories}` within allowed roots; `GET /sessions/:id/models` returns `{models,thinkingLevels}` from the attached runtime.
+
+## Errors and optional REST reads
+
+Errors use `{code,message}`. Program logic uses `code`; `message` is display text, never a parser contract. Typical codes: `authentication_required`, `workspace_forbidden`, `generation_mismatch`, `runtime_required`, `runtime_not_ready`, `input_pending`, `input_expired`, `invalid_request`, `invalid_file`, `idempotency_conflict`, `persistence_unavailable`, `stale_cursor`, `history_unavailable`. Durable command failures appear in the Operation, even if acceptance returned 202. Internal error chains and raw OMP error objects are not public DTOs.
+
+Optional inspection APIs (Android uses snapshots instead): `GET /host`, `GET /workspaces`, `GET /sessions?limit=50&cursor=...` (creation-order paging), and `GET /sessions/:id` (session snapshot fields without event type/sessionId). These use the same public DTOs.

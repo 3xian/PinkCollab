@@ -39,7 +39,7 @@ class SessionGatewayTest {
 
     private fun loadingDetail() = SessionDetail(
         Session("session", "host", "/work", "Work", SessionStatus.Idle, "Ready",
-            false, null, "", "", false), subscriptionId = "sub", savedHistory = SavedHistory.Loading,
+            false, null, "", "", false), snapshotToken = "sub", savedHistory = SavedHistory.Loading,
     )
 
     private fun gatewayWith(state: MutableStateFlow<AppState>, transport: GatewayTransport) = SessionGateway(
@@ -63,7 +63,7 @@ class SessionGatewayTest {
         val key = SessionKey("host", "session")
         val initial = loadingDetail()
         val running = initial.copy(session = initial.session.copy(status = SessionStatus.Running,
-            runtimeAttached = true, runtimeExecution = RuntimeExecution.Active))
+            runtimeAttached = true))
         val state = MutableStateFlow(AppState(details = mapOf(key to running)))
         var requests = 0
         val gateway = gatewayWith(state, HistoryTransport {
@@ -75,7 +75,7 @@ class SessionGatewayTest {
         assertFalse(pending.isCompleted)
         assertEquals(SavedHistory.Loading, state.value.details.getValue(key).savedHistory)
         state.update { it.copy(details = mapOf(key to running.copy(session = running.session.copy(
-            status = SessionStatus.Idle, runtimeExecution = RuntimeExecution.Quiescent)))) }
+            status = SessionStatus.Idle)))) }
         pending.await()
         assertEquals(2, requests)
         assertTrue(state.value.details.getValue(key).savedHistory is SavedHistory.Ready)
@@ -95,7 +95,7 @@ class SessionGatewayTest {
         connections.focus("host", "session")
         val initial = loadingDetail()
         val running = initial.copy(session = initial.session.copy(status = SessionStatus.Running,
-            runtimeAttached = true, runtimeExecution = RuntimeExecution.Active),
+            runtimeAttached = true),
             liveItems = listOf(TimelineItem("live", "assistant", "Working", "", "")))
         state.value = AppState(details = mapOf(key to running))
         val pending = async { gateway.loadHistory("host", "session", "sub") }
@@ -109,7 +109,7 @@ class SessionGatewayTest {
         assertTrue(pending.isCompleted)
         pending.await()
         val retained = state.value.details.getValue(key)
-        assertNull(retained.subscriptionId)
+        assertNull(retained.snapshotToken)
         assertEquals(running.session, retained.session)
         assertEquals(running.liveItems, retained.liveItems)
         assertEquals(SavedHistory.Failed, retained.savedHistory)
@@ -120,7 +120,7 @@ class SessionGatewayTest {
 
     @Test fun unsubscribe_and_disconnect_keep_the_visible_transcript() = runTest {
         val key = SessionKey("host", "session")
-        val ready = loadingDetail().copy(cursor = Cursor("epoch", 3),
+        val ready = loadingDetail().copy(
             savedHistory = SavedHistory.Ready("source", listOf(TimelineItem("saved", "user", "Keep me", "", "")), "older"))
         for (disconnect in listOf("unsubscribe", "offline", "forget")) {
             val state = MutableStateFlow(AppState())
@@ -140,8 +140,7 @@ class SessionGatewayTest {
             val retained = state.value.details.getValue(key)
             assertEquals(ready.savedHistory, retained.savedHistory)
             assertEquals(ready.session, retained.session)
-            assertNull(retained.subscriptionId)
-            assertNull(retained.cursor)
+            assertNull(retained.snapshotToken)
             assertEquals(disconnect == "offline", connections.isDesired("host", "session"))
         }
     }
@@ -161,7 +160,7 @@ class SessionGatewayTest {
         assertFalse(pending.isCompleted)
         connections.unsubscribe("host", "session")
         connections.focus("host", "session")
-        val fresh = loadingDetail().copy(subscriptionId = "new-sub",
+        val fresh = loadingDetail().copy(snapshotToken = "new-sub",
             savedHistory = SavedHistory.Ready("new-source", listOf(TimelineItem("new", "user", "New", "", "")), null))
         state.value = AppState(details = mapOf(key to fresh))
         response.complete(historyPage)
@@ -211,7 +210,7 @@ class SessionGatewayTest {
 
     @Test fun stale_history_request_does_not_fail_a_newer_subscription() = runTest {
         val key = SessionKey("host", "session")
-        val state = MutableStateFlow(AppState(details = mapOf(key to loadingDetail().copy(subscriptionId = "new"))))
+        val state = MutableStateFlow(AppState(details = mapOf(key to loadingDetail().copy(snapshotToken = "new"))))
         gatewayWith(state, HistoryTransport { error("unexpected") }).loadHistory("host", "session", "old")
 
         assertEquals(SavedHistory.Loading, state.value.details.getValue(key).savedHistory)
@@ -219,7 +218,7 @@ class SessionGatewayTest {
 
     @Test fun missing_subscription_fails_an_in_flight_page() = runTest {
         val key = SessionKey("host", "session")
-        val state = MutableStateFlow(AppState(details = mapOf(key to loadingDetail().copy(subscriptionId = null))))
+        val state = MutableStateFlow(AppState(details = mapOf(key to loadingDetail().copy(snapshotToken = null))))
         val failure = runCatching {
             gatewayWith(state, HistoryTransport { error("unexpected") }).loadHistory("host", "session", null)
         }.exceptionOrNull()
@@ -231,7 +230,7 @@ class SessionGatewayTest {
     @Test fun focusing_a_session_preserves_same_id_detail_on_another_host() = runTest {
         fun detail(hostId: String, subscription: String) = SessionDetail(
             Session("same", hostId, "/work", "Work", SessionStatus.Idle, "Ready",
-                false, null, "", "", false), subscriptionId = subscription,
+                false, null, "", "", false), snapshotToken = subscription,
         )
         val first = SessionKey("host-a", "same")
         val second = SessionKey("host-b", "same")
@@ -240,14 +239,14 @@ class SessionGatewayTest {
         val gateway = SessionGateway(state, NoNetworkTransport(), { error("unexpected host lookup") }) { hostId, sessionId ->
             assertEquals("host-a", hostId)
             assertEquals("same", sessionId)
-            assertEquals(detail("host-a", "old").copy(subscriptionId = null), state.value.details[first])
+            assertEquals(detail("host-a", "old").copy(snapshotToken = null), state.value.details[first])
             assertTrue(second in state.value.details)
             focused = true
             state.update { it.copy(details = it.details + (first to detail("host-a", "new"))) }
         }
         gateway.detail("host-a", "same")
         assertTrue(focused)
-        assertEquals("new", state.value.details[first]?.subscriptionId)
-        assertEquals("other", state.value.details[second]?.subscriptionId)
+        assertEquals("new", state.value.details[first]?.snapshotToken)
+        assertEquals("other", state.value.details[second]?.snapshotToken)
     }
 }

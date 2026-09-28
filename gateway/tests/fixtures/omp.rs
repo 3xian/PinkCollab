@@ -173,7 +173,7 @@ fn main() {
         };
         match frame["type"].as_str().unwrap_or_default() {
             "get_state" => ack(
-                json!({"sessionFile":log,"sessionId":"fixture","sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none(),"isStreaming":pending_prompt_id.is_some()}),
+                json!({"sessionFile":log,"sessionId":"fixture","sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none() && !args.iter().any(|arg| arg == "--unknown-execution"),"isStreaming":pending_prompt_id.is_some()}),
             ),
             "get_available_thinking_levels" => {
                 let mut levels = vec![json!("off")];

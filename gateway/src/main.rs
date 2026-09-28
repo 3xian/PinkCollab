@@ -132,7 +132,7 @@ async fn serve_until(
     let host_id = store.host_id()?;
     let bus = Arc::new(Bus::default());
     store.recover_operations()?;
-    let v2 = pinkcollab_gateway::v2_runtime::SessionDirectory::new(
+    let sessions = pinkcollab_gateway::runtime::SessionDirectory::new(
         store.clone(),
         browser.clone(),
         bus.clone(),
@@ -153,7 +153,7 @@ async fn serve_until(
         store,
         browser,
         bus: bus.clone(),
-        v2: v2.clone(),
+        sessions: sessions.clone(),
     });
     let handle = axum_server::Handle::new();
     let server_handle = handle.clone();
@@ -178,13 +178,13 @@ async fn serve_until(
     tokio::pin!(task);
     tokio::select! {
         result = &mut task => {
-            v2.close().await;
+            sessions.close().await;
             result??;
         },
         _ = stop => {
-            bus.publish("gateway.shutdown", serde_json::json!({}));
+            bus.disconnect();
             handle.graceful_shutdown(Some(Duration::from_secs(10)));
-            v2.close().await;
+            sessions.close().await;
             task.await??;
         },
     }

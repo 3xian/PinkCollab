@@ -16,7 +16,6 @@ import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.PairedHost
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SessionStatus
@@ -34,7 +33,7 @@ class ComposerRailDeviceTest {
     @Test fun detached_composer_shows_send_without_start_and_sends_on_tap() {
         val host = PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client")
         val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
-            "", "", false, null, RuntimeExecution.Unknown)
+            "", "", false, null)
         val controls = sessionControls(SessionDetail(session), HostState(host, connection = ConnectionState.Online(1L)),
             SessionDraft(text = "hello"), 0, SessionActivity())
         val sent = AtomicInteger()
@@ -60,7 +59,7 @@ class ComposerRailDeviceTest {
             connection = ConnectionState.Online(1L),
         )
         val exited = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
-            "", "", false, null, RuntimeExecution.Unknown)
+            "", "", false, null)
         val selected = ModelInfo("provider", "test-model", "Test model")
         var page by mutableStateOf(SessionPageState(LoadState.Ready(SessionDetail(exited)), host,
             SessionDraft(text = "hello again"), 0, SessionActivity(), null, null))
@@ -84,8 +83,8 @@ class ComposerRailDeviceTest {
         }
         compose.onNodeWithText("Starting OMP…").assertExists()
         compose.runOnIdle {
-            page = page.copy(detail = LoadState.Ready(SessionDetail(exited.copy(status = SessionStatus.Running,
-                runtimeAttached = true, runtimeGeneration = "next", runtimeExecution = RuntimeExecution.Quiescent))),
+            page = page.copy(detail = LoadState.Ready(SessionDetail(exited.copy(status = SessionStatus.Idle,
+                runtimeAttached = true, generation = "next"))),
                 activity = SessionActivity())
         }
         compose.waitForIdle()

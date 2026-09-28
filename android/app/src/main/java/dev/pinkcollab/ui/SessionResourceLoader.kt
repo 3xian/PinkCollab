@@ -78,14 +78,14 @@ internal class SessionResourceLoader(
         val key = SessionKey(session.hostId, session.id)
         val request = synchronized(modelLoadLock) {
             val current = mutableModelLoads.value[key]
-            val sameGeneration = key in modelGenerations && modelGenerations[key] == session.runtimeGeneration
+            val sameGeneration = key in modelGenerations && modelGenerations[key] == session.generation
             if (((current == LoadState.Loading || (current is LoadState.Ready && current.refreshing)) && sameGeneration) ||
                 (!force && current is LoadState.Ready && sameGeneration)) {
                 null
             } else {
                 val cached = (current as? LoadState.Ready)?.takeIf { sameGeneration }
                 mutableModelLoads.value += key to (cached?.copy(refreshing = true) ?: LoadState.Loading)
-                modelGenerations[key] = session.runtimeGeneration
+                modelGenerations[key] = session.generation
                 val version = (++nextModelVersion).also { modelVersions[key] = it }
                 version to cached
             }

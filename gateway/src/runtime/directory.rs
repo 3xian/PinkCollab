@@ -101,7 +101,7 @@ impl SessionDirectory {
         }
         Ok(view)
     }
-    pub async fn list(&self) -> Result<Vec<Value>> {
+    pub async fn list(&self) -> Result<Vec<SessionSummary>> {
         let sessions = self.store.run(|store| store.v2_sessions()).await?;
         self.summaries(sessions).await
     }
@@ -109,7 +109,7 @@ impl SessionDirectory {
         &self,
         after: Option<(&str, &str)>,
         limit: usize,
-    ) -> Result<(Vec<Value>, bool)> {
+    ) -> Result<(Vec<SessionSummary>, bool)> {
         let after = after.map(|(created, id)| (created.to_owned(), id.to_owned()));
         let (sessions, has_more) = self
             .store
@@ -124,17 +124,50 @@ impl SessionDirectory {
             .await?;
         Ok((self.summaries(sessions).await?, has_more))
     }
-    async fn summaries(&self, sessions: Vec<SessionRecord>) -> Result<Vec<Value>> {
+    async fn summaries(&self, sessions: Vec<SessionRecord>) -> Result<Vec<SessionSummary>> {
         let mut result = Vec::with_capacity(sessions.len());
         for session in sessions {
             if let Some(controller) = self.active_controller(&session.id).await {
                 let mut state = controller.state.lock().await;
-                result.push(json!({"session":state.session,"runtime":state.capture_runtime()}));
+                result.push(SessionSummary {
+                    session: SessionDto::from(&state.session),
+                    runtime: state.capture_runtime().as_ref().map(RuntimeDto::from),
+                });
             } else {
-                result.push(json!({"session":session,"runtime":null}));
+                result.push(SessionSummary {
+                    session: SessionDto::from(&session),
+                    runtime: None,
+                });
             }
         }
         Ok(result)
+    }
+    pub async fn publish_created(&self, session: &SessionRecord) {
+        // A snapshot may expose the committed row before the create request publishes it.
+        // Serialize with controller registration so a late creation event cannot detach
+        // a runtime another client has already started from that snapshot.
+        let controllers = self.controllers.lock().await;
+        if let Some(controller) = controllers
+            .get(&session.id)
+            .and_then(std::sync::Weak::upgrade)
+        {
+            let mut state = controller.state.lock().await;
+            let runtime = state.capture_runtime().as_ref().map(RuntimeDto::from);
+            let session = SessionDto::from(&state.session);
+            self.bus.publish(ServerEvent::SessionUpsert {
+                session_id: session.id.clone(),
+                summary: SessionSummary { session, runtime },
+            });
+            return;
+        }
+        let session = SessionDto::from(session);
+        self.bus.publish(ServerEvent::SessionUpsert {
+            session_id: session.id.clone(),
+            summary: SessionSummary {
+                session,
+                runtime: None,
+            },
+        });
     }
     pub async fn submit(
         self: &Arc<Self>,

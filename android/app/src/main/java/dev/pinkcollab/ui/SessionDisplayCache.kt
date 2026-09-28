@@ -13,8 +13,7 @@ internal data class SessionDisplay(
 internal fun sessionDetailForDisplay(current: SessionDetail?, cached: SessionDisplay?): SessionDisplay? {
     val detail = current ?: cached?.detail?.copy(
         savedHistory = SavedHistory.Loading,
-        subscriptionId = null,
-        cursor = null,
+        snapshotToken = null,
     ) ?: return null
     val items = when (val history = detail.savedHistory) {
         SavedHistory.Loading, SavedHistory.Failed -> cached?.historyItems.orEmpty()

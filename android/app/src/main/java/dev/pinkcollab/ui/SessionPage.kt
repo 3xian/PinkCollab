@@ -214,7 +214,7 @@ internal fun SessionPage(
             if (session.runtimeAttached) {
                 items(liveTimeline, key = { "live:${it.id}" }) { item ->
                     DisplayItem(item, markwon, liveActivity = host?.connected == true &&
-                        session.runtimeExecution == RuntimeExecution.Active)
+                        session.status == SessionStatus.Running)
                 }
             }
             if (session.runtimeAttached && detail.streaming.isNotBlank()) item {
@@ -421,7 +421,7 @@ internal fun SessionPage(
             }
         }
     }
-    LaunchedEffect(showModels, attached, session.runtimeGeneration) {
+    LaunchedEffect(showModels, attached, session.generation) {
         if (showModels && attached) onLoadModels(false)
     }
     if (showModels) {

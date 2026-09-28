@@ -28,7 +28,7 @@ internal class SessionGateway(
         val key = "$hostId:$cwd"
         val commandId = pendingCreateIds.computeIfAbsent(key) { UUID.randomUUID().toString() }
         val body = JSONObject().put("commandId", commandId).put("hostId", hostId).put("cwd", cwd)
-        val session = JSONObject(api.request(p.url, p.credential, "/api/v2/sessions", "POST", body)).session()
+        val session = JSONObject(api.request(p.url, p.credential, "/api/v3/sessions", "POST", body)).session()
         pendingCreateIds.remove(key, commandId)
         return session
     }
@@ -37,7 +37,7 @@ internal class SessionGateway(
         val key = SessionKey(hostId, id)
         invalidateSubscription(hostId, id)
         focus(hostId, id)
-        awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[key]?.subscriptionId != null }
+        awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[key]?.snapshotToken != null }
     }
 
     /** Release subscription-owned work without evicting the last visible session or transcript. */
@@ -46,22 +46,21 @@ internal class SessionGateway(
         mutable.update { app ->
             val current = app.details[key] ?: return@update app
             app.copy(details = app.details + (key to current.copy(
-                subscriptionId = null,
-                cursor = null,
+                snapshotToken = null,
                 savedHistory = if (current.savedHistory is SavedHistory.Loading) SavedHistory.Failed else current.savedHistory,
             )))
         }
     }
 
-    suspend fun loadHistory(hostId: String, id: String, subscriptionId: String?) {
+    suspend fun loadHistory(hostId: String, id: String, snapshotToken: String?) {
         val key = SessionKey(hostId, id)
         val before = state.value.details[key] ?: return
-        if (before.subscriptionId != subscriptionId) return
-        if (subscriptionId == null) {
+        if (before.snapshotToken != snapshotToken) return
+        if (snapshotToken == null) {
             failUnstartedHistory(key)
             throw IOException("History unavailable")
         }
-        val request = HistoryRequest(subscriptionId, before.historyEpoch)
+        val request = HistoryRequest(snapshotToken, before.historyEpoch)
         val p = paired(hostId)
         val page = try {
             firstHistoryPage(key, request, p) ?: return
@@ -88,7 +87,7 @@ internal class SessionGateway(
             if (!request.matches(current)) return null
             try {
                 return parseHistoryPage(api.request(p.url, p.credential,
-                    "/api/v2/sessions/${key.sessionId}/history", query = "limit" to "100"))
+                    "/api/v3/sessions/${key.sessionId}/history", query = "limit" to "100"))
             } catch (failure: GatewayHttpException) {
                 if (failure.errorCode !in setOf("history_unavailable", "stale_cursor")) throw failure
                 val latest = state.value.details[key] ?: return null
@@ -96,11 +95,11 @@ internal class SessionGateway(
                 // First-prompt metadata may arrive before OMP creates its transcript.
                 // Wait for that turn to settle, without treating missing data as empty history.
                 if (latest.savedHistory.sourceId == null && latest.session.isActive &&
-                    latest.session.runtimeExecution != RuntimeExecution.Quiescent) {
+                    latest.session.status != SessionStatus.Idle) {
                     state.first { app ->
                         val detail = app.details[key]
                         detail == null || !request.matches(detail) || !detail.session.isActive ||
-                            detail.session.runtimeExecution == RuntimeExecution.Quiescent
+                            detail.session.status == SessionStatus.Idle
                     }
                     continue
                 }
@@ -114,7 +113,7 @@ internal class SessionGateway(
     private fun failUnstartedHistory(key: SessionKey) {
         mutable.update { app ->
             val current = app.details[key] ?: return@update app
-            if (current.subscriptionId != null || current.savedHistory !is SavedHistory.Loading) return@update app
+            if (current.snapshotToken != null || current.savedHistory !is SavedHistory.Loading) return@update app
             app.copy(details = app.details + (key to current.copy(savedHistory = SavedHistory.Failed)))
         }
     }
@@ -132,13 +131,13 @@ internal class SessionGateway(
         val before = state.value.details[key] ?: return
         val ready = before.savedHistory as? SavedHistory.Ready ?: return
         val cursor = ready.nextCursor ?: return
-        val request = HistoryRequest(before.subscriptionId ?: return, before.historyEpoch)
+        val request = HistoryRequest(before.snapshotToken ?: return, before.historyEpoch)
         val p = paired(hostId)
         val page = try {
-            parseHistoryPage(api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "cursor" to cursor))
+            parseHistoryPage(api.request(p.url, p.credential, "/api/v3/sessions/$id/history", query = "cursor" to cursor))
         } catch (failure: IOException) {
             if ((failure as? GatewayHttpException)?.errorCode == "stale_cursor") {
-                before.subscriptionId?.let { loadHistory(hostId, id, it) }
+                before.snapshotToken?.let { loadHistory(hostId, id, it) }
                 return
             }
             throw failure
@@ -155,7 +154,7 @@ internal class SessionGateway(
 
     suspend fun models(hostId: String, id: String): ModelCatalog {
         val p = paired(hostId)
-        val raw = JSONObject(api.request(p.url, p.credential, "/api/v2/sessions/$id/models"))
+        val raw = JSONObject(api.request(p.url, p.credential, "/api/v3/sessions/$id/models"))
         return ModelCatalog(raw.getJSONArray("models").objects().map { it.modelInfo() }, raw.getJSONArray("thinkingLevels").strings())
     }
 }
@@ -164,8 +163,8 @@ internal fun historyCursor(page: JSONObject): String? = (page.opt("nextCursor") 
 
 private data class HistoryPage(val source: String?, val items: List<TimelineItem>, val nextCursor: String?)
 
-internal data class HistoryRequest(val subscriptionId: String, val epoch: Long) {
-    fun matches(detail: SessionDetail?): Boolean = detail?.subscriptionId == subscriptionId && detail.historyEpoch == epoch
+internal data class HistoryRequest(val snapshotToken: String, val epoch: Long) {
+    fun matches(detail: SessionDetail?): Boolean = detail?.snapshotToken == snapshotToken && detail.historyEpoch == epoch
 }
 
 private suspend fun parseHistoryPage(raw: String): HistoryPage = withContext(Dispatchers.Default) {

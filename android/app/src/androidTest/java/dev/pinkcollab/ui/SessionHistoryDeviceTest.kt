@@ -28,7 +28,6 @@ import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.PairedHost
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.SavedHistory
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionDetail
@@ -47,7 +46,7 @@ class SessionHistoryDeviceTest {
         connection = ConnectionState.Online(1L),
     )
     private val session = Session("session", "host", "/work", "Work", SessionStatus.Running, "", false,
-        null, "", "", true, "generation", RuntimeExecution.Quiescent)
+        null, "", "", true, "generation")
     private val saved = TimelineItem("saved", "user", "Earlier question", "", "2026-09-20T00:00:00Z")
     private val live = TimelineItem("live", "user", "Current question", "", "2026-09-20T00:00:01Z")
 
@@ -150,7 +149,7 @@ class SessionHistoryDeviceTest {
 
     @Test fun history_in_flight_does_not_claim_there_are_no_saved_messages() {
         val detail = SessionDetail(session.copy(status = SessionStatus.Idle, runtimeAttached = false,
-            runtimeGeneration = null), savedHistory = SavedHistory.Loading)
+            generation = null), savedHistory = SavedHistory.Loading)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
@@ -162,7 +161,7 @@ class SessionHistoryDeviceTest {
 
     @Test fun failed_history_does_not_claim_there_are_no_saved_messages() {
         val detail = SessionDetail(session.copy(status = SessionStatus.Idle, runtimeAttached = false,
-            runtimeGeneration = null), savedHistory = SavedHistory.Failed)
+            generation = null), savedHistory = SavedHistory.Failed)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
@@ -189,7 +188,7 @@ class SessionHistoryDeviceTest {
 
     @Test fun detached_session_without_saved_history_has_no_empty_message() {
         val detail = SessionDetail(session.copy(status = SessionStatus.Idle, runtimeAttached = false,
-            runtimeGeneration = null))
+            generation = null))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
@@ -200,7 +199,7 @@ class SessionHistoryDeviceTest {
 
     @Test fun detached_session_displays_saved_transcript() {
         val detail = SessionDetail(session.copy(status = SessionStatus.Idle, runtimeAttached = false,
-            runtimeGeneration = null), savedHistory = SavedHistory.Ready(null, listOf(saved), null))
+            generation = null), savedHistory = SavedHistory.Ready(null, listOf(saved), null))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })

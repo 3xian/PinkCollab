@@ -36,15 +36,7 @@ data class ModelInfo(
 data class ModelCatalog(val models: List<ModelInfo>, val thinkingLevels: List<String>)
 enum class SessionStatus { Starting, Running, NeedsInput, Stopping, Idle }
 
-enum class RuntimeExecution(val wire: String) {
-    Active("active"), Quiescent("quiescent"), Unknown("unknown");
-
-    companion object {
-        fun fromWire(raw: String): RuntimeExecution = entries.firstOrNull { it.wire == raw } ?: Unknown
-    }
-}
-
-data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val runtimeGeneration: String? = null, val runtimeExecution: RuntimeExecution = RuntimeExecution.Unknown, val workTiming: WorkTiming? = null) {
+data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val generation: String? = null, val workTiming: WorkTiming? = null) {
     /** A session is active while its OMP runtime is live, including the startup hand-off. */
     val isActive: Boolean get() = status == SessionStatus.Starting || runtimeAttached
 }
@@ -94,9 +86,7 @@ data class ToolArguments(
 data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean)
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
 sealed interface OperationStatus {
-    data object Accepted : OperationStatus
-    data object Dispatching : OperationStatus
-    data object Running : OperationStatus
+    data object Pending : OperationStatus
     data object Succeeded : OperationStatus
     data object OutcomeUnknown : OperationStatus
     data object Failed : OperationStatus
@@ -105,11 +95,9 @@ sealed interface OperationStatus {
 
     companion object {
         fun fromWire(raw: String): OperationStatus = when (raw) {
-            "accepted" -> Accepted
-            "dispatching" -> Dispatching
-            "running" -> Running
+            "pending" -> Pending
             "succeeded" -> Succeeded
-            "outcome_unknown" -> OutcomeUnknown
+            "unknown" -> OutcomeUnknown
             "failed" -> Failed
             "cancelled" -> Cancelled
             else -> Unknown(raw)
@@ -146,17 +134,13 @@ data class SessionDetail(
     val session: Session,
     val streaming: String = "",
     val model: ModelInfo? = null,
-    val cursor: Cursor? = null,
-    val subscriptionId: String? = null,
+    // Local identity for cancelling stale asynchronous reads; never sent over the wire.
+    val snapshotToken: String? = null,
     val operations: List<OperationReceipt> = emptyList(),
     val savedHistory: SavedHistory = SavedHistory.None,
     val liveItems: List<TimelineItem> = emptyList(),
     val historyEpoch: Long = 0,
 )
-data class Cursor(val epoch: String, val revision: Long) {
-    fun accepts(epoch: String, baseRevision: Long, revision: Long): Boolean =
-        this.epoch == epoch && baseRevision == this.revision && revision > this.revision
-}
 data class Workspace(val name: String, val path: String)
 data class Listing(val path: String, val parent: String?, val directories: List<Workspace>)
 sealed interface ConnectionState {
@@ -174,8 +158,7 @@ data class HostState(
     val sessions: List<Session> = emptyList(),
     val workspaces: List<Workspace> = emptyList(),
     val revision: Long = 0,
-    val cursor: Cursor? = null,
-    val subscriptionId: String? = null,
+    val snapshotToken: String? = null,
     val lastSyncedAtEpochMillis: Long? = null,
     val initialSync: InitialSyncState = InitialSyncState.Pending,
 ) {
@@ -214,14 +197,13 @@ fun Host.json() = JSONObject().put("id", id).put("name", name).put("os", os).put
 fun JSONObject.session(runtime: JSONObject? = null): Session {
     val pending = runtime?.optJSONArray("pendingInputs")?.objects().orEmpty()
     val a = pending.firstOrNull()?.let { Attention(it.getString("id"), AttentionType.fromWire(it.getString("type")), it.optString("text"), it.optJSONArray("options")?.strings().orEmpty()) }
-    val phase = runtime?.optString("phase") ?: ""
-    val execution = RuntimeExecution.fromWire(runtime?.optString("execution") ?: "unknown")
-    val status = when {
-        phase == "starting" -> SessionStatus.Starting
-        phase == "stopping" -> SessionStatus.Stopping
-        a != null -> SessionStatus.NeedsInput
-        execution == RuntimeExecution.Active -> SessionStatus.Running
-        else -> SessionStatus.Idle
+    val status = when (runtime?.getString("state")) {
+        "starting" -> SessionStatus.Starting
+        "stopping" -> SessionStatus.Stopping
+        "running" -> SessionStatus.Running
+        "waiting_input" -> SessionStatus.NeedsInput
+        "idle", null -> SessionStatus.Idle
+        else -> error("Unsupported runtime state")
     }
     val activity = runtime?.optString("activity")?.takeIf { it.isNotBlank() } ?: when (status) {
         SessionStatus.Starting -> "Starting OMP"
@@ -230,17 +212,13 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
         SessionStatus.NeedsInput -> "Waiting for input"
         SessionStatus.Idle -> "Ready to continue"
     }
-    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() }, execution,
+    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() },
         runtime?.optJSONObject("workTiming")?.takeIf { it.has("elapsedMs") }?.let {
             WorkTiming(it.optLong("elapsedMs").coerceAtLeast(0), it.optBoolean("running"), it.optBoolean("completed"))
         })
 }
 fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))
-fun JSONObject.cursor() = Cursor(getString("epoch"), getLong("revision"))
-fun JSONObject.receipt() = OperationReceipt(getString("commandId"), OperationStatus.fromWire(getString("status")), getString("commandType"), optJSONObject("error")?.optString("code"))
-fun Session.withRuntime(runtime: JSONObject?): Session = JSONObject()
-    .put("id", id).put("hostId", hostId).put("cwd", cwd).put("title", title)
-    .put("createdAt", createdAt).put("updatedAt", updatedAt).session(runtime)
+fun JSONObject.receipt() = OperationReceipt(getString("id"), OperationStatus.fromWire(getString("state")), getString("kind"), optJSONObject("error")?.optString("code"))
 fun JSONObject.item(): TimelineItem {
     val tool = optJSONObject("tool")?.let {
         val arguments = when (val value = it.opt("arguments")) {

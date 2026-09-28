@@ -1,9 +1,6 @@
 #![cfg(feature = "test-fixtures")]
 mod support;
-use pinkcollab_gateway::{
-    storage::Store,
-    uploads::{self, PromptFileMode},
-};
+use pinkcollab_gateway::{storage::Store, uploads};
 use serde_json::{Value, json};
 use std::time::Duration;
 use support::{Harness, wait_operation};
@@ -13,7 +10,7 @@ async fn uploaded_files_reach_the_matching_omp_session() {
     let h = Harness::new(1, vec!["--record-prompt-frame".into()]).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let sessions = format!("{}/api/v2/sessions", h.url);
+    let sessions = format!("{}/api/v3/sessions", h.url);
     let record: Value = client
         .post(&sessions)
         .bearer_auth(&credential)
@@ -112,7 +109,7 @@ async fn uploaded_files_reach_the_matching_omp_session() {
     );
     let commands = format!("{session}/commands");
     assert_eq!(client.post(&commands).bearer_auth(&credential)
-        .json(&json!({"commandId":"prompt-files","type":"prompt","delivery":"start","message":"","fileIds":[image_id,document_id]}))
+        .json(&json!({"commandId":"prompt-files","type":"prompt","message":"","fileIds":[image_id,document_id]}))
         .send().await.unwrap().status(), 202);
     wait_operation(
         &client,
@@ -139,15 +136,14 @@ async fn uploaded_files_reach_the_matching_omp_session() {
         "direct prompts use OMP file mentions"
     );
     assert_eq!(std::fs::read(image_path).unwrap(), image);
-    let (_, queued_images) = uploads::prompt_files(
+    let files = uploads::prompt_files(
         &h.store,
         record["id"].as_str().unwrap(),
         &[format!("file_{}", "a".repeat(32))],
-        PromptFileMode::Queued,
     )
     .unwrap();
-    assert_eq!(queued_images[0]["type"], "image");
-    assert_eq!(queued_images[0]["mimeType"], "image/png");
+    assert_eq!(files.images[0]["type"], "image");
+    assert_eq!(files.images[0]["mimeType"], "image/png");
 
     let other: Value = client
         .post(&sessions)
@@ -161,7 +157,7 @@ async fn uploaded_files_reach_the_matching_omp_session() {
         .unwrap();
     let other_session = format!("{sessions}/{}", other["id"].as_str().unwrap());
     assert_eq!(client.post(format!("{other_session}/commands")).bearer_auth(&credential)
-        .json(&json!({"commandId":"foreign-file","type":"prompt","delivery":"start","message":"","fileIds":[format!("file_{}", "a".repeat(32))]}))
+        .json(&json!({"commandId":"foreign-file","type":"prompt","message":"","fileIds":[format!("file_{}", "a".repeat(32))]}))
         .send().await.unwrap().status(), 202);
     let failed: Value = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -174,7 +170,7 @@ async fn uploaded_files_reach_the_matching_omp_session() {
                 .json()
                 .await
                 .unwrap();
-            if operation["status"] == "failed" {
+            if operation["state"] == "failed" {
                 break operation;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -248,7 +244,7 @@ async fn queued_image_over_frame_limit_fails_instead_of_disappearing() {
     let client = reqwest::Client::new();
     let credential = h.pair().await;
     let session: Value = client
-        .post(format!("{}/api/v2/sessions", h.url))
+        .post(format!("{}/api/v3/sessions", h.url))
         .bearer_auth(&credential)
         .json(&json!({"commandId":"create-frame-limit","hostId":h.host.id,"cwd":h.cwd("frame-limit")}))
         .send()
@@ -258,7 +254,7 @@ async fn queued_image_over_frame_limit_fails_instead_of_disappearing() {
         .await
         .unwrap();
     let session_url = format!(
-        "{}/api/v2/sessions/{}",
+        "{}/api/v3/sessions/{}",
         h.url,
         session["id"].as_str().unwrap()
     );
@@ -277,6 +273,14 @@ async fn queued_image_over_frame_limit_fails_instead_of_disappearing() {
             .status(),
         201
     );
+    client
+        .post(format!("{session_url}/commands"))
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"hold","type":"prompt","message":"hold"}))
+        .send()
+        .await
+        .unwrap();
+    let runtime = support::wait_runtime(&client, &session_url, &credential, "running").await;
     assert_eq!(
         client
             .post(format!("{session_url}/commands"))
@@ -284,8 +288,7 @@ async fn queued_image_over_frame_limit_fails_instead_of_disappearing() {
             .json(&json!({
                 "commandId":"oversized-queued-image",
                 "type":"prompt",
-                "delivery":"steer",
-                "expectedGeneration":"gen-test",
+                "generation":runtime["generation"],
                 "message":"\\".repeat(250_000),
                 "fileIds":[file_id],
             }))
@@ -306,7 +309,7 @@ async fn queued_image_over_frame_limit_fails_instead_of_disappearing() {
                 .json()
                 .await
                 .unwrap();
-            if operation["status"] == "failed" {
+            if operation["state"] == "failed" {
                 break operation;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;

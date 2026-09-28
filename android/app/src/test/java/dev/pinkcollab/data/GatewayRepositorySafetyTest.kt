@@ -39,11 +39,11 @@ class GatewayRepositorySafetyTest {
             bytes: ByteArray): String = error("unexpected upload")
     }
 
-    private fun accepted(body: JSONObject) = JSONObject().put("operation", receipt(body.getString("commandId"), "accepted"))
+    private fun accepted(body: JSONObject) = JSONObject().put("operation", receipt(body.getString("commandId"), "pending"))
 
     private fun runtimeState(host: PairedHost, generation: String): AppState {
         val session = Session("session", "host", "/tmp", "Work", SessionStatus.Running, "Working", false, null,
-            "2026-01-01", "2026-01-01", true, generation, RuntimeExecution.Active)
+            "2026-01-01", "2026-01-01", true, generation)
         return AppState(hosts = mapOf("host" to HostState(host, sessions = listOf(session))),
             details = mapOf(SessionKey("host", "session") to SessionDetail(session)))
     }
@@ -86,10 +86,10 @@ class GatewayRepositorySafetyTest {
 
     private fun request(intent: String = "intent-one", message: String = "hello") = CommandRequest(
         "host", "client", "session", "prompt:intent:$intent", "prompt", intent,
-    ) { JSONObject().put("delivery", "start").put("message", message) }
+    ) { JSONObject().put("message", message) }
 
     private fun missing(): Nothing = throw GatewayHttpException(404, "operation_not_found", "missing")
-    private fun receipt(id: String, status: String) = JSONObject().put("commandId", id).put("status", status)
+    private fun receipt(id: String, status: String) = JSONObject().put("id", id).put("state", status).put("kind", "prompt")
 
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun forgetting_host_waits_for_command_and_removes_its_pending_record() = runTest {
@@ -109,7 +109,7 @@ class GatewayRepositorySafetyTest {
                 posts++
                 posted.complete(Unit)
                 releasePost.await()
-                return JSONObject().put("operation", receipt(body!!.getString("commandId"), "accepted")).toString()
+                return JSONObject().put("operation", receipt(body!!.getString("commandId"), "pending")).toString()
             }
             override suspend fun upload(url: String, credential: String, path: String, name: String,
                 bytes: ByteArray): String = error("unexpected upload")
@@ -171,7 +171,7 @@ class GatewayRepositorySafetyTest {
             post = { body ->
                 sent += body
                 if (sent.size == 1) throw IOException("response lost")
-                JSONObject().put("operation", receipt(body.getString("commandId"), "accepted"))
+                JSONObject().put("operation", receipt(body.getString("commandId"), "pending"))
             },
             lookup = { lookups++; if (lookups == 2) throw IOException("offline") else missing() },
         )
@@ -200,7 +200,7 @@ class GatewayRepositorySafetyTest {
     @Test fun detached_prompt_requests_lazy_runtime_start_without_a_generation() = runBlocking {
         val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
         val session = Session("session", "host", "/tmp", "Work", SessionStatus.Idle, "", false, null,
-            "2026-01-01", "2026-01-01", false, null, RuntimeExecution.Unknown)
+            "2026-01-01", "2026-01-01", false, null)
         val state = MutableStateFlow(AppState(hosts = mapOf("host" to HostState(host, sessions = listOf(session)))))
         val transport = RecordingTransport(::accepted)
         val dispatcher = CommandDispatcher(state, { host }, transport, MemoryOutbox(), HostCommandGate())
@@ -209,9 +209,9 @@ class GatewayRepositorySafetyTest {
 
         val posted = transport.posts.single()
         assertEquals("prompt", posted.getString("type"))
-        assertEquals("start", posted.getString("delivery"))
+        assertTrue(!posted.has("delivery"))
         assertEquals("hello", posted.getString("message"))
-        assertFalse(posted.has("expectedGeneration"))
+        assertFalse(posted.has("generation"))
     }
 
     @Test fun lookup_authentication_failure_never_posts_or_discards_a_command() = runBlocking {
@@ -262,7 +262,7 @@ class GatewayRepositorySafetyTest {
         storage.beforeClaim = { atClaim.complete(Unit); resumeClaim.await() }
         val sent = mutableListOf<String>()
         val transport = CommandTransport(
-            post = { body -> sent += body.getString("commandId"); JSONObject().put("operation", receipt(body.getString("commandId"), "accepted")) },
+            post = { body -> sent += body.getString("commandId"); JSONObject().put("operation", receipt(body.getString("commandId"), "pending")) },
             lookup = { missing() },
         )
         val recovering = async(Dispatchers.Default) { DurableCommandOutbox(storage).recover(old, transport) }
@@ -284,7 +284,7 @@ class GatewayRepositorySafetyTest {
         storage.afterClaim = { claimed.complete(Unit); resume.await() }
         val sent = mutableListOf<String>()
         val transport = CommandTransport(
-            post = { body -> sent += body.getString("commandId"); JSONObject().put("operation", receipt(body.getString("commandId"), "accepted")) },
+            post = { body -> sent += body.getString("commandId"); JSONObject().put("operation", receipt(body.getString("commandId"), "pending")) },
             lookup = { missing() },
         )
         val recovering = async(Dispatchers.Default) { DurableCommandOutbox(storage).recover(old, transport) }
@@ -300,7 +300,7 @@ class GatewayRepositorySafetyTest {
     @Test fun lost_stop_response_is_lookup_only() = runBlocking {
         val storage = MemoryOutbox()
         val request = CommandRequest("host", "client", "session", "stop", "stop_runtime") {
-            JSONObject().put("expectedGeneration", "run")
+            JSONObject().put("generation", "run")
         }
         var posts = 0
         val transport = CommandTransport(post = { posts++; throw IOException("response lost") }, lookup = { missing() })
@@ -316,7 +316,7 @@ class GatewayRepositorySafetyTest {
         val state = MutableStateFlow(runtimeState(host, "run-a"))
         val storage = MemoryOutbox()
         val transport = RecordingTransport { body ->
-            if (body.getString("expectedGeneration") == "run-a") throw IOException("response lost")
+            if (body.getString("generation") == "run-a") throw IOException("response lost")
             accepted(body)
         }
         val dispatcher = CommandDispatcher(state, { host }, transport, storage, HostCommandGate())
@@ -330,7 +330,7 @@ class GatewayRepositorySafetyTest {
         state.value = runtimeState(host, "run-b")
         dispatcher.command("host", "session", "stop")
 
-        assertEquals(listOf("run-a", "run-b"), transport.posts.map { it.getString("expectedGeneration") })
+        assertEquals(listOf("run-a", "run-b"), transport.posts.map { it.getString("generation") })
         val records = storage.records()
         assertEquals(2, records.size)
         assertNotEquals(records[0].key, records[1].key)
@@ -347,7 +347,7 @@ class GatewayRepositorySafetyTest {
             action(dispatcher)
             state.value = runtimeState(host, "run-b")
             action(dispatcher)
-            assertEquals(listOf("run-a", "run-b"), transport.posts.map { it.getString("expectedGeneration") })
+            assertEquals(listOf("run-a", "run-b"), transport.posts.map { it.getString("generation") })
             assertEquals(2, storage.records().map { it.key }.toSet().size)
         }
 
@@ -367,7 +367,7 @@ class GatewayRepositorySafetyTest {
         dispatcher.setThinkingLevel("host", "session", "high")
         dispatcher.command("host", "session", "stop")
 
-        assertEquals(listOf("run-a", "run-a", "run-a"), transport.posts.map { it.getString("expectedGeneration") })
+        assertEquals(listOf("run-a", "run-a", "run-a"), transport.posts.map { it.getString("generation") })
     }
 
     @Test fun stop_key_and_payload_capture_the_same_generation() = runBlocking {
@@ -380,10 +380,10 @@ class GatewayRepositorySafetyTest {
 
         dispatcher.command("host", "session", "stop")
 
-        assertEquals("run-a", transport.posts.single().getString("expectedGeneration"))
+        assertEquals("run-a", transport.posts.single().getString("generation"))
         val oldKey = storage.records().single().key
         dispatcher.command("host", "session", "stop")
-        assertEquals("run-b", transport.posts.last().getString("expectedGeneration"))
+        assertEquals("run-b", transport.posts.last().getString("generation"))
         assertNotEquals(oldKey, storage.records().last().key)
     }
 

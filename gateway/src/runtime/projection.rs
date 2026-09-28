@@ -4,7 +4,7 @@ impl SessionController {
     pub(super) async fn apply_frame(self: &Arc<Self>, generation: &str, frame: Value) {
         let kind = omp::string(&frame, "type").to_owned();
         if kind == "prompt_result" {
-            let (session_id, key, status, error, projection) = {
+            let (session_id, key, status, error) = {
                 let mut state = self.state.lock().await;
                 if state
                     .runtime
@@ -29,19 +29,14 @@ impl SessionController {
                     "error" => "failed",
                     _ => "outcome_unknown",
                 };
+                self.publish_state(&mut state);
                 (
                     state.session.id.clone(),
                     key,
                     status,
                     frame.get("error").cloned(),
-                    state.capture_runtime().clone(),
                 )
             };
-            self.publish(
-                &session_id,
-                "v2.runtime.updated",
-                json!({"runtime":projection}),
-            );
             if let Some((client_id, command_id)) = key {
                 let controller = self.clone();
                 let generation = generation.to_owned();
@@ -58,7 +53,7 @@ impl SessionController {
                         .advance(
                             &mut receipt,
                             status,
-                            Some(json!({"runtimeGeneration":generation})),
+                            Some(json!({"generation":generation})),
                             error,
                         )
                         .await;
@@ -74,7 +69,6 @@ impl SessionController {
         {
             return;
         }
-        let id = state.session.id.clone();
         let mut changed_item = None;
         let mut changed_runtime = false;
         match kind.as_str() {
@@ -266,11 +260,7 @@ impl SessionController {
         }
         if changed_runtime {
             state.update_work_timing(false);
-            self.publish(
-                &id,
-                "v2.runtime.updated",
-                json!({"runtime":state.capture_runtime()}),
-            );
+            self.publish_state(&mut state);
         }
         let schedule_flush = !state.display_flush_scheduled
             && (!state.dirty_messages.is_empty() || !state.removed_messages.is_empty());
@@ -288,8 +278,9 @@ impl SessionController {
         }
     }
     async fn flush_display(&self, generation: &str) {
+        // Keep publication ordered with exit/reset and concurrent timeline mutations.
+        let mut state = self.state.lock().await;
         let (session_id, items, removed) = {
-            let mut state = self.state.lock().await;
             if state
                 .runtime
                 .as_ref()
@@ -309,22 +300,24 @@ impl SessionController {
             (state.session.id.clone(), items, removed)
         };
         if !removed.is_empty() {
-            self.publish(
-                &session_id,
-                "v2.timeline.patch",
-                json!({"items":[],"removedIds":removed}),
-            );
+            self.bus.publish(ServerEvent::Timeline {
+                session_id: session_id.clone(),
+                upsert: vec![],
+                remove: removed,
+                reset: false,
+            });
         }
         let mut chunk = Vec::new();
         let mut bytes = 0;
         for item in items {
             let item_bytes = serde_json::to_vec(&item).map_or(LIVE_PATCH_LIMIT, |v| v.len());
             if bytes + item_bytes > LIVE_PATCH_LIMIT && !chunk.is_empty() {
-                self.publish(
-                    &session_id,
-                    "v2.timeline.patch",
-                    json!({"items":chunk,"removedIds":[]}),
-                );
+                self.bus.publish(ServerEvent::Timeline {
+                    session_id: session_id.clone(),
+                    upsert: chunk,
+                    remove: vec![],
+                    reset: false,
+                });
                 chunk = Vec::new();
                 bytes = 0;
             }
@@ -332,16 +325,17 @@ impl SessionController {
             chunk.push(item);
         }
         if !chunk.is_empty() {
-            self.publish(
-                &session_id,
-                "v2.timeline.patch",
-                json!({"items":chunk,"removedIds":[]}),
-            );
+            self.bus.publish(ServerEvent::Timeline {
+                session_id: session_id.clone(),
+                upsert: chunk,
+                remove: vec![],
+                reset: false,
+            });
         }
     }
-    pub(super) async fn apply_exit(self: &Arc<Self>, generation: &str, reason: Option<String>) {
+    pub(super) async fn apply_exit(self: &Arc<Self>, generation: &str, _reason: Option<String>) {
+        let mut state = self.state.lock().await;
         let session_id = {
-            let mut state = self.state.lock().await;
             if state
                 .runtime
                 .as_ref()
@@ -358,13 +352,15 @@ impl SessionController {
             state.dirty_messages.clear();
             state.removed_messages.clear();
             state.display_flush_scheduled = false;
+            self.publish_state(&mut state);
+            self.bus.publish(ServerEvent::Timeline {
+                session_id: state.session.id.clone(),
+                upsert: vec![],
+                remove: vec![],
+                reset: true,
+            });
             state.session.id.clone()
         };
-        self.publish(
-            &session_id,
-            "v2.runtime.exited",
-            json!({"generation":generation,"reason":reason}),
-        );
         let cleanup_session = session_id.clone();
         let cleanup_generation = generation.to_owned();
         let cleanup = self
@@ -380,6 +376,20 @@ impl SessionController {
         }
         if let Ok((_, Err(err))) = cleanup {
             eprintln!("Could not release confirmed runtime lease: {err}");
+        }
+        if let Ok(operations) = self
+            .store
+            .run(move |store| store.recent_operations(&session_id, 20))
+            .await
+        {
+            for receipt in operations.iter().filter(|o| {
+                o.runtime_generation.as_deref() == Some(generation) && o.status == "outcome_unknown"
+            }) {
+                self.bus.publish(ServerEvent::Operation {
+                    session_id: receipt.session_id.clone(),
+                    operation: OperationDto::from(receipt),
+                });
+            }
         }
     }
     pub(super) async fn stop_on_shutdown(self: &Arc<Self>) {

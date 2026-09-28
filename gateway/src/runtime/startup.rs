@@ -1,8 +1,8 @@
-use super::{RuntimeInstance, SessionController, model_info};
+use super::{RuntimeInstance, ServerEvent, SessionController, model_info};
 use crate::{
+    domain::RuntimeSnapshot,
     omp::{self, Output, Runtime},
     storage,
-    v2_model::RuntimeSnapshot,
 };
 use anyhow::{Context, Result, ensure};
 use serde_json::json;
@@ -82,12 +82,13 @@ impl SessionController {
         }
         {
             let mut state = self.state.lock().await;
-            self.publish(
-                &session.id,
-                "v2.runtime.updated",
-                json!({"runtime":state.capture_runtime()}),
-            );
-            self.publish(&session.id, "v2.timeline.reset", json!({}));
+            self.publish_state(&mut state);
+            self.bus.publish(ServerEvent::Timeline {
+                session_id: session.id.clone(),
+                upsert: vec![],
+                remove: vec![],
+                reset: true,
+            });
         }
         let controller = self.clone();
         let event_generation = generation.clone();
@@ -216,20 +217,8 @@ impl SessionController {
             return Err(err);
         }
         {
-            let state = self.state.lock().await;
-            self.publish(
-                &session.id,
-                "v2.metadata.updated",
-                json!({"session":state.session}),
-            );
-        }
-        {
             let mut state = self.state.lock().await;
-            self.publish(
-                &session.id,
-                "v2.runtime.updated",
-                json!({"runtime":state.capture_runtime()}),
-            );
+            self.publish_state(&mut state);
         }
         Ok((generation, runtime))
     }

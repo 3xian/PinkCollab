@@ -1,7 +1,6 @@
 package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.ConnectionState
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
 
@@ -28,8 +27,8 @@ internal fun sessionCardStatus(session: Session, connection: ConnectionState?): 
         session.status == SessionStatus.Stopping -> SessionCardStatus.Stopping
         !session.runtimeAttached -> SessionCardStatus.Inactive
         session.attention != null || session.needsAttention || session.status == SessionStatus.NeedsInput -> SessionCardStatus.NeedsInput
-        session.runtimeExecution == RuntimeExecution.Active -> SessionCardStatus.Working
-        session.runtimeExecution == RuntimeExecution.Quiescent -> SessionCardStatus.Ready
+        session.status == SessionStatus.Running -> SessionCardStatus.Working
+        session.status == SessionStatus.Idle -> SessionCardStatus.Ready
         else -> SessionCardStatus.Unknown
     }
 }

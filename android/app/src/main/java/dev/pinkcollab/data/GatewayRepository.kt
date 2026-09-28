@@ -69,8 +69,8 @@ internal class GatewayRepository(
 
     suspend fun pair(url: String, token: String) {
         val base = api.validateURL(url)
-        val response = JSONObject(api.request(base, null, "/api/v2/pair", "POST", JSONObject().put("token", token.trim()).put("name", "PinkCollab Android")))
-        require(response.getInt("protocolVersion") == 2) { "Upgrade PinkCollab to connect to this Gateway" }
+        val response = JSONObject(api.request(base, null, "/api/v3/pair", "POST", JSONObject().put("token", token.trim()).put("name", "PinkCollab Android")))
+        require(response.getInt("protocolVersion") == 3) { "Upgrade PinkCollab to connect to this Gateway" }
         val paired = PairedHost(response.getJSONObject("host").host(), base, response.getString("credential"), response.getString("clientId"))
         pairedHosts.pair(paired)
     }
@@ -120,25 +120,18 @@ internal class GatewayRepository(
 
     private fun event(hostId: String, frame: JSONObject) {
         val reduction = updateAtomically(mutable) { app ->
-            val reduced = reduceV2(app, hostId, frame, System.currentTimeMillis())
+            val reduced = reduceProtocol(app, hostId, frame, System.currentTimeMillis())
             reduced.state to reduced
         }
-        if (frame.optString("type") == "snapshot" && frame.optString("resource") == "host/sessions") {
+        if (frame.optString("type") == "host_snapshot") {
             initialSyncTimeouts.remove(hostId)?.cancel()
         }
         reduction.effects.forEach { effect ->
             when (effect) {
-                is GatewayEffect.ResyncResource -> {
-                    if (effect.resource == "host/sessions") state.value.hosts[effect.hostId]?.paired?.let(::connect)
-                    else if (effect.resource.startsWith("session/")) {
-                        val sessionId = effect.resource.removePrefix("session/")
-                        if (connections.isDesired(effect.hostId, sessionId)) connections.subscribe(effect.hostId, sessionId)
-                    }
-                }
                 is GatewayEffect.LoadHistory -> {
-                    val subscriptionId = state.value.details[effect.session]?.subscriptionId
+                    val snapshotToken = state.value.details[effect.session]?.snapshotToken
                     scope.launch {
-                        runCatching { sessions.loadHistory(effect.session.hostId, effect.session.sessionId, subscriptionId) }
+                        runCatching { sessions.loadHistory(effect.session.hostId, effect.session.sessionId, snapshotToken) }
                             .onFailure { reportError(it.message ?: "History unavailable") }
                     }
                 }
@@ -147,10 +140,10 @@ internal class GatewayRepository(
     }
 
     suspend fun refreshHost(id: String) {
-        val before = state.value.hosts[id]?.subscriptionId
+        val before = state.value.hosts[id]?.snapshotToken
         connect(paired(id))
         awaitSnapshot(state, "Timed out waiting for the host snapshot") {
-            it.hosts[id]?.subscriptionId?.let { subscription -> subscription != before } == true
+            it.hosts[id]?.snapshotToken?.let { subscription -> subscription != before } == true
         }
     }
 

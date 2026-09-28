@@ -1,10 +1,11 @@
 #![cfg(feature = "test-fixtures")]
 
 use pinkcollab_gateway::{
-    events::Bus,
+    domain::SessionRecord,
+    events::{Bus, Event},
+    protocol::ServerEvent,
+    runtime::{Command, SessionDirectory},
     storage::Store,
-    v2_model::SessionRecord,
-    v2_runtime::{Command, Delivery, SessionDirectory},
     workspace::Browser,
 };
 use std::{sync::Arc, time::Duration};
@@ -64,11 +65,23 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
         .runtime
         .unwrap()
         .generation;
+    // A delayed create publication must carry the runtime already started by another observer.
+    let mut created_events = bus.subscribe();
+    directory
+        .publish_created(&store.v2_session("session").unwrap().unwrap())
+        .await;
+    let created = created_events.try_recv().unwrap();
+    let Event::Update { event, .. } = created else {
+        panic!("expected update")
+    };
+    let ServerEvent::SessionUpsert { summary, .. } = event.as_ref() else {
+        panic!("expected upsert")
+    };
+    assert_eq!(summary.runtime.as_ref().unwrap().generation, generation);
     let first = Command::Prompt {
-        delivery: Delivery::Start,
         message: "First task".into(),
         file_ids: vec![],
-        expected_generation: Some(generation.clone()),
+        generation: Some(generation.clone()),
     };
     submit(&directory, "first", first.clone()).await;
     assert_eq!(
@@ -79,10 +92,9 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
         &directory,
         "second",
         Command::Prompt {
-            delivery: Delivery::Start,
             message: "  最新消息\n继续修复模型选择器  ".into(),
             file_ids: vec![],
-            expected_generation: Some(generation.clone()),
+            generation: Some(generation.clone()),
         },
     )
     .await;
@@ -92,14 +104,11 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
         .unwrap()
         .unwrap()
         .metadata_revision;
-    assert_eq!(
-        directory.list().await.unwrap()[0]["session"]["title"],
-        expected
-    );
+    assert_eq!(directory.list().await.unwrap()[0].session.title, expected);
     let (page, has_more) = directory.list_page(None, 10).await.unwrap();
     assert!(!has_more);
-    assert_eq!(page[0]["session"]["title"], expected);
-    assert_eq!(page[0]["runtime"]["generation"], generation);
+    assert_eq!(page[0].session.title, expected);
+    assert_eq!(page[0].runtime.as_ref().unwrap().generation, generation);
     // An older command replay must not restore its earlier title.
     submit(&directory, "first", first).await;
     assert_eq!(
@@ -120,23 +129,14 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
             .unwrap()
             .is_none()
     );
-    let mut list_updated = false;
-    let mut detail_updated = false;
-    while let Ok(event) = events.try_recv() {
-        if event.payload["changes"][0]["value"]["session"]["title"] == expected {
-            list_updated |= event.payload["resource"] == "host/sessions";
-            detail_updated |= event.payload["resource"] == "session/session";
-        }
-    }
-    assert!(list_updated && detail_updated);
-    submit(
-        &directory,
-        "stop",
-        Command::StopRuntime {
-            expected_generation: generation,
-        },
-    )
-    .await;
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
+            let Event::Update { event, .. } = event else { return false };
+            matches!(event.as_ref(), ServerEvent::SessionState { summary, .. }
+                if summary.session.title == expected && summary.runtime.as_ref().is_some_and(|runtime| runtime.generation == generation))
+        })
+    );
+    submit(&directory, "stop", Command::StopRuntime { generation }).await;
     let saved = store.v2_session("session").unwrap().unwrap();
     std::fs::write(
         saved.engine_session_ref.unwrap(),
@@ -163,14 +163,17 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
             .iter()
             .any(|operation| operation.command_id == "stop" && operation.status == "succeeded")
     );
-    let expected_summary = serde_json::json!({"session":view.session,"runtime":null});
+    let expected_summary = serde_json::json!({"session":pinkcollab_gateway::protocol::SessionDto::from(&view.session),"runtime":null});
     assert_eq!(
-        detached.list().await.unwrap(),
-        vec![expected_summary.clone()]
+        serde_json::to_value(detached.list().await.unwrap()).unwrap(),
+        serde_json::json!([expected_summary.clone()])
     );
     let (page, has_more) = detached.list_page(None, 10).await.unwrap();
     assert!(!has_more);
-    assert_eq!(page, vec![expected_summary]);
+    assert_eq!(
+        serde_json::to_value(page).unwrap(),
+        serde_json::json!([expected_summary])
+    );
     assert!(detached.view("missing").await.unwrap().is_none());
 }
 

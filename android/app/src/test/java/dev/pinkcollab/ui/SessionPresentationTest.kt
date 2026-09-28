@@ -6,7 +6,6 @@ import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.PairedHost
-import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SessionStatus
@@ -20,7 +19,7 @@ class SessionPresentationTest {
     private val paired = PairedHost(Host("host", "Desktop", "windows", "", ""), "https://host", "secret", "client")
     private val online = HostState(paired, connection = ConnectionState.Online(1L))
     private val session = Session("session", "host", "/work", "Work", SessionStatus.Running, "Working",
-        false, null, "", "", true, "generation", RuntimeExecution.Active)
+        false, null, "", "", true, "generation")
     private val draft = SessionDraft(text = "hello")
     private fun controls(
         session: Session = this.session,
@@ -56,17 +55,17 @@ class SessionPresentationTest {
         assertFalse(controls(session = session.copy(status = SessionStatus.Starting)).canChooseModel)
         assertFalse(controls(session = session.copy(status = SessionStatus.Stopping)).canChooseModel)
         assertFalse(controls(session = session.copy(status = SessionStatus.Stopping)).inputEnabled)
-        assertFalse(controls(session = session.copy(runtimeExecution = RuntimeExecution.Unknown)).inputEnabled)
+        assertFalse(controls(session = session.copy(status = SessionStatus.Starting)).inputEnabled)
     }
 
     @Test fun model_picker_can_start_a_new_runtime_after_exit() {
         val exited = session.copy(status = SessionStatus.Idle, runtimeAttached = false,
-            runtimeGeneration = null, runtimeExecution = RuntimeExecution.Unknown)
+            generation = null)
         assertTrue(controls(session = exited).canChooseModel)
         assertFalse(controls(session = exited).attached)
         assertFalse(controls(session = exited, host = online.copy(connection = ConnectionState.Offline())).canChooseModel)
         assertFalse(controls(session = exited.copy(status = SessionStatus.Starting)).canChooseModel)
-        assertTrue(controls(session = session.copy(runtimeGeneration = "new-generation")).canChooseModel)
+        assertTrue(controls(session = session.copy(generation = "new-generation")).canChooseModel)
     }
 
 }

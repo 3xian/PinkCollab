@@ -47,7 +47,7 @@ internal interface CommandOutboxStorage {
 
 /** Each claim is one durable, conditional SQLite update. A deleted draft cannot be posted later. */
 internal class SqliteCommandOutboxStorage(context: Context) : CommandOutboxStorage {
-    private val helper = object : SQLiteOpenHelper(context.applicationContext, "command-outbox.db", null, 1) {
+    private val helper = object : SQLiteOpenHelper(context.applicationContext, "command-outbox.db", null, 2) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE commands (
                 key TEXT PRIMARY KEY NOT NULL, host_id TEXT NOT NULL, client_id TEXT NOT NULL,
@@ -57,8 +57,13 @@ internal class SqliteCommandOutboxStorage(context: Context) : CommandOutboxStora
             db.execSQL("CREATE INDEX commands_session ON commands(host_id,client_id,session_id,type)")
         }
 
-        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            // Protocol upgrade: unsent intents have no side effect; sent commands may only be looked up.
+            db.execSQL("DELETE FROM commands WHERE state='PREPARED'")
+            db.execSQL("UPDATE commands SET state='LOOKUP_ONLY'")
+        }
     }
+    // Retain the existing keystore identity to decrypt receipts left by the upgrade.
     private val alias = "pinkcollab.command-outbox.v2"
 
 
@@ -246,8 +251,8 @@ internal class DurableCommandOutbox(private val storage: CommandOutboxStorage) {
             val current = storage.find(saved.key)?.takeIf { it.id == saved.id } ?: continue
             val receipt = lookupReceipt(lookup, current.id)
                 ?: throw IOException("Earlier prompt ${current.id} is unconfirmed. Retry that draft before sending another prompt.")
-            val status = receipt.getString("status")
-            if (status == "outcome_unknown") {
+            val status = receipt.getString("state")
+            if (status == "unknown") {
                 storage.transition(current.key, current.id, CommandState.POSTED, CommandState.LOOKUP_ONLY)
                 throw IOException("Earlier prompt ${current.id} has an unconfirmed outcome")
             }
@@ -256,11 +261,11 @@ internal class DurableCommandOutbox(private val storage: CommandOutboxStorage) {
     }
 
     private suspend fun settle(pending: PendingCommand, receipt: JSONObject, allowTerminalFailure: Boolean = false) {
-        require(receipt.getString("commandId") == pending.id) { "Gateway returned a different command ID" }
-        when (receipt.getString("status")) {
+        require(receipt.getString("id") == pending.id) { "Gateway returned a different command ID" }
+        when (receipt.getString("state")) {
             "succeeded", "failed", "cancelled" -> storage.remove(pending.key, pending.id)
-            "outcome_unknown" -> storage.transition(pending.key, pending.id, CommandState.POSTED, CommandState.LOOKUP_ONLY)
-            "accepted", "dispatching", "running" -> Unit
+            "unknown" -> storage.transition(pending.key, pending.id, CommandState.POSTED, CommandState.LOOKUP_ONLY)
+            "pending" -> Unit
             else -> throw IOException("Unknown command receipt status")
         }
         if (!allowTerminalFailure) checkReceipt(receipt, pending.id)
@@ -276,12 +281,12 @@ private suspend fun lookupReceipt(lookup: suspend (String) -> JSONObject, id: St
 }
 
 private fun checkReceipt(receipt: JSONObject, id: String) {
-    require(receipt.getString("commandId") == id) { "Gateway returned a different command ID" }
-    when (receipt.getString("status")) {
+    require(receipt.getString("id") == id) { "Gateway returned a different command ID" }
+    when (receipt.getString("state")) {
         "failed", "cancelled" -> throw TerminalCommandFailure(receipt.optJSONObject("error")?.optString("message")
-            ?.takeIf { it.isNotBlank() } ?: "Command ${receipt.getString("status")}")
-        "outcome_unknown" -> throw IOException("Command $id has an unconfirmed outcome; inspect the session before sending another command")
-        "accepted", "dispatching", "running", "succeeded" -> Unit
+            ?.takeIf { it.isNotBlank() } ?: "Command ${receipt.getString("state")}")
+        "unknown" -> throw IOException("Command $id has an unconfirmed outcome; inspect the session before sending another command")
+        "pending", "succeeded" -> Unit
         else -> throw IOException("Unknown command receipt status")
     }
 }

@@ -1,7 +1,6 @@
 use super::SessionController;
-use crate::v2_model::SessionRecord;
+use crate::domain::SessionRecord;
 use anyhow::Result;
-use serde_json::json;
 
 impl SessionController {
     pub(super) async fn update_prompt_title(&self, generation: &str, message: &str) -> Result<()> {
@@ -36,11 +35,7 @@ impl SessionController {
         // Persistence validates the generation; a committed title outlives that runtime.
         if saved.metadata_revision > state.session.metadata_revision {
             state.session = saved;
-            self.publish(
-                &state.session.id,
-                "v2.metadata.updated",
-                json!({"session":state.session,"historyChanged":false}),
-            );
+            self.publish_state(&mut state);
         }
     }
 }
@@ -58,7 +53,7 @@ fn prompt_prefix(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{events::Bus, storage::Store, v2_runtime::ControllerState, workspace::Browser};
+    use crate::{events::Bus, runtime::ControllerState, storage::Store, workspace::Browser};
     use std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -136,18 +131,19 @@ mod tests {
         assert_eq!(view.session.title, "Latest prompt");
         assert_eq!(view.session.metadata_revision, latest.metadata_revision);
         let detail = events.try_recv().unwrap();
-        assert_eq!(detail.payload["resource"], "session/session");
-        assert_eq!(detail.payload["changes"][0]["type"], "v2.metadata.updated");
-        assert_eq!(
-            detail.payload["changes"][0]["value"],
-            json!({"session":latest,"historyChanged":false})
-        );
-        let summary = events.try_recv().unwrap();
-        assert_eq!(summary.payload["resource"], "host/sessions");
-        assert_eq!(summary.payload["changes"][0]["type"], "summary.changed");
-        assert_eq!(
-            summary.payload["changes"][0]["value"],
-            detail.payload["changes"][0]["value"]
+        let crate::events::Event::Update { event, .. } = detail else {
+            panic!("expected update")
+        };
+        let crate::protocol::ServerEvent::SessionState { summary, .. } = event.as_ref() else {
+            panic!("expected session state")
+        };
+        assert_eq!(summary.session.title, "Latest prompt");
+        assert!(summary.runtime.is_none());
+        assert!(
+            serde_json::to_value(&summary.session)
+                .unwrap()
+                .get("metadataRevision")
+                .is_none()
         );
         controller.apply_prompt_title(older).await;
         controller.apply_prompt_title(latest.clone()).await;

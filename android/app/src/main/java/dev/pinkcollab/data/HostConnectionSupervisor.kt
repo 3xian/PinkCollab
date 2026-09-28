@@ -88,20 +88,20 @@ internal class HostConnectionSupervisor(
     }
 
     private inner class HostConnection(private val paired: PairedHost) {
-        private val generation = AtomicLong()
+        private val connectionGeneration = AtomicLong()
         private var job: Job? = null
         private var socket: WebSocket? = null
 
         fun subscribe(sessionId: String) {
-            socket?.send(JSONObject().put("type", "subscribe").put("resource", "session/$sessionId").toString())
+            socket?.send(JSONObject().put("type", "subscribe").put("sessionId", sessionId).toString())
         }
 
         fun unsubscribe(sessionId: String) {
-            socket?.send(JSONObject().put("type", "unsubscribe").put("resource", "session/$sessionId").toString())
+            socket?.send(JSONObject().put("type", "unsubscribe").put("sessionId", sessionId).toString())
         }
 
         fun start() {
-            val currentGeneration = generation.incrementAndGet()
+            val currentGeneration = connectionGeneration.incrementAndGet()
             job?.cancel()
             job = scope.launch {
                 var failedAttempts = 0
@@ -128,7 +128,7 @@ internal class HostConnectionSupervisor(
         }
 
         fun stop() {
-            generation.incrementAndGet()
+            connectionGeneration.incrementAndGet()
             socket?.cancel()
             socket = null
             job?.cancel()
@@ -144,14 +144,14 @@ internal class HostConnectionSupervisor(
             }
         }
 
-        private fun isCurrent(expectedGeneration: Long): Boolean =
+        private fun isCurrent(generation: Long): Boolean =
             synchronized(lock) {
-                generation.get() == expectedGeneration && connections[paired.host.id] === this
+                connectionGeneration.get() == generation && connections[paired.host.id] === this
             }
 
-        private fun emitState(expectedGeneration: Long, state: ConnectionState) {
+        private fun emitState(generation: Long, state: ConnectionState) {
             synchronized(lock) {
-                if (generation.get() == expectedGeneration && connections[paired.host.id] === this) {
+                if (connectionGeneration.get() == generation && connections[paired.host.id] === this) {
                     if (state == ConnectionState.Reconnecting || state == ConnectionState.AuthenticationRequired ||
                         state == ConnectionState.UpgradeRequired) invalidateSubscriptions(paired.host.id)
                     onState(paired.host.id, state)
@@ -159,32 +159,32 @@ internal class HostConnectionSupervisor(
             }
         }
 
-        private fun handleFrame(expectedGeneration: Long, frame: JSONObject) {
+        private fun handleFrame(generation: Long, frame: JSONObject) {
             synchronized(lock) {
-                if (generation.get() == expectedGeneration && connections[paired.host.id] === this) {
-                    val resource = frame.optString("resource")
-                    if (resource.startsWith("session/") &&
-                        desiredSessions[paired.host.id]?.contains(resource.removePrefix("session/")) != true) return
+                if (connectionGeneration.get() == generation && connections[paired.host.id] === this) {
+                    val sessionId = frame.optString("sessionId")
+                    if (frame.optString("type") in setOf("session_snapshot", "timeline", "operation") &&
+                        desiredSessions[paired.host.id]?.contains(sessionId) != true) return
                     onFrame(paired.host.id, frame)
                 }
             }
         }
 
-        private suspend fun awaitSocket(expectedGeneration: Long, initialAttempt: Boolean): Disconnect =
+        private suspend fun awaitSocket(generation: Long, initialAttempt: Boolean): Disconnect =
             suspendCancellableCoroutine { continuation ->
                 val hadSnapshot = AtomicBoolean()
                 val socket = api.client.newWebSocket(
                     Request.Builder()
-                        .url(paired.url + "/api/v2/events")
+                        .url(paired.url + "/api/v3/events")
                         .header("Authorization", "Bearer ${paired.credential}")
                         .build(),
                     object : WebSocketListener() {
                         override fun onOpen(webSocket: WebSocket, response: Response) {
-                            if (!isCurrent(expectedGeneration)) {
+                            if (!isCurrent(generation)) {
                                 webSocket.cancel()
                                 return
                             }
-                            if (initialAttempt) emitState(expectedGeneration, ConnectionState.Synchronizing)
+                            if (initialAttempt) emitState(generation, ConnectionState.Synchronizing)
                             synchronized(lock) {
                                 socket = webSocket
                                 desiredSessions[paired.host.id]?.forEach(::subscribe)
@@ -192,11 +192,11 @@ internal class HostConnectionSupervisor(
                         }
 
                         override fun onMessage(webSocket: WebSocket, text: String) {
-                            if (!isCurrent(expectedGeneration)) return
+                            if (!isCurrent(generation)) return
                             runCatching {
                                 val frame = JSONObject(text)
-                                handleFrame(expectedGeneration, frame)
-                                if (frame.getString("type") == "snapshot") hadSnapshot.set(true)
+                                handleFrame(generation, frame)
+                                if (frame.getString("type") == "host_snapshot") hadSnapshot.set(true)
                             }.onFailure { webSocket.close(1002, "Invalid protocol frame") }
                         }
 
