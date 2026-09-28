@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 
 impl SessionDirectory {
     pub fn new(

@@ -97,14 +97,21 @@ fn main() {
         }
         spawn_lingering_child(&cwd);
     }
-    let log = std::env::current_dir()
-        .unwrap()
-        .join("fixture-session.jsonl");
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log)
-        .unwrap();
+    let log =
+        std::env::current_dir()
+            .unwrap()
+            .join(if args.iter().any(|arg| arg == "--lazy-history") {
+                format!("fixture-session-{}.jsonl", std::process::id())
+            } else {
+                "fixture-session.jsonl".into()
+            });
+    if !args.iter().any(|arg| arg == "--lazy-history") {
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .unwrap();
+    }
     let mut parent = String::new();
     let all_models = [
         json!({"provider":"fixture","id":"fast","name":"Fixture Fast"}),

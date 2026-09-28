@@ -367,6 +367,56 @@ fn v2_migration_keeps_identity_authorization_and_engine_mapping() {
 }
 
 #[test]
+fn v3_migration_protects_legacy_and_aborted_prompt_history() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(Store::open(dir.path()).unwrap());
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    db.execute_batch(
+        "ALTER TABLE session_records DROP COLUMN history_may_have_been_written;
+         PRAGMA user_version=2;
+         INSERT INTO session_records
+             (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref)
+         VALUES
+             ('legacy','host','/work','Legacy',1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','legacy.jsonl'),
+             ('empty','host','/work','Empty',2,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','empty.jsonl'),
+             ('aborted','host','/work','Aborted',2,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','aborted.jsonl');
+         INSERT INTO operation_records
+             (client_id,session_id,command_id,command_type,request_fingerprint,status,created_at,updated_at)
+         VALUES
+             ('phone','aborted','prompt','prompt','fingerprint','cancelled','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');",
+    )
+    .unwrap();
+    drop(db);
+
+    let store = Store::open(dir.path()).unwrap();
+    assert!(
+        !store
+            .reference_is_unwritten("legacy", "legacy.jsonl")
+            .unwrap()
+    );
+    assert!(
+        !store
+            .reference_is_unwritten("aborted", "aborted.jsonl")
+            .unwrap()
+    );
+    assert!(
+        !store
+            .replace_unwritten_engine_ref("aborted", 2, "aborted.jsonl", "new.jsonl")
+            .unwrap()
+    );
+    assert!(
+        store
+            .reference_is_unwritten("empty", "empty.jsonl")
+            .unwrap()
+    );
+    assert!(
+        store
+            .replace_unwritten_engine_ref("empty", 2, "empty.jsonl", "new.jsonl")
+            .unwrap()
+    );
+}
+
+#[test]
 fn failed_v2_migration_rolls_back_and_keeps_a_consistent_backup() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("pinkcollab.db");

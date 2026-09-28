@@ -3,13 +3,14 @@ package dev.pinkcollab.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ChevronLeft
-import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.QrCodeScanner
@@ -18,6 +19,8 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -80,8 +83,8 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
         val target = sessionKeys.indexOf(selectedSession)
         if (target >= 0 && target != pagerState.currentPage) pagerState.scrollToPage(target)
     }
-    LaunchedEffect(pagerState.currentPage, sessionKeys) {
-        sessionKeys.getOrNull(pagerState.currentPage)?.let(onSessionSelected)
+    LaunchedEffect(pagerState.settledPage, sessionKeys) {
+        sessionKeys.getOrNull(pagerState.settledPage)?.let(onSessionSelected)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -95,9 +98,8 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
         )
         TasksPagerBar(
             sessions = sessions,
-            hosts = app.hosts,
             currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
-            selectPage = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+            selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
         )
         if (sessions.isEmpty()) {
             Box(Modifier.weight(1f)) {
@@ -126,7 +128,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
         } else {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("sessionTimelinePager"),
                 beyondViewportPageCount = 1,
                 pageSpacing = 8.dp,
                 key = { pagerKeys[it] },
@@ -377,76 +379,82 @@ private fun TopBarPill(icon: ImageVector, label: String, onClick: () -> Unit) {
 @Composable
 private fun TasksPagerBar(
     sessions: List<Session>,
-    hosts: Map<String, HostState>,
     currentPage: Int,
     selectPage: (Int) -> Unit,
 ) {
-    val current = sessions.getOrNull(currentPage) ?: return
+    if (sessions.isEmpty()) return
+    val listState = rememberLazyListState()
+    val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }
+    val cardWidth = 184.dp
+    val startPadding = 12.dp
 
-    Box(
+    BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .height(76.dp)
+            .height(64.dp)
             .zIndex(1f),
     ) {
-        Row(
-            Modifier
-                .matchParentSize()
-                .background(Base0.copy(alpha = 0.90f))
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+        val centerOffset = ((maxWidth - cardWidth) / 2).coerceAtLeast(0.dp)
+        val scrollOffsetPx = with(LocalDensity.current) { (startPadding - centerOffset).roundToPx() }
+        LaunchedEffect(currentPage, sessionKeys, scrollOffsetPx) {
+            // No leading spacer: the first card stays at the left edge.
+            listState.animateScrollToItem(currentPage, scrollOffset = scrollOffsetPx)
+        }
+        LazyRow(
+            state = listState,
+            modifier = Modifier.matchParentSize().background(Base0.copy(alpha = 0.90f)).testTag("sessionCards"),
+            contentPadding = PaddingValues(start = startPadding, end = centerOffset.coerceAtLeast(startPadding), top = 5.dp, bottom = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TaskNeighborPreview(
-                session = sessions.getOrNull(currentPage - 1),
-                direction = -1,
-                edgeLabel = "Newest",
-                modifier = Modifier.weight(0.82f),
-                onClick = { selectPage(currentPage - 1) },
-            )
-            Spacer(Modifier.width(6.dp))
-            Column(
-                Modifier
-                    .weight(1.36f)
-                    .fillMaxHeight()
-                    .glassPanel(RoundedCornerShape(16.dp), fillAlpha = 0.13f, borderAlpha = 0.24f)
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text(
-                    current.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).background(statusColor(current.status), CircleShape))
-                    Spacer(Modifier.width(6.dp))
+            itemsIndexed(sessions, key = { _, session -> SessionKey(session.hostId, session.id).pagerKey() }) { index, session ->
+                val selected = index == currentPage
+                val fileName = session.cwd.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { session.cwd }
+                val shape = RoundedCornerShape(16.dp)
+                Column(
+                    Modifier
+                        .width(cardWidth)
+                        .testTag("sessionCard:${session.id}")
+                        .fillMaxHeight()
+                        .clip(shape)
+                        .then(
+                            if (selected) Modifier.glassPanel(shape, fillAlpha = 0.13f, borderAlpha = 0.24f)
+                            else Modifier.background(Color.White.copy(alpha = 0.055f), shape)
+                        )
+                        .clickable(onClick = rememberHapticOnClick { selectPage(index) })
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
                     Text(
-                        "${statusLabel(current.status)} · ${hosts[current.hostId]?.paired?.host?.name.orEmpty()}",
-                        Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextMid,
+                        session.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (selected) TextHigh else TextMid,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "${currentPage + 1}/${sessions.size}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Purple200,
-                    )
+                    Spacer(Modifier.height(3.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            fileName,
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextMid,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.size(6.dp).background(statusColor(session.status), CircleShape))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            statusLabel(session.status),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = statusColor(session.status),
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.width(6.dp))
-            TaskNeighborPreview(
-                session = sessions.getOrNull(currentPage + 1),
-                direction = 1,
-                edgeLabel = "Oldest",
-                modifier = Modifier.weight(0.82f),
-                onClick = { selectPage(currentPage + 1) },
-            )
         }
         Box(
             Modifier
@@ -460,61 +468,5 @@ private fun TasksPagerBar(
                     ),
                 ),
         )
-    }
-}
-
-@Composable
-private fun TaskNeighborPreview(
-    session: Session?,
-    direction: Int,
-    edgeLabel: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val shape = RoundedCornerShape(14.dp)
-    Row(
-        modifier
-            .fillMaxHeight()
-            .clip(shape)
-            .background(Color.White.copy(alpha = if (session == null) 0.025f else 0.055f), shape)
-            .clickable(enabled = session != null, onClick = rememberHapticOnClick(onClick))
-            .padding(horizontal = 6.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (direction < 0) {
-            Icon(
-                Icons.Outlined.ChevronLeft,
-                contentDescription = null,
-                Modifier.size(18.dp),
-                tint = if (session == null) Gray400.copy(alpha = 0.35f) else Purple200,
-            )
-        }
-        Column(
-            Modifier.weight(1f),
-            horizontalAlignment = if (direction < 0) Alignment.Start else Alignment.End,
-        ) {
-            Text(
-                session?.title ?: edgeLabel,
-                style = MaterialTheme.typography.labelSmall,
-                color = if (session == null) Gray400.copy(alpha = 0.45f) else TextHigh,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                session?.let { statusLabel(it.status) }.orEmpty(),
-                style = MaterialTheme.typography.labelSmall,
-                color = session?.let { statusColor(it.status) } ?: Color.Transparent,
-                maxLines = 1,
-            )
-        }
-        if (direction > 0) {
-            Icon(
-                Icons.Outlined.ChevronRight,
-                contentDescription = null,
-                Modifier.size(18.dp),
-                tint = if (session == null) Gray400.copy(alpha = 0.35f) else Purple200,
-            )
-        }
     }
 }

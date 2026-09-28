@@ -67,7 +67,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 2,
+            schema_version <= 3,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         db.execute("INSERT OR IGNORE INTO identity VALUES (1,?)", [id("host_")])?;
         if schema_version < 2 {
             migrate_v2(&db)?;
+        }
+        if schema_version < 3 {
+            migrate_history_marker(&db)?;
         }
         Ok(Self {
             db: Mutex::new(db),
@@ -310,6 +313,37 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
     pub fn v2_session(&self, id: &str) -> Result<Option<SessionRecord>> {
         read_v2_session(&self.db.lock(), id)
     }
+    /// Only a mapped reference with no possible prompt write may be treated as an
+    /// absent, never-written OMP file. The marker is committed before prompt RPC.
+    pub fn reference_is_unwritten(&self, id: &str, reference: &str) -> Result<bool> {
+        Ok(self.db.lock().query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_records WHERE id=?1 AND engine_session_ref=?2 AND history_may_have_been_written=0)",
+            params![id, reference],
+            |row| row.get::<_, bool>(0),
+        )?)
+    }
+
+    pub fn mark_prompt_may_write(&self, id: &str, reference: &str) -> Result<bool> {
+        Ok(self.db.lock().execute(
+            "UPDATE session_records SET history_may_have_been_written=1 WHERE id=?1 AND engine_session_ref=?2",
+            params![id, reference],
+        )? == 1)
+    }
+
+    pub fn replace_unwritten_engine_ref(
+        &self,
+        id: &str,
+        expected_revision: i64,
+        old_reference: &str,
+        reference: &str,
+    ) -> Result<bool> {
+        Ok(self.db.lock().execute(
+            "UPDATE session_records SET engine_session_ref=?1,metadata_revision=metadata_revision+1,updated_at=?2
+             WHERE id=?3 AND metadata_revision=?4 AND engine_session_ref=?5
+             AND history_may_have_been_written=0",
+            params![reference, Utc::now().to_rfc3339(), id, expected_revision, old_reference],
+        )? == 1)
+    }
 
     pub fn set_engine_ref(
         &self,
@@ -511,13 +545,46 @@ fn parse_session(
 fn read_v2_session(db: &Connection, id: &str) -> Result<Option<SessionRecord>> {
     db.query_row("SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref FROM session_records WHERE id=?1",[id],session_columns).optional()?.map(parse_session).transpose()
 }
+/// Version 2 used successful prompt receipts as a proxy for transcript safety.
+/// Existing mapped legacy rows have revision 1; an existing v2 mapping with any
+/// prompt receipt is also protected, whatever its terminal status.
+fn migrate_history_marker(db: &Connection) -> Result<()> {
+    db.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| -> Result<()> {
+        if db.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('session_records') WHERE name='history_may_have_been_written'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )? == 0
+        {
+            db.execute_batch(
+                "ALTER TABLE session_records ADD COLUMN history_may_have_been_written INTEGER NOT NULL DEFAULT 0;
+                 UPDATE session_records SET history_may_have_been_written=1
+                 WHERE engine_session_ref IS NOT NULL AND (
+                     metadata_revision=1 OR EXISTS (
+                         SELECT 1 FROM operation_records WHERE session_id=session_records.id AND command_type='prompt'
+                     )
+                 );",
+            )?;
+        }
+        db.execute_batch("PRAGMA user_version=3;")?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => db.execute_batch("COMMIT;").map_err(Into::into),
+        Err(err) => {
+            let _ = db.execute_batch("ROLLBACK;");
+            Err(err)
+        }
+    }
+}
 fn migrate_v2(db: &Connection) -> Result<()> {
     db.execute_batch("BEGIN IMMEDIATE;")?;
     let result = (|| -> Result<()> {
         db.execute_batch("CREATE TABLE session_records (
             id TEXT PRIMARY KEY,host_id TEXT NOT NULL,cwd TEXT NOT NULL,title TEXT NOT NULL,
             metadata_revision INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
-            archived_at TEXT,engine_session_ref TEXT);
+            archived_at TEXT,engine_session_ref TEXT,history_may_have_been_written INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE create_receipts (
             client_id TEXT NOT NULL,command_id TEXT NOT NULL,fingerprint TEXT NOT NULL,
             session_id TEXT NOT NULL,PRIMARY KEY(client_id,command_id));
@@ -546,8 +613,8 @@ fn migrate_v2(db: &Connection) -> Result<()> {
                         .and_then(|v| v.as_str())
                         .with_context(|| format!("legacy session missing {key}"))
                 };
-                db.execute("INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref) VALUES (?1,?2,?3,?4,1,?5,?6,NULL,?7)",
-                    params![required("id")?,required("hostId")?,required("cwd")?,required("title")?,parse_time(required("createdAt")?)?.to_rfc3339(),parse_time(required("updatedAt")?)?.to_rfc3339(),if session_file.is_empty(){None}else{Some(session_file.as_str())}])?;
+                db.execute("INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref,history_may_have_been_written) VALUES (?1,?2,?3,?4,1,?5,?6,NULL,?7,?8)",
+                    params![required("id")?,required("hostId")?,required("cwd")?,required("title")?,parse_time(required("createdAt")?)?.to_rfc3339(),parse_time(required("updatedAt")?)?.to_rfc3339(),if session_file.is_empty(){None}else{Some(session_file.as_str())},!session_file.is_empty()])?;
             }
             db.execute_batch("DROP TABLE sessions;")?;
         }

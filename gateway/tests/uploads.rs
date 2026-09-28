@@ -193,7 +193,7 @@ fn concurrent_uploads_publish_only_complete_files() {
     let file_id = format!("file_{}", "b".repeat(32));
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
     let attempts = std::thread::scope(|scope| {
-        let handles = [b'a', b'b'].map(|byte| {
+        let handles = (*b"ab").map(|byte| {
             let store = store.clone();
             let barrier = barrier.clone();
             let session_id = session_id.clone();

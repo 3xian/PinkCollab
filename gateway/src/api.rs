@@ -397,6 +397,28 @@ async fn v2_history(
     let Some(reference) = session.engine_session_ref else {
         return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
     };
+    if tokio::fs::metadata(&reference)
+        .await
+        .err()
+        .is_some_and(|err| err.kind() == std::io::ErrorKind::NotFound)
+    {
+        let prompt_session = id.clone();
+        let missing_reference = reference.clone();
+        let unwritten = app
+            .store
+            .run(move |store| store.reference_is_unwritten(&prompt_session, &missing_reference))
+            .await
+            .map_err(|_| {
+                V2Error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "persistence_unavailable",
+                    "Session record unavailable".into(),
+                )
+            })?;
+        if unwritten {
+            return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
+        }
+    }
     let page = crate::history::history_page(
         FsPath::new(&reference),
         &id,

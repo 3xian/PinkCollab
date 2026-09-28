@@ -1,20 +1,19 @@
 use crate::{
     events::Bus,
     model::{Attention, ModelInfo, TimelineItem},
-    omp::{self, Output, Runtime},
-    storage::{self, Store},
+    omp::{self, Runtime},
+    storage::Store,
     uploads,
     v2_model::{OperationRecord, RuntimeSnapshot, SessionRecord, SessionView},
     workspace::Browser,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
-    path::Path,
     sync::Arc,
 };
 use tokio::sync::{Mutex, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore};
@@ -221,6 +220,7 @@ pub struct SessionDirectory {
 }
 
 mod directory;
+mod startup;
 
 enum CommandResult {
     Running,
@@ -442,6 +442,38 @@ impl SessionController {
                             "Answer the pending input first",
                         ));
                     }
+                }
+                // Commit the safety marker before any prompt bytes can reach OMP.
+                // A failed/aborted/no-op RPC may still leave this mapping protected.
+                let reference = self
+                    .state
+                    .lock()
+                    .await
+                    .session
+                    .engine_session_ref
+                    .clone()
+                    .ok_or_else(|| {
+                        CommandFailure::failed(
+                            "persistence_unavailable",
+                            "OMP session reference is unavailable",
+                        )
+                    })?;
+                let mark_session = receipt.session_id.clone();
+                let marked = self
+                    .store
+                    .run(move |store| store.mark_prompt_may_write(&mark_session, &reference))
+                    .await
+                    .map_err(|_| {
+                        CommandFailure::failed(
+                            "persistence_unavailable",
+                            "Could not protect OMP history mapping",
+                        )
+                    })?;
+                if !marked {
+                    return Err(CommandFailure::failed(
+                        "persistence_unavailable",
+                        "OMP history mapping changed before prompt",
+                    ));
                 }
                 let settled_revision = {
                     let mut state = self.state.lock().await;
@@ -716,194 +748,6 @@ impl SessionController {
             snapshot.phase = "stopping".into();
         }
         Ok(runtime)
-    }
-    async fn ensure_runtime(self: &Arc<Self>) -> Result<(String, Arc<Runtime>)> {
-        {
-            let state = self.state.lock().await;
-            if let Some(current) = state.runtime.as_ref() {
-                ensure!(
-                    current.process.alive(),
-                    "previous runtime exit is not confirmed"
-                );
-                ensure!(
-                    state
-                        .projection
-                        .as_ref()
-                        .is_some_and(|p| p.phase == "ready"),
-                    "runtime is not ready"
-                );
-                return Ok((current.generation.clone(), current.process.clone()));
-            }
-        }
-        let permit = self
-            .quota
-            .clone()
-            .try_acquire_owned()
-            .context("OMP runtime limit reached")?;
-        let session = { self.state.lock().await.session.clone() };
-        let cwd = self.browser.validate(Path::new(&session.cwd))?;
-        let generation = storage::id("run_");
-        let reserve_session = session.id.clone();
-        let reserve_generation = generation.clone();
-        ensure!(
-            self.store
-                .run(move |store| store.reserve_runtime(&reserve_session, &reserve_generation))
-                .await?,
-            "previous runtime exit is not confirmed"
-        );
-        let (runtime, mut output) = match Runtime::spawn(&self.executable, &self.args, &cwd) {
-            Ok(started) => started,
-            Err(err) => {
-                let release_session = session.id.clone();
-                let release_generation = generation.clone();
-                let _ = self
-                    .store
-                    .run(move |store| store.release_runtime(&release_session, &release_generation))
-                    .await;
-                return Err(err);
-            }
-        };
-        {
-            let mut state = self.state.lock().await;
-            ensure!(state.runtime.is_none(), "runtime started concurrently");
-            state.runtime = Some(RuntimeInstance {
-                generation: generation.clone(),
-                process: runtime.clone(),
-                _permit: permit,
-            });
-            state.projection = Some(RuntimeSnapshot {
-                generation: generation.clone(),
-                phase: "starting".into(),
-                execution: "unknown".into(),
-                activity: None,
-                actual_model: None,
-                pending_inputs: Vec::new(),
-            });
-            state.settled_revision = 0;
-            state.messages.clear();
-            state.finalized_messages.clear();
-            state.dirty_messages.clear();
-            state.removed_messages.clear();
-            state.display_flush_scheduled = false;
-        }
-        {
-            let state = self.state.lock().await;
-            self.publish(
-                &session.id,
-                "v2.runtime.updated",
-                json!({"runtime":state.projection}),
-            );
-            self.publish(&session.id, "v2.timeline.reset", json!({}));
-        }
-        let controller = self.clone();
-        let event_generation = generation.clone();
-        tokio::spawn(async move {
-            while let Some(event) = output.recv().await {
-                match event {
-                    Output::Frame(frame) => controller.apply_frame(&event_generation, frame).await,
-                    Output::Exited(reason) => {
-                        controller.apply_exit(&event_generation, reason).await;
-                        break;
-                    }
-                }
-            }
-        });
-        let started = async {
-            runtime.wait_ready().await?;
-            if let Some(reference) = session.engine_session_ref.as_deref() {
-                ensure!(
-                    Path::new(reference).is_file(),
-                    "stored OMP session is unavailable"
-                );
-                let response = runtime
-                    .request(json!({"type":"switch_session","sessionPath":reference}))
-                    .await?;
-                ensure!(
-                    response["data"]["cancelled"] != true,
-                    "OMP did not load stored session"
-                );
-            }
-            let response = runtime.request(json!({"type":"get_state"})).await?;
-            let data = &response["data"];
-            let reference = omp::string(data, "sessionFile");
-            ensure!(
-                !reference.is_empty(),
-                "OMP did not provide a session reference"
-            );
-            if session.engine_session_ref.is_none() {
-                let save_session = session.id.clone();
-                let save_reference = reference.to_owned();
-                let revision = session.metadata_revision;
-                ensure!(
-                    self.store
-                        .run(move |store| store.set_engine_ref(
-                            &save_session,
-                            revision,
-                            &save_reference
-                        ))
-                        .await?,
-                    "session mapping changed during startup"
-                );
-            } else {
-                ensure!(
-                    session.engine_session_ref.as_deref() == Some(reference),
-                    "OMP loaded a different session"
-                );
-            }
-            let reload_session = session.id.clone();
-            let saved = self
-                .store
-                .run(move |store| store.v2_session(&reload_session))
-                .await?
-                .context("session disappeared during startup")?;
-            let mut state = self.state.lock().await;
-            ensure!(
-                state
-                    .runtime
-                    .as_ref()
-                    .is_some_and(|r| r.generation == generation),
-                "runtime generation changed during startup"
-            );
-            state.session = saved;
-            if let Some(snapshot) = state.projection.as_mut() {
-                snapshot.phase = "ready".into();
-                snapshot.execution = if data["isSettled"] == true {
-                    "quiescent"
-                } else if data["isStreaming"] == true {
-                    "active"
-                } else {
-                    "unknown"
-                }
-                .into();
-                snapshot.actual_model = model_info(data);
-            }
-            Ok::<(), anyhow::Error>(())
-        }
-        .await;
-        if let Err(err) = started {
-            let stopped = runtime.stop_confirmed().await;
-            if stopped.is_ok() {
-                self.apply_exit(&generation, Some(err.to_string())).await;
-            }
-            return Err(err);
-        }
-        {
-            let state = self.state.lock().await;
-            self.publish(
-                &session.id,
-                "v2.metadata.updated",
-                json!({"session":state.session}),
-            );
-        }
-        {
-            let state = self.state.lock().await;
-            self.publish(
-                &session.id,
-                "v2.runtime.updated",
-                json!({"runtime":state.projection}),
-            );
-        }
-        Ok((generation, runtime))
     }
     async fn refresh_state(&self, generation: &str, runtime: &Runtime) -> Result<()> {
         let response = runtime.request(json!({"type":"get_state"})).await?;

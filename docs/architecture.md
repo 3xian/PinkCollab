@@ -32,7 +32,13 @@ The supervisor drains OMP output independently of Android and uses a bounded fra
 | Process state, pending input, current model, live preview | Live OMP process and Gateway memory | Rebuilt from a new snapshot while the process lives; absent after process exit |
 | Android history pages | Local display cache | Valid only for the matching source and subscription |
 
-An old Session can be resumed by starting a new runtime and loading its server-side OMP mapping. Old unfinished Operations are marked cancelled or outcome unknown on restart and are never sent again automatically. Missing or corrupt history is an explicit error. OMP history and the live WebSocket projection are separate reads, so they do not form a single atomic transcript snapshot.
+An old Session can be resumed by starting a new runtime and loading its server-side OMP mapping. Before any prompt RPC can reach OMP, the Gateway durably records that the mapped reference may contain history; this stays true after aborted, failed, unknown, or even `agentInvoked:false` outcomes. A mapped session with no possible prompt write may have acquired a reference before OMP writes a JSONL file; only that absent file is empty history, and resume can replace the mapping under an atomic unwritten guard. Legacy mapped sessions and older sessions with prompt receipts migrate conservatively. Old unfinished Operations are marked cancelled or outcome unknown on restart and are never sent again automatically. Missing history for a possibly written mapping, or corrupt history, is an explicit error. OMP history and the live WebSocket projection are separate reads, so they do not form a single atomic transcript snapshot.
 
 The Gateway tracks `epoch` and `revision` per subscribed resource. The host summary list and each open session detail have separate cursors. Android replaces a resource with its subscription snapshot and accepts only contiguous changes. A reconnect takes a fresh snapshot; there is no persistent event replay. This avoids resolving concurrent REST and WebSocket updates by timestamps.
+
+## Android navigation
+
+Android's Tasks screen orders sessions by creation time. Its Timeline pager owns the selected page; the independently scrollable card strip above it follows that page and centers the selected card when space permits. The first card stays at the left edge instead of adding blank leading space. Tapping a card selects its Timeline page; dragging only the strip does not change the selection.
+
+Each compact session card displays the session title on its first line and the final component of its workspace path alongside the current status on its second line. Host names and position counters are not shown in the cards.
 
