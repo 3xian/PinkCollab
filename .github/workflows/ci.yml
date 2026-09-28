@@ -139,6 +139,9 @@ jobs:
           api-level: 35
           target: google_apis
           arch: x86_64
+          # The default AVD profile is a 320x640dp legacy screen. A modern phone
+          # profile is what the UI tests describe, keyboard included.
+          profile: pixel_6
           ram-size: 2048M
           working-directory: android
           script: |
