@@ -142,8 +142,8 @@ jobs:
           # The default AVD profile is a 320x640dp legacy screen. A modern phone
           # profile is what the UI tests describe, keyboard included.
           profile: pixel_6
-          # The keyboard tests pull in the on-device IME, which does not fit in
-          # the default 2 GB the way the rest of the suite does.
+          # The on-device IME and the Compose suite together are steadier with
+          # more headroom than the default 2 GB.
           ram-size: 4096M
           cores: 4
           working-directory: android
@@ -151,7 +151,11 @@ jobs:
             # The AVD's device profile declares a hardware keyboard, which hides
             # the soft IME. The composer tests need a keyboard that can appear.
             adb shell settings put secure show_ime_with_hard_keyboard 1
-            ./gradlew :app:connectedDebugAndroidTest --console=plain
+            ./gradlew :app:connectedDebugAndroidTest --console=plain || status=$?
+            if [ -n "$status" ]; then
+              adb logcat -d -b all -v threadtime | tail -300
+            fi
+            exit ${status:-0}
       - name: Upload device test report
         if: failure()
         uses: actions/upload-artifact@v7
