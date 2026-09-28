@@ -8,6 +8,50 @@
 
 <p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="480" alt="PinkCollab app showing an OMP session on a phone" /></p>
 
+## Install
+
+Install the app and Gateway from the same release.
+
+1. **Host:** Node.js 18+. Install Tailscale and allow Funnel for this node.
+2. **Phone:** install the [release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
+
+```sh
+npm install -g pinkcollab@latest
+```
+
+## Use
+
+1. **Set up the host once.** Make sure `omp --version` works, then choose an existing directory for your projects:
+
+   ```sh
+   pinkcollab init --workspace /absolute/path/to/projects
+   pinkcollab funnel
+   ```
+
+   On Windows, use a path such as `C:/code`. To allow more than one directory, repeat `--workspace` in the same `init` command. `funnel` sets up the public HTTPS address used by the phone.
+
+2. **Start the Gateway.** Run this on the host and leave the terminal open while using the app:
+
+   ```sh
+   pinkcollab serve
+   ```
+
+3. **Pair your phone.** Open another terminal on the host and run:
+
+   ```sh
+   pinkcollab pair
+   ```
+
+   Scan the QR code in the PinkCollab app. The code can be used once within five minutes. Run `pinkcollab pair` again if it expires.
+
+4. **Start a session.** In the app, open **Workspaces**, choose a directory, create a session, and send a prompt. Use **Stop** to interrupt the current turn, **Exit** to end the runtime after confirmation, and **Send** to submit a prompt.
+
+For later use, start the Gateway with `pinkcollab serve` and open the app on your paired phone. To change the allowed directories, edit `workspaces` in `~/.pinkcollab/config.yaml`. `init` will not overwrite an existing configuration.
+
+For Funnel permissions, connection troubleshooting, or running the Gateway in the background, see [Deployment and networking](docs/deployment.md).
+
+## How it works
+
 ```mermaid
 flowchart TD
     subgraph phone [Phone]
@@ -26,50 +70,13 @@ flowchart TD
     host -->|provider API| Provider
 ```
 
-## Install
-
-Install the app and Gateway from the same release.
-
-1. **Host:** Node.js 18+. Install Tailscale and allow Funnel for this node.
-2. **Phone:** install the [release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
-
-```sh
-npm install -g pinkcollab@latest
-```
-
-## Use
-
-On the host, allow directories that already exist. On Windows, a path looks like `C:\code`. Repeat `--workspace` for each root you want to expose:
-
-```sh
-pinkcollab init --workspace /absolute/path/to/projects --workspace /another/root
-pinkcollab funnel
-pinkcollab serve
-```
-
-A later `init` fails once `config.yaml` exists. Add or remove roots by editing `workspaces` in `config.yaml` instead.
-
-Leave that terminal open. In another terminal:
-
-```sh
-pinkcollab pair
-```
-
-Scan the QR in the app. Open **Workspaces**, choose one of the directories you allowed, create a session, and send a prompt.
-
-In a session, the right-hand composer controls are **Stop** (interrupt the current turn), **Exit** (confirm before ending the runtime), and **Send** (submit the prompt).
-
-The pairing code lasts five minutes and works once. If it expires, run `pair` again.
-
-If Funnel is not allowed for this node, `funnel` stops. Enable the `funnel` attribute in the Tailscale admin console, then run it again.
-
 ## Docs
 
-- [Architecture](docs/architecture.md) — components, lifecycles, and state ownership
-- [Protocol v2](docs/protocol.md) — REST and WebSocket API contracts
-- [Deployment and networking](docs/deployment.md) — HTTPS access, pairing, background services, and Gateway CLI/configuration
-- [Development](docs/development.md) — contributor setup, builds, and validation
-- [Releases](docs/npm-release.md) — maintainer guide to signing and publishing Android, Gateway, and npm releases
+- [Architecture](docs/architecture.md): components, lifecycles, and state ownership
+- [Protocol v2](docs/protocol.md): REST and WebSocket API contracts
+- [Deployment and networking](docs/deployment.md): HTTPS access, pairing, background services, and Gateway CLI/configuration
+- [Development](docs/development.md): contributor setup, builds, and validation
+- [Releases](docs/npm-release.md): maintainer guide to signing and publishing Android, Gateway, and npm releases
 
 ## License
 
