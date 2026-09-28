@@ -488,13 +488,7 @@ async fn v2_create(
     })?;
     let cwd = crate::workspace::display(&cwd);
     let title = if body.title.trim().is_empty() {
-        FsPath::new(&cwd)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("New session")
-            .chars()
-            .take(80)
-            .collect::<String>()
+        "New session".to_owned()
     } else {
         body.title.trim().chars().take(80).collect::<String>()
     };

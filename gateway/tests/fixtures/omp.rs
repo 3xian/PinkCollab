@@ -51,6 +51,27 @@ fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
     emit(json!({"type":"message_end","messageId":id,"message":message}));
     emit(json!({"type":"agent_end"}));
 }
+fn save_title(log: &std::path::Path, title: &str) {
+    let content = std::fs::read_to_string(log).unwrap_or_default();
+    let body = if content
+        .lines()
+        .next()
+        .and_then(|line| serde_json::from_str::<Value>(line).ok())
+        .is_some_and(|v| v["type"] == "title")
+    {
+        content
+            .split_once('\n')
+            .map(|(_, body)| body)
+            .unwrap_or_default()
+    } else {
+        &content
+    };
+    std::fs::write(
+        log,
+        format!("{}\n{body}", json!({"type":"title","v":1,"title":title})),
+    )
+    .unwrap();
+}
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--linger-child") {
@@ -127,6 +148,8 @@ fn main() {
     };
     let mut model_index = 0;
     let mut thinking_level = "medium".to_owned();
+    let title_file = std::env::current_dir().unwrap().join("fixture-title.txt");
+    let mut session_title = std::fs::read_to_string(&title_file).unwrap_or_default();
     let mut pending_prompt_id: Option<Value> = None;
     let mut pending_prompt_ack: Option<Value> = None;
     emit(json!({"type":"ready","protocolVersion":1}));
@@ -150,7 +173,7 @@ fn main() {
         };
         match frame["type"].as_str().unwrap_or_default() {
             "get_state" => ack(
-                json!({"sessionFile":log,"sessionId":"fixture","model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none(),"isStreaming":pending_prompt_id.is_some()}),
+                json!({"sessionFile":log,"sessionId":"fixture","sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none(),"isStreaming":pending_prompt_id.is_some()}),
             ),
             "get_available_thinking_levels" => {
                 let mut levels = vec![json!("off")];
@@ -211,6 +234,25 @@ fn main() {
                     .unwrap();
                 }
                 let message = frame["message"].as_str().unwrap_or_default();
+                if let Some(title) = message.strip_prefix("silent-title:") {
+                    session_title = title.to_owned();
+                    std::fs::write(&title_file, &session_title).unwrap();
+                    save_title(&log, &session_title);
+                }
+                if let Some(title) = message.strip_prefix("title:") {
+                    session_title = title.to_owned();
+                    std::fs::write(&title_file, &session_title).unwrap();
+                    save_title(&log, &session_title);
+                    emit(
+                        json!({"type":"session_info_update","title":session_title,"sessionId":"fixture"}),
+                    );
+                }
+                if let Some(title) = message.strip_prefix("stale-title:") {
+                    session_title = title.to_owned();
+                    std::fs::write(&title_file, &session_title).unwrap();
+                    save_title(&log, &session_title);
+                    emit(json!({"type":"session_info_update","title":"Stale event title"}));
+                }
                 if message == "fail" {
                     emit(
                         json!({"type":"response","id":frame["id"],"success":false,"error":"fixture rejects prompt"}),

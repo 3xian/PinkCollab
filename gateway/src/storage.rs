@@ -366,6 +366,30 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         )? == 1)
     }
 
+    /// Persist metadata and return the same committed record under one database lock.
+    pub fn set_session_title(
+        &self,
+        id: &str,
+        generation: &str,
+        title: &str,
+    ) -> Result<Option<SessionRecord>> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Ok(None);
+        }
+        let db = self.db.lock();
+        let changed = db.execute(
+            "UPDATE session_records SET title=?1,metadata_revision=metadata_revision+1,updated_at=?2
+             WHERE id=?3 AND title<>?1 AND EXISTS
+             (SELECT 1 FROM runtime_leases WHERE session_id=?3 AND generation=?4)",
+            params![title, Utc::now().to_rfc3339(), id, generation],
+        )?;
+        if changed == 0 {
+            return Ok(None);
+        }
+        read_v2_session(&db, id)
+    }
+
     pub fn operation(
         &self,
         client_id: &str,

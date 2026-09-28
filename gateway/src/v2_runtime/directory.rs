@@ -75,7 +75,8 @@ impl SessionDirectory {
             return Ok(Some(controller.view().await?));
         }
         let session_id = id.to_owned();
-        self.store
+        let view = self
+            .store
             .run(move |store| {
                 let Some(session) = store.v2_session(&session_id)? else {
                     return Ok(None);
@@ -93,7 +94,11 @@ impl SessionDirectory {
                     history_ref,
                 }))
             })
-            .await
+            .await?;
+        if let Some(controller) = self.active_controller(id).await {
+            return Ok(Some(controller.view().await?));
+        }
+        Ok(view)
     }
     pub async fn list(&self) -> Result<Vec<Value>> {
         let sessions = self.store.run(|store| store.v2_sessions()).await?;
@@ -119,22 +124,14 @@ impl SessionDirectory {
         Ok((self.summaries(sessions).await?, has_more))
     }
     async fn summaries(&self, sessions: Vec<SessionRecord>) -> Result<Vec<Value>> {
-        let controllers = {
-            let mut controllers = self.controllers.lock().await;
-            controllers.retain(|_, weak| weak.strong_count() > 0);
-            controllers
-                .iter()
-                .filter_map(|(id, weak)| weak.upgrade().map(|controller| (id.clone(), controller)))
-                .collect::<HashMap<_, _>>()
-        };
         let mut result = Vec::with_capacity(sessions.len());
         for session in sessions {
-            let runtime = if let Some(controller) = controllers.get(&session.id) {
-                controller.state.lock().await.projection.clone()
+            if let Some(controller) = self.active_controller(&session.id).await {
+                let state = controller.state.lock().await;
+                result.push(json!({"session":state.session,"runtime":state.projection}));
             } else {
-                None
-            };
-            result.push(json!({"session":session,"runtime":runtime}));
+                result.push(json!({"session":session,"runtime":null}));
+            }
         }
         Ok(result)
     }

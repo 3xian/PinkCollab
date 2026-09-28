@@ -221,6 +221,7 @@ pub struct SessionDirectory {
 
 mod directory;
 mod startup;
+mod title;
 
 enum CommandResult {
     Running,
@@ -488,6 +489,9 @@ impl SessionController {
                     .await;
                 match response {
                     Ok(response) => {
+                        if let Err(err) = self.update_prompt_title(&generation, &message).await {
+                            eprintln!("Could not persist latest prompt title: {err}");
+                        }
                         if response["data"]["agentInvoked"] == false {
                             self.state
                                 .lock()

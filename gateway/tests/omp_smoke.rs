@@ -17,6 +17,15 @@ async fn real_omp_rpc_ui_handshake() {
         .as_str()
         .expect("OMP session reference")
         .to_owned();
+    runtime
+        .request(serde_json::json!({"type":"set_session_name","name":"PinkCollab title smoke"}))
+        .await
+        .unwrap();
+    let named = runtime
+        .request(serde_json::json!({"type":"get_state"}))
+        .await
+        .unwrap();
+    assert_eq!(named["data"]["sessionName"], "PinkCollab title smoke");
     let models = runtime
         .request(serde_json::json!({"type":"get_available_models"}))
         .await

@@ -336,7 +336,7 @@ impl SessionController {
             );
         }
     }
-    pub(super) async fn apply_exit(&self, generation: &str, reason: Option<String>) {
+    pub(super) async fn apply_exit(self: &Arc<Self>, generation: &str, reason: Option<String>) {
         let session_id = {
             let mut state = self.state.lock().await;
             if state
@@ -378,7 +378,7 @@ impl SessionController {
             eprintln!("Could not release confirmed runtime lease: {err}");
         }
     }
-    pub(super) async fn stop_on_shutdown(&self) {
+    pub(super) async fn stop_on_shutdown(self: &Arc<Self>) {
         let current = {
             self.state
                 .lock()
