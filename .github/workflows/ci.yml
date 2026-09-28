@@ -146,6 +146,15 @@ jobs:
             # the soft IME. The composer tests need a keyboard that can appear.
             adb shell settings put secure show_ime_with_hard_keyboard 1
             ./gradlew :app:connectedDebugAndroidTest --console=plain
+      - name: Upload device test report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pinkcollab-android-device-tests
+          path: |
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/androidTest-results/connected/**
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v7
         with:
           name: pinkcollab-android-debug
