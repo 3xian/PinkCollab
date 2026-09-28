@@ -1,11 +1,9 @@
 'use strict';
 
 const demoGroups = {
-  attention: { cards: [{ kind: 'attention-task', label: 'NEEDS YOUR INPUT', time: 'now', title: 'Review database migration', host: 'dev-server', path: 'projects/api', message: 'Ready to apply the migration.\nWould you like to proceed?' }], context: 'A decision from you keeps work moving.' },
-  running: { cards: [{ kind: 'running-task', label: 'RUNNING', time: 'live', title: 'Fix the failing tests', host: 'home-pc', path: 'projects/web', message: 'Running the test suite…' }, { kind: 'running-task', label: 'RUNNING', time: 'live', title: 'Refactor the API routes', host: 'dev-server', path: 'projects/api' }], context: 'Watch the live stream, then steer with a new prompt.' },
-  recent: { cards: [{ kind: 'recent-task', label: 'PAUSED', time: '12m ago', title: 'Update project documentation', host: 'home-pc', path: 'projects/web' }, { kind: 'recent-task', label: 'PAUSED', time: '1h ago', title: 'Investigate slow queries', host: 'dev-server', path: 'projects/api' }], context: 'Send a prompt to resume a paused session.' }
+  running: { prompt: 'Fix the failing tests and explain what changed.', reply: 'I’ll reproduce the failure, check the affected code, and run the tests after the fix.', tool: 'npm test', result: 'Running…', placeholder: 'Steer OMP…' },
+  recent: { prompt: 'Update the API setup instructions.', reply: 'Updated the setup instructions with the required environment variables and a working request example.', tool: 'git diff --stat', result: 'README.md | 18 ++++++++++++------', placeholder: 'Send another prompt…' }
 };
-
 const tabs = [...document.querySelectorAll('.task-tab')];
 const panel = document.querySelector('#demo-tasks');
 function element(tag, className, text) {
@@ -23,28 +21,12 @@ function activateTab(tab) {
     item.setAttribute('aria-selected', String(active));
     item.tabIndex = active ? 0 : -1;
   }
+  tab.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
   panel.setAttribute('aria-labelledby', tab.id);
-  panel.replaceChildren();
-  for (const card of group.cards) {
-    const article = element('article', `demo-task ${card.kind}`);
-    const label = element('div', 'task-label');
-    label.append(element('span', 'status-dot'), document.createTextNode(card.label), element('span', 'task-time', card.time));
-    const path = element('p', 'task-path');
-    path.append(document.createTextNode(card.host), element('span', '', '/'), document.createTextNode(card.path));
-    article.append(label, element('h3', '', card.title), path);
-    if (card.message) {
-      const message = element('div', 'task-message');
-      const arrow = element('span', '', '↳');
-      arrow.setAttribute('aria-hidden', 'true');
-      const text = element('p', '', card.message);
-      text.style.whiteSpace = 'pre-line';
-      message.append(arrow, text);
-      article.append(message);
-    }
-    if (tab.dataset.group === 'attention') article.append(element('span', 'task-footnote', 'Continue the conversation in the app →'));
-    panel.append(article);
-  }
-  panel.append(element('p', 'demo-context', group.context));
+  const tool = element('div', 'demo-tool-call');
+  tool.append(element('strong', '', 'bash'), element('code', '', group.tool), element('span', '', group.result));
+  panel.replaceChildren(element('p', 'demo-user-message', group.prompt), element('p', 'demo-assistant-message', group.reply), tool);
+  document.querySelector('#demo-placeholder').firstChild.textContent = group.placeholder + ' ';
 }
 for (const tab of tabs) {
   tab.addEventListener('click', () => activateTab(tab));

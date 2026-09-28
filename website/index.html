@@ -7,7 +7,7 @@
   <meta name="description" content="Oh My Pi is a coding agent for the terminal. PinkCollab starts a real OMP process on a host you own, so you can prompt, follow, interrupt, and stop it from your phone.">
   <link rel="canonical" href="https://3xian.github.io/PinkCollab/">
   <meta property="og:site_name" content="PinkCollab">
-  <meta property="og:title" content="PinkCollab — Android client for Oh My Pi (OMP)">
+  <meta property="og:title" content="PinkCollab - Android client for Oh My Pi (OMP)">
   <meta property="og:description" content="Oh My Pi is a coding agent for the terminal. PinkCollab starts a real OMP process on a host you own, so you can prompt, follow, interrupt, and stop it from your phone.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://3xian.github.io/PinkCollab/">
@@ -17,7 +17,7 @@
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="The PinkCollab wordmark beside an Android phone showing a session list fed by two connected hosts.">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="PinkCollab — Android client for Oh My Pi (OMP)">
+  <meta name="twitter:title" content="PinkCollab - Android client for Oh My Pi (OMP)">
   <meta name="twitter:description" content="Oh My Pi is a coding agent for the terminal. PinkCollab starts a real OMP process on a host you own, so you can prompt, follow, interrupt, and stop it from your phone.">
   <meta name="twitter:image" content="https://3xian.github.io/PinkCollab/assets/social-card.png">
   <link rel="icon" href="assets/favicon-48.png" sizes="48x48" type="image/png">
@@ -27,9 +27,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700&family=DM+Sans:wght@400..700&family=Manrope:wght@400..800&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="styles.css?v=2cea2da47e13">
-  <script src="app.js?v=8cabcccece04" defer></script>
-  <title>PinkCollab — Android client for Oh My Pi (OMP)</title>
+  <link rel="stylesheet" href="styles.css?v=672fe47988e1">
+  <script src="app.js?v=c802f1182b51" defer></script>
+  <title>PinkCollab - Android client for Oh My Pi (OMP)</title>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -54,30 +54,30 @@
           <div class="host-chip host-server"><span class="host-icon" aria-hidden="true">▤</span><div><strong>dev-server</strong><span><b></b> Connected</span></div></div>
           <div class="phone">
             <div class="phone-top" aria-hidden="true"><span>9:41</span><div class="camera"></div><span>▰</span></div>
-            <div class="phone-content">
-              <div class="phone-heading"><img src="assets/logo-96.png" width="34" height="34" decoding="async" alt=""><span>PinkCollab</span><span class="avatar">P</span></div>
-              <div class="phone-title"><div><span class="phone-overline">START · FOLLOW · ANSWER</span><h2>Sessions</h2></div><span class="host-count">2 hosts</span></div>
-              <div class="task-tabs" role="tablist" aria-label="Demo session groups">
-                <button id="tab-running" class="task-tab active" role="tab" aria-selected="true" aria-controls="demo-tasks" data-group="running">Running <span>1</span></button>
-                <button id="tab-attention" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="attention">Needs you <span>1</span></button>
-                <button id="tab-recent" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="recent">Paused</button>
+            <div class="session-demo">
+              <div class="demo-topbar"><strong>Sessions 1/2 active</strong><span>Workspaces</span><span>Conf</span></div>
+              <div class="session-tabs" role="tablist" aria-label="Demo sessions">
+                <button id="tab-running" class="task-tab active" role="tab" aria-selected="true" aria-controls="demo-tasks" data-group="running"><strong>Fix the failing tests</strong><span>web <i>● Running</i></span></button>
+                <button id="tab-recent" class="task-tab" role="tab" aria-selected="false" aria-controls="demo-tasks" tabindex="-1" data-group="recent"><strong>Update documentation</strong><span>api <i>● Paused</i></span></button>
               </div>
-              <div id="demo-tasks" role="tabpanel" aria-labelledby="tab-running" tabindex="0">
-                <article class="demo-task running-task"><div class="task-label"><span class="status-dot"></span> RUNNING <span class="task-time">live</span></div><h3>Fix the failing tests</h3><p class="task-path">home-pc <span>/</span> projects/web</p><div class="task-message"><span aria-hidden="true">↳</span><p>Running the test suite…</p></div></article>
-                <p class="demo-context">Watch the live stream, then steer with a new prompt.</p>
+              <div id="demo-tasks" class="demo-conversation" role="tabpanel" aria-labelledby="tab-running" tabindex="0">
+                <p class="demo-user-message">Fix the failing tests and explain what changed.</p>
+                <p class="demo-assistant-message">I’ll reproduce the failure, check the affected code, and run the tests after the fix.</p>
+                <div class="demo-tool-call"><strong>bash</strong><code>npm test</code><span>Running…</span></div>
               </div>
-              <div class="phone-bottom-nav" aria-hidden="true"><span class="selected"><b>▦</b>Sessions</span><span><b>▱</b>Workspaces</span></div>
+              <div class="demo-composer" aria-label="Illustrative message composer">
+                <div class="demo-input"><p id="demo-placeholder">Steer OMP… <span aria-hidden="true"><svg width="12" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12V6a4 4 0 0 1 8 0v11a6 6 0 0 1-12 0V7m8-1v11a2 2 0 0 1-4 0v-5"/></svg></span></p><a href="#model-control">DeepSeek V4 Flash <span>high ▾</span></a></div>
+                <div class="demo-command-rail" aria-hidden="true"><span>■</span><span>↑</span></div>
+              </div>
             </div>
             <div class="home-indicator" aria-hidden="true"></div>
           </div>
           <div class="event-chip"><span class="event-check" aria-hidden="true">✓</span><div><strong>You’re in the loop.</strong><span>Live replies. Clear session states.</span></div></div>
-          <span class="scene-caption">Illustrative session view · try the tabs</span>
         </div>
       </section>
       <section class="in-hand" aria-labelledby="in-hand-title">
         <figure class="in-hand-photo">
           <img src="assets/pinkcollab-in-hand.webp" width="1200" height="900" loading="lazy" decoding="async" alt="Illustration of a person holding a phone with a PinkCollab session on screen">
-          <figcaption>Illustration · PinkCollab on Android</figcaption>
         </figure>
         <div class="in-hand-copy">
           <p class="eyebrow">IN YOUR HAND</p>
@@ -99,13 +99,26 @@
             <div class="compare-visual-row compare-visual-row-active"><span class="compare-visual-icon" aria-hidden="true">▣</span><span><small>PINKCOLLAB / ANDROID</small><strong>Start one from anywhere</strong></span><span class="compare-visual-status">CREATE</span></div>
           </div>
         </div>
+      <section class="model-control" id="model-control" aria-labelledby="model-control-title">
+        <div class="model-control-heading">
+          <div>
+            <h3 id="model-control-title">Choose the model.<br><span>Set the thinking.</span></h3>
+          </div>
+          <p>OMP’s <code>/collab</code> guests cannot change the model. PinkCollab puts that choice on your phone, with supported thinking levels alongside it.</p>
+        </div>
+        <figure class="model-control-photo">
+          <a href="assets/pinkcollab-model-picker.jpg" aria-label="View the PinkCollab model picker image at full size">
+            <img src="assets/pinkcollab-model-picker.jpg" width="1672" height="941" loading="lazy" decoding="async" alt="PinkCollab’s Models screen on a handheld phone: a search field, models grouped by provider, a selected model, a Thinking slider set to high, and an Apply button.">
+          </a>
+        </figure>
+      </section>
         <ol class="compare-list">
-          <li><span class="compare-number">01 / BEGIN</span><b>Start work, do not just watch it.</b><p><code>/collab</code> shares a session that is already running on a terminal you opened. PinkCollab creates the session itself and starts OMP in that directory, so a new task can begin without a keyboard in front of the host.</p></li>
-          <li><span class="compare-number">02 / RETURN</span><b>Persistent sessions.</b><p>A Collab room follows one process and ends when it does. PinkCollab keeps the session in your list after OMP exits, reloads its transcript, and starts a new runtime on the same conversation later.</p></li>
-          <li><span class="compare-number">03 / CONTROL</span><b>Attach files and choose the model.</b><p>A <code>/collab</code> guest can prompt and interrupt, but cannot change the model or upload a file. PinkCollab does both from the phone, then sends, steers, stops, or answers.</p></li>
-          <li><span class="compare-number">04 / CONNECT</span><b>Reachable without a relay.</b><p><code>/collab</code> reaches guests through OMP's hosted relay, and its production relay is not distributed for self-hosting. PinkCollab talks only to the Gateway you run: Tailscale Funnel, private Serve, or your own HTTPS proxy.</p></li>
-          <li><span class="compare-number">05 / MOVE</span><b>Swipe between live sessions.</b><p>A <code>/collab</code> link opens one session. PinkCollab keeps every session in one pager: swipe to read the next one and steer it, while the others keep running.</p></li>
-          <li class="compare-caveat"><span class="compare-number">06 / THE BOUNDARY</span><b>Gaps it does not close.</b><p>PinkCollab does not mirror the TUI, and OMP stays in control of tools, files, and credentials. Use <code>/collab</code> when you want a colleague inside your terminal session; use PinkCollab to run your own sessions from your phone.</p></li>
+          <li><b>Start work, do not just watch it.</b><p><code>/collab</code> shares a session that is already running on a terminal you opened. PinkCollab creates the session itself and starts OMP in that directory, so a new task can begin without a keyboard in front of the host.</p></li>
+          <li><b>Persistent sessions.</b><p>A Collab room follows one process and ends when it does. PinkCollab keeps the session in your list after OMP exits, reloads its transcript, and starts a new runtime on the same conversation later.</p></li>
+          <li><b>Bring files into the conversation.</b><p>A <code>/collab</code> guest cannot upload a file. Attach files from your phone with PinkCollab to give OMP the context for the next step.</p></li>
+          <li><b>Reachable without a relay.</b><p><code>/collab</code> reaches guests through OMP's hosted relay, and its production relay is not distributed for self-hosting. PinkCollab talks only to the Gateway you run: Tailscale Funnel, private Serve, or your own HTTPS proxy.</p></li>
+          <li><b>Swipe between live sessions.</b><p>A <code>/collab</code> link opens one session. PinkCollab keeps every session in one pager: swipe to read the next one and steer it, while the others keep running.</p></li>
+          <li class="compare-caveat"><b>Gaps it does not close.</b><p>PinkCollab does not mirror the TUI, and OMP stays in control of tools, files, and credentials. Use <code>/collab</code> when you want a colleague inside your terminal session; use PinkCollab to run your own sessions from your phone.</p></li>
         </ol>
       </section>
       <section class="getting-started section" id="get-started" aria-labelledby="start-title">
@@ -152,7 +165,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
       </section>
       
       <section class="architecture section" id="architecture" aria-labelledby="architecture-title">
-        <div class="section-heading architecture-heading"><p class="eyebrow">FROM A TAP TO A RUNNING AGENT</p><h2 id="architecture-title">Your phone starts the session.<br>Your host stays in control.</h2><p>PinkCollab is a direct bridge to OMP — not another agent and not a cloud relay.</p></div>
+        <div class="section-heading architecture-heading"><p class="eyebrow">FROM A TAP TO A RUNNING AGENT</p><h2 id="architecture-title">Your phone starts the session.<br>Your host stays in control.</h2><p>PinkCollab connects your phone directly to OMP running on your host.</p></div>
         <figure class="architecture-panel">
           <div class="architecture-flow" aria-label="PinkCollab architecture: the Android app connects over HTTPS and WebSocket to a Rust gateway on your host. The gateway starts and controls Oh My Pi, which connects to your model provider. Workspaces, metadata, and session history stay on the host.">
             <article class="arch-node arch-external arch-phone-node"><span class="arch-icon" aria-hidden="true">▣</span><span class="arch-kicker">IN YOUR HAND</span><h3>Android app</h3><p>Start, follow, answer</p></article>
@@ -178,7 +191,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
         <div class="section-heading"><p class="eyebrow">BEFORE YOU START</p><h2 id="limits-title">What PinkCollab does not do yet.</h2><p>So the first surprise isn’t a surprise.</p></div>
         <ul class="limits-list">
           <li>A terminal session cannot be attached: PinkCollab manages the sessions it spawns itself.</li>
-          <li>Running OMP processes are not restored when the gateway restarts — those sessions show as offline. History can still be read from OMP's session file; the live event stream is not replayed.</li>
+          <li>Running OMP processes are not restored when the gateway restarts. Those sessions show as offline. History can still be read from OMP's session file; the live event stream is not replayed.</li>
           <li>Notifications are not implemented: a session waiting on your input only shows it while the app is open.</li>
           <li>No terminal, Git client, code editor, or cloud relay: PinkCollab is a bridge to OMP on your own hosts, not an IDE and not a middleman.</li>
         </ul>
@@ -188,22 +201,21 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
         <div class="powered-card">
           <div class="powered-intro">
             <div class="powered-head">
-              <p class="eyebrow">POWERED BY <span aria-hidden="true">/ OH MY PI</span></p>
-              <h2 id="omp-title">Oh My Pi does the work.<br>PinkCollab keeps you in the loop.</h2>
-              <p class="powered-lead"><a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> is a coding agent for the terminal: subagents, plan mode, LSP and DAP, hindsight memory, hashline edits, and time-traveling rules, on a native Rust engine. PinkCollab adds no agent of its own — it drives OMP on your machines and carries the conversation to your phone.</p>
+              <p class="eyebrow">THE AGENT BEHIND THE APP</p>
+              <h2 id="omp-title">Oh My Pi.<br>The coding agent<br>behind PinkCollab.</h2>
+              <p class="powered-lead"><a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> is a coding agent that works in your terminal. It reads your project, edits files, and runs commands to check its work. PinkCollab connects you to that agent from your phone.</p><p class="powered-foundation">The coding capabilities come from OMP, with a native Rust core and tools for planning, code intelligence, and debugging.</p>
               <a class="powered-link" href="https://omp.sh/docs">Explore OMP docs <span aria-hidden="true">↗</span></a>
             </div>
             <div class="powered-brand">
-              <span class="powered-brand-label">THE ENGINE <span>TERMINAL AGENT</span></span>
+              <span class="powered-brand-label">THE ENGINE <span>OH MY PI</span></span>
               <a class="powered-brand-mark" href="https://omp.sh/" aria-label="Visit Oh My Pi"><img src="assets/omp-mark.svg" width="108" height="108" loading="lazy" alt=""><span>omp</span></a>
-              <p class="powered-brand-capabilities">SUBAGENTS <span>·</span> PLAN MODE <span>·</span> LSP / DAP <span>·</span> HASHLINE</p>
-              <div class="powered-brand-bridge"><span>YOUR HOST</span><span aria-hidden="true">→</span><img src="assets/logo-96.png" width="30" height="30" loading="lazy" alt=""><strong>PinkCollab</strong><span>IN YOUR HAND</span></div>
+              <p class="powered-brand-capabilities">READ CODE <span>·</span> MAKE CHANGES <span>·</span> RUN TESTS</p>
             </div>
           </div>
           <ul class="powered-list">
-            <li><span class="powered-list-index">01 / RUN</span><b>Real OMP processes.</b> Creating a session from Android starts <code>omp --mode rpc-ui</code> on the host that owns the code, and later prompts continue that same conversation.</li>
-            <li><span class="powered-list-index">02 / OWN</span><b>Host-side credentials.</b> Configure model provider credentials on the host, not the phone; OMP may transmit them to your provider for model requests.</li>
-            <li><span class="powered-list-index">03 / REACH</span><b>Choose your reachability.</b> Funnel needs Tailscale on the host; private Serve needs it on the host and phone. You can also use your own HTTPS reverse proxy.</li>
+            <li><b>From a task to a plan.</b> OMP can explore a codebase, propose an approach in plan mode, and delegate independent work to subagents.</li>
+            <li><b>From code to a checked result.</b> Code intelligence and live debugging help OMP investigate problems. File edits, shell commands, and tests let it implement and check changes.</li>
+            <li><b>Built for ongoing work.</b> OMP supports your choice of model providers, saved sessions you can resume, and project rules, skills, and MCP servers that extend its workflow.</li>
           </ul>
         </div>
       </section>
