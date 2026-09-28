@@ -141,7 +141,11 @@ jobs:
           arch: x86_64
           ram-size: 2048M
           working-directory: android
-          script: ./gradlew :app:connectedDebugAndroidTest --console=plain
+          script: |
+            # The AVD's device profile declares a hardware keyboard, which hides
+            # the soft IME. The composer tests need a keyboard that can appear.
+            adb shell settings put secure show_ime_with_hard_keyboard 1
+            ./gradlew :app:connectedDebugAndroidTest --console=plain
       - uses: actions/upload-artifact@v7
         with:
           name: pinkcollab-android-debug
