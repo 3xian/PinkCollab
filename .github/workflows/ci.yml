@@ -151,11 +151,9 @@ jobs:
             # The AVD's device profile declares a hardware keyboard, which hides
             # the soft IME. The composer tests need a keyboard that can appear.
             adb shell settings put secure show_ime_with_hard_keyboard 1
-            ./gradlew :app:connectedDebugAndroidTest --console=plain || status=$?
-            if [ -n "$status" ]; then
-              adb logcat -d -b all -v threadtime | tail -300
-            fi
-            exit ${status:-0}
+            ./gradlew :app:connectedDebugAndroidTest --console=plain
+            mkdir -p app/build/reports
+            adb logcat -d -b all -v threadtime | tail -4000 > app/build/reports/device-logcat.txt
       - name: Upload device test report
         if: failure()
         uses: actions/upload-artifact@v7
@@ -164,6 +162,7 @@ jobs:
           path: |
             android/app/build/reports/androidTests/connected/**
             android/app/build/outputs/androidTest-results/connected/**
+            android/app/build/reports/device-logcat.txt
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v7
         with:
