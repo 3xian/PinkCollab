@@ -84,12 +84,6 @@ internal fun ModelPickerSheet(
                     if (runtimeAttached && ready != null) {
                         val catalog = ready.value
                         if (catalog.models.isNotEmpty()) ModelSearchField(query) { query = it }
-                        val thinkingLevels = thinkingLevelsForModel(catalog, pending.model, current)
-                        if (thinkingLevels.isNotEmpty()) {
-                            ThinkingLevelSlider(thinkingLevels, pending.thinkingLevel, canEdit) {
-                                pending = pending.copy(thinkingLevel = it)
-                            }
-                        }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         val grouped = groupModelsByProvider(filterModels(catalog.models, query))
                         if (catalog.models.isEmpty() || grouped.isEmpty()) {
@@ -151,6 +145,15 @@ internal fun ModelPickerSheet(
                             }
                         }
                     }
+                    if (runtimeAttached && ready != null) {
+                        val thinkingLevels = thinkingLevelsForModel(ready.value, pending.model, current)
+                        if (thinkingLevels.isNotEmpty()) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            ThinkingLevelSlider(thinkingLevels, pending.thinkingLevel, canEdit) {
+                                pending = pending.copy(thinkingLevel = it)
+                            }
+                        }
+                    }
                     ModelPickerActions(
                         dismiss = dismiss,
                         apply = { apply(changes) },
@@ -180,12 +183,25 @@ private fun ModelPickerHeader(dismiss: () -> Unit, refresh: () -> Unit, canRefre
 
 @Composable
 private fun ModelSearchField(query: String, onQueryChange: (String) -> Unit) {
-    OutlinedTextField(
+    TextField(
         value = query,
         onValueChange = onQueryChange,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).semantics { contentDescription = "Search models" },
-        placeholder = { Text("Search models…") },
-        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
+        textStyle = MaterialTheme.typography.bodyMedium,
+        placeholder = { Text("Search models…", style = MaterialTheme.typography.bodyMedium) },
+        leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
+        shape = RoundedCornerShape(18.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            disabledIndicatorColor = Color.Transparent,
+            focusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
         singleLine = true,
     )
     Spacer(Modifier.height(8.dp))
@@ -206,8 +222,6 @@ private fun ModelProviderHeader(provider: String, count: Int, expanded: Boolean,
                 .padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.width(4.dp).height(24.dp).clip(RoundedCornerShape(2.dp)).background(Purple400))
-            Spacer(Modifier.width(12.dp))
             Text(provider.uppercase(), modifier = Modifier.weight(1f), maxLines = 1,
                 overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall,
                 color = TextHigh, fontWeight = FontWeight.SemiBold)
@@ -227,7 +241,7 @@ private fun ModelProviderHeader(provider: String, count: Int, expanded: Boolean,
 private fun CompactModelRow(model: ModelInfo, selected: Boolean, enabled: Boolean, onSelect: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(start = 26.dp, end = 12.dp, top = 2.dp, bottom = 2.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(if (selected) CircleShape else RoundedCornerShape(10.dp))
             .heightIn(min = 50.dp)
             .background(if (selected) Purple700.copy(alpha = 0.7f) else Color.Transparent)
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onSelect))

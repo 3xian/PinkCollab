@@ -8,7 +8,9 @@ import dev.pinkcollab.data.OperationReceipt
 import dev.pinkcollab.data.OperationStatus
 import dev.pinkcollab.data.RuntimeExecution
 import dev.pinkcollab.data.SessionDetail
+import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
+import dev.pinkcollab.data.TimelineItem
 
 internal data class SessionPageState(
     val detail: LoadState<SessionDetail>,
@@ -18,6 +20,9 @@ internal data class SessionPageState(
     val activity: SessionActivity,
     val sendProgress: SendProgress?,
     val model: LoadState<ModelCatalog>?,
+    val refreshError: String? = null,
+    val historyItems: List<TimelineItem>? = null,
+    val summary: Session? = null,
 )
 
 internal sealed interface SessionAction {
@@ -76,13 +81,11 @@ internal fun sessionControls(
     )
 }
 
-internal fun operationStatusText(receipt: OperationReceipt): String = when (receipt.status) {
-    OperationStatus.Accepted -> "${receipt.commandType}: received by Gateway"
-    OperationStatus.Dispatching -> "${receipt.commandType}: sending to OMP"
-    OperationStatus.Running -> "${receipt.commandType}: running"
-    OperationStatus.OutcomeUnknown -> "${receipt.commandType}: outcome unconfirmed; check this session before retrying"
-    OperationStatus.Failed -> "${receipt.commandType}: ${receipt.errorCode ?: "failed"}"
-    OperationStatus.Cancelled -> "${receipt.commandType}: cancelled"
-    OperationStatus.Succeeded -> "${receipt.commandType}: succeeded"
-    is OperationStatus.Unknown -> "${receipt.commandType}: ${receipt.status.wire}"
+internal fun operationStatusText(receipt: OperationReceipt): String? = when (receipt.status) {
+    OperationStatus.OutcomeUnknown, is OperationStatus.Unknown ->
+        "Could not confirm the result. Check the conversation before trying again."
+    OperationStatus.Failed -> if (receipt.commandType == "prompt")
+        "Your message could not be sent. Please try again."
+        else "The action could not be completed. Please try again."
+    else -> null
 }

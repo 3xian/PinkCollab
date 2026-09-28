@@ -32,6 +32,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -48,9 +50,10 @@ internal fun SessionPage(
     state: SessionPageState,
     onAction: (SessionAction) -> Unit,
     onApplyModelSettings: (ModelSettingsChanges) -> Boolean,
+    isActive: Boolean = true,
 ) {
     val load = state.detail
-    val host = state.host
+    val host = state.host.takeIf { load is LoadState.Ready }
     val draft = state.draft
     val selectingFiles = state.selectingFiles
     val activity = state.activity
@@ -64,18 +67,12 @@ internal fun SessionPage(
     val onRespond: (AttentionResponse) -> Unit = { onAction(SessionAction.Respond(it)) }
     val onLoadModels: (Boolean) -> Unit = { onAction(SessionAction.LoadModels(it)) }
     val onLoadEarlier: () -> Unit = { onAction(SessionAction.LoadEarlierHistory) }
-    when (load) {
-        LoadState.Loading -> {
-            TimelineLoadingState()
-            return
-        }
-        is LoadState.Failed -> {
-            EmptyState("Could not load this session", load.message, "Retry", onRetry)
-            return
-        }
-        is LoadState.Ready -> Unit
-    }
-    val detail = load.value
+    // Keep the composer mounted while the selected session's details arrive.
+    // The summary supplies identity only; it does not enable runtime actions.
+    val detail = (load as? LoadState.Ready)?.value ?: SessionDetail(
+        session = requireNotNull(state.summary),
+        savedHistory = SavedHistory.Loading,
+    )
     val context = LocalContext.current
     val markwon = remember(context) { Markwon.create(context) }
     val session = detail.session
@@ -101,13 +98,19 @@ internal fun SessionPage(
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
     val savedHistory = detail.savedHistory
-    val historyTimeline = remember(savedHistory.items) { projectSessionTimeline(savedHistory.items) }
+    val historyItems = state.historyItems ?: savedHistory.items
+    val historyTimeline = remember(historyItems) { projectSessionTimeline(historyItems) }
     val liveTimeline = if (session.runtimeAttached) {
         remember(detail.liveItems) { projectSessionTimeline(detail.liveItems) }
     } else emptyList()
     val hasSavedMessages = historyTimeline.isNotEmpty() || savedHistory.nextCursor != null
-    val timelineState = rememberLazyListState()
+    val awaitingHistory = state.refreshError == null && savedHistory == SavedHistory.Loading && historyTimeline.isEmpty() &&
+        liveTimeline.isEmpty() && detail.streaming.isBlank() && session.attention == null
+    val timelineState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE)
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
+    LaunchedEffect(isActive) {
+        if (isActive) followTimeline = true
+    }
 
     val inputEnabled = controls.inputEnabled
     var inputFocused by remember { mutableStateOf(false) }
@@ -126,6 +129,7 @@ internal fun SessionPage(
         }
     }
     LaunchedEffect(
+        isActive,
         historyTimeline,
         liveTimeline,
         detail.streaming,
@@ -133,18 +137,22 @@ internal fun SessionPage(
         composerHeightPx,
         followTimeline,
     ) {
-        if (!followTimeline) return@LaunchedEffect
+        if (!isActive || !followTimeline) return@LaunchedEffect
         withFrameNanos { }
         val lastItemIndex = timelineState.layoutInfo.totalItemsCount - 1
         if (lastItemIndex >= 0) timelineState.scrollToItem(lastItemIndex)
     }
     val density = LocalDensity.current
     val composerClearance = with(density) { composerHeightPx.toDp() } + 12.dp
-    // The scaffold already reserves the navigation bar below the composer, so the keyboard
-    // overlap has to be measured from that edge rather than the window bottom: padding by the
-    // raw IME inset would lift the composer by a whole navigation bar too much.
-    val imeOverlap = WindowInsets.ime.getBottom(density) - WindowInsets.navigationBars.getBottom(density)
-    val composerImePadding = with(density) { imeOverlap.coerceAtLeast(0).toDp() }
+    val imeInsets = WindowInsets.ime
+    val navigationInsets = WindowInsets.navigationBars
+    // IME insets animate every frame. Moving the composer during placement keeps that
+    // animation from remeasuring its text field, buttons, and attachment chips.
+    val keyboardOffset = Modifier.offset {
+        val overlap = (imeInsets.getBottom(this) - navigationInsets.getBottom(this))
+            .coerceAtLeast(0)
+        IntOffset(0, -overlap)
+    }
     val composerShape = RoundedCornerShape(14.dp)
     val composerFill = Brush.verticalGradient(
         listOf(
@@ -153,11 +161,6 @@ internal fun SessionPage(
         ),
     )
     val idleBorder = Brush.linearGradient(listOf(Color.White.copy(alpha = 0.16f), Purple400.copy(alpha = 0.14f)))
-    val composerBorder = if (inputFocused) {
-        Brush.linearGradient(listOf(Purple400.copy(alpha = 0.74f), Violet400.copy(alpha = 0.54f)))
-    } else {
-        idleBorder
-    }
     fun Modifier.composerCard(border: Brush? = null) = this
         .shadow(
             elevation = 18.dp,
@@ -172,7 +175,7 @@ internal fun SessionPage(
     val placeholder = controls.placeholder
 
     Box(Modifier.fillMaxSize()) {
-        MaterialTheme(
+        if (load is LoadState.Ready) MaterialTheme(
             colorScheme = MaterialTheme.colorScheme,
             typography = SessionTypography,
         ) {
@@ -204,9 +207,16 @@ internal fun SessionPage(
                 }
             }
             if (session.runtimeAttached) {
-                if (liveTimeline.isEmpty()) item(key = "timeline-empty") {
+                if (liveTimeline.isEmpty() && !hasSavedMessages && detail.streaming.isBlank() && session.attention == null &&
+                    savedHistory != SavedHistory.Loading && savedHistory != SavedHistory.Failed) item(key = "timeline-empty") {
                     Text(
-                        "Waiting for the agent…",
+                        when (session.status) {
+                            SessionStatus.Starting -> "Starting the agent…"
+                            SessionStatus.Running -> "The agent is working…"
+                            SessionStatus.Stopping -> "Stopping the agent…"
+                            SessionStatus.NeedsInput -> "The agent needs your input."
+                            SessionStatus.Idle -> "Send a message to start the conversation."
+                        },
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = TextMid,
@@ -238,16 +248,43 @@ internal fun SessionPage(
                     }
                 }
             }
-            detail.operations.lastOrNull()?.takeIf { it.status != OperationStatus.Succeeded }?.let { receipt -> item(key = "operation-${receipt.commandId}") {
-                val text = operationStatusText(receipt)
-                Text(text, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = if (receipt.status == OperationStatus.OutcomeUnknown || receipt.status == OperationStatus.Failed) Red400 else TextMid)
-            } }
+            detail.operations.lastOrNull()?.let { receipt ->
+                operationStatusText(receipt)?.let { text ->
+                    item(key = "operation-${receipt.commandId}") {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        ) {
+                            Text(text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
             session.attention?.let { attention -> item { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
+            if (savedHistory == SavedHistory.Failed || state.refreshError != null) item(key = "history-failed") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                    Text(state.refreshError ?: "Could not load message history", color = TextMid,
+                        style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onRetry) { Text("Retry") }
+                }
+            }
+            // A separate end anchor reaches the bottom even when the final message is taller than the viewport.
+            item(key = "timeline-end") { Spacer(Modifier.height(1.dp)) }
         }
+        }
+        if (load is LoadState.Failed) {
+            EmptyState("Could not load this session", load.message, "Retry", onRetry,
+                modifier = Modifier.padding(bottom = composerClearance))
+        } else if (load == LoadState.Loading || awaitingHistory) {
+            TimelineLoadingState(Modifier.padding(bottom = composerClearance)
+                .testTag(if (load == LoadState.Loading) "sessionLoading" else "historyLoading"))
         }
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
+                .then(keyboardOffset)
                 .fillMaxWidth()
                 .height(composerClearance + 104.dp)
                 .background(
@@ -262,8 +299,8 @@ internal fun SessionPage(
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
+                .then(keyboardOffset)
                 .fillMaxWidth()
-                .padding(bottom = composerImePadding)
                 .padding(horizontal = 12.dp, vertical = 6.dp)
                 .onSizeChanged { composerHeightPx = it.height },
         ) {
@@ -271,6 +308,11 @@ internal fun SessionPage(
                 Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val composerBorder = if (inputFocused) {
+                    Brush.linearGradient(listOf(Purple400.copy(alpha = 0.74f), Violet400.copy(alpha = 0.54f)))
+                } else {
+                    idleBorder
+                }
                 Column(
                     Modifier
                         .weight(1f)
@@ -291,6 +333,7 @@ internal fun SessionPage(
                             value = prompt,
                             onValueChange = onDraftTextChange,
                             modifier = Modifier
+                                .testTag("sessionInput")
                                 .weight(1f)
                                 .heightIn(min = 48.dp, max = 180.dp)
                                 // Center the first 20sp line beside the 48dp attachment target.

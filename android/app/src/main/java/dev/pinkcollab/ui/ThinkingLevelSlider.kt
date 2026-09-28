@@ -1,51 +1,41 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.FilterChip
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import dev.pinkcollab.ui.theme.TextMid
-import kotlin.math.exp
+import dev.pinkcollab.ui.theme.Teal300
+import dev.pinkcollab.ui.theme.BrandPurple
+import dev.pinkcollab.ui.theme.BrandPink
 import kotlin.math.roundToInt
 
-/** A continuous drag follows the finger with resistance at the ends, then springs to a model-provided level. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ThinkingLevelSlider(
     levels: List<String>,
@@ -54,92 +44,96 @@ internal fun ThinkingLevelSlider(
     onSelect: (String) -> Unit,
 ) {
     if (levels.isEmpty()) return
-    val latestOnSelect by rememberUpdatedState(onSelect)
-    var settledIndex by remember(levels) { mutableStateOf(levels.indexOf(selected).takeIf { it >= 0 }) }
-    var dragging by remember(levels) { mutableStateOf(false) }
-    var dragX by remember(levels) { mutableFloatStateOf(0f) }
-    LaunchedEffect(levels, selected) {
-        if (!dragging) settledIndex = levels.indexOf(selected).takeIf { it >= 0 }
-    }
+    val selectedIndex = levels.indexOf(selected)
+    val selectedLabel = levels.getOrNull(selectedIndex) ?: "Not set"
+    val sliderEnabled = enabled && levels.size > 1
+    val accent = Teal300
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-        Text("Thinking", style = MaterialTheme.typography.labelLarge, color = TextMid,
-            modifier = Modifier.padding(bottom = 8.dp))
-        BoxWithConstraints(
-            Modifier.fillMaxWidth().height(48.dp)
-                .testTag("thinkingSlider")
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-        ) {
-            val cellWidth = maxWidth / levels.size
-            val cellPx = constraints.maxWidth.toFloat() / levels.size
-            val maxX = (levels.size - 1) * cellPx
-            val position = if (dragging) dampedDragPosition(dragX, maxX, cellPx * 0.35f)
-                else (settledIndex ?: 0) * cellPx
-            val animatedX by animateFloatAsState(
-                targetValue = position,
-                animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow),
-                label = "Thinking level position",
-            )
-            val visualIndex = if (dragging) ((dragX + cellPx / 2) / cellPx).roundToInt()
-                .coerceIn(levels.indices) else settledIndex
-
-            if (dragging || settledIndex != null) {
-                Box(
-                    Modifier.offset { IntOffset(animatedX.roundToInt(), 0) }
-                        .width(cellWidth).fillMaxHeight().padding(3.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                )
-            }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Thinking", style = MaterialTheme.typography.labelLarge, color = TextMid)
+            Text(selectedLabel, style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary)
+        }
+        if (selectedIndex < 0 || levels.size == 1) {
             Row(
-                Modifier.fillMaxWidth().fillMaxHeight().pointerInput(levels, enabled, cellPx) {
-                    if (!enabled) return@pointerInput
-                    detectHorizontalDragGestures(
-                        onDragStart = { start: Offset ->
-                            dragging = true
-                            dragX = start.x - cellPx / 2
-                        },
-                        onHorizontalDrag = { change, delta ->
-                            change.consume()
-                            dragX += delta
-                        },
-                        onDragEnd = {
-                            val index = ((dragX + cellPx / 2) / cellPx).roundToInt()
-                                .coerceIn(levels.indices)
-                            settledIndex = index
-                            dragging = false
-                            latestOnSelect(levels[index])
-                        },
-                        onDragCancel = { dragging = false },
-                    )
-                },
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                levels.forEachIndexed { index, level ->
-                    val isSelected = visualIndex == index
-                    Box(
-                        Modifier.weight(1f).fillMaxHeight()
-                            .clickable(enabled = enabled, role = Role.RadioButton) {
-                                settledIndex = index
-                                latestOnSelect(level)
-                            }
-                            .semantics { this.selected = isSelected },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(level, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                levels.forEach { level ->
+                    FilterChip(
+                        selected = selected == level,
+                        onClick = { onSelect(level) },
+                        enabled = enabled,
+                        label = { Text(level) },
+                        modifier = Modifier.testTag(
+                            if (levels.size == 1) "thinkingSingleLevel" else "thinkingLevel:$level",
+                        ),
+                    )
                 }
             }
+            return@Column
         }
+        Slider(
+            value = selectedIndex.toFloat(),
+            onValueChange = { value -> onSelect(levels[value.roundToInt().coerceIn(levels.indices)]) },
+            enabled = sliderEnabled,
+            track = { state ->
+                val inactiveColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                val disabledColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                val tickColor = MaterialTheme.colorScheme.onSurfaceVariant
+                Canvas(Modifier.fillMaxWidth().height(8.dp)) {
+                    val radius = size.height / 2
+                    val startX = radius
+                    val endX = (size.width - radius).coerceAtLeast(startX)
+                    val rtl = layoutDirection == LayoutDirection.Rtl
+                    val start = Offset(if (rtl) endX else startX, radius)
+                    val end = Offset(if (rtl) startX else endX, radius)
+                    val range = state.valueRange
+                    val fraction = ((state.value - range.start) / (range.endInclusive - range.start))
+                        .coerceIn(0f, 1f)
+                    drawLine(inactiveColor, start, end, size.height, StrokeCap.Round)
+                    if (fraction > 0f) {
+                        val activeEnd = Offset(start.x + (end.x - start.x) * fraction, radius)
+                        drawLine(
+                            brush = Brush.linearGradient(
+                                colors = if (sliderEnabled) listOf(BrandPurple, BrandPink)
+                                    else listOf(disabledColor, disabledColor),
+                                start = start,
+                                end = activeEnd,
+                            ),
+                            start = start,
+                            end = activeEnd,
+                            strokeWidth = size.height,
+                            cap = StrokeCap.Round,
+                        )
+                    }
+                    if (levels.size > 1) {
+                        levels.indices.forEach { index ->
+                            val tickFraction = index.toFloat() / levels.lastIndex
+                            drawCircle(
+                                color = tickColor.copy(alpha = 0.6f),
+                                radius = 1.dp.toPx(),
+                                center = Offset(start.x + (end.x - start.x) * tickFraction, radius),
+                            )
+                        }
+                    }
+                }
+            },
+            thumb = {
+                Icon(
+                    imageVector = Icons.Filled.Bolt,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = if (sliderEnabled) accent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                )
+            },
+            valueRange = 0f..levels.lastIndex.coerceAtLeast(1).toFloat(),
+            steps = (levels.size - 2).coerceAtLeast(0),
+            modifier = Modifier.fillMaxWidth().testTag("thinkingSlider").semantics {
+                contentDescription = "Thinking"
+                stateDescription = selectedLabel
+            },
+        )
     }
-}
-
-private fun dampedDragPosition(raw: Float, max: Float, resistance: Float): Float = when {
-    raw < 0f -> -resistance * (1f - exp(raw / resistance))
-    raw > max -> max + resistance * (1f - exp((max - raw) / resistance))
-    else -> raw
 }

@@ -79,7 +79,7 @@ internal fun ResourcesScreen(
                 host.connection == ConnectionState.Synchronizing ||
                 host.connection == ConnectionState.Reconnecting
             val (connectionLabel, connectionColor) = when (host.connection) {
-                ConnectionState.Connecting, ConnectionState.Synchronizing, ConnectionState.Reconnecting -> "Connecting…" to Amber300
+                ConnectionState.Connecting, ConnectionState.Synchronizing, ConnectionState.Reconnecting -> "Connecting" to Amber300
                 is ConnectionState.Online -> "Online" to Teal300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400

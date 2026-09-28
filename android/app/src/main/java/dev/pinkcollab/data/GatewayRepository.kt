@@ -29,7 +29,8 @@ internal class GatewayRepository(
     val state = mutable.asStateFlow()
     private val errorChannel = Channel<String>(Channel.BUFFERED)
     val errors = errorChannel.receiveAsFlow()
-    private val connections = HostConnectionSupervisor(scope, api, ::connectionState, ::event)
+    private val connections: HostConnectionSupervisor = HostConnectionSupervisor(scope, api, ::connectionState, ::event,
+        { hostId, sessionId -> sessions.invalidateSubscription(hostId, sessionId) })
     private val directories = DirectoryGateway(scope, api, ::paired)
     private val attachments = AttachmentUploader(api, ::paired)
     private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()

@@ -139,8 +139,8 @@ private fun ComposerRailButton(
 
 /** Visible composer copy is the selected model name, never the word "Model". */
 internal fun composerModelLabel(model: ModelInfo?): String {
-    model ?: return "Not selected"
-    return model.name.takeIf { it.isNotBlank() } ?: model.id.takeIf { it.isNotBlank() } ?: "Not selected"
+    model ?: return "Select model"
+    return model.name.takeIf { it.isNotBlank() } ?: model.id.takeIf { it.isNotBlank() } ?: "Select model"
 }
 
 internal fun composerThinkingLabel(model: ModelInfo?): String? =

@@ -40,8 +40,8 @@ class ModelSelectionTest {
     fun composer_model_label_is_the_selected_name() {
         assertEquals("Claude Sonnet", composerModelLabel(ModelInfo("anthropic", "claude-sonnet", "Claude Sonnet")))
         assertEquals("claude-sonnet", composerModelLabel(ModelInfo("anthropic", "claude-sonnet", " ")))
-        assertEquals("Not selected", composerModelLabel(null))
-        assertEquals("Not selected", composerModelLabel(ModelInfo("anthropic", "", " ")))
+        assertEquals("Select model", composerModelLabel(null))
+        assertEquals("Select model", composerModelLabel(ModelInfo("anthropic", "", " ")))
     }
 
     @Test

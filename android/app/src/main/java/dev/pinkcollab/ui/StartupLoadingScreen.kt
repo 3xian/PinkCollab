@@ -2,6 +2,7 @@ package dev.pinkcollab.ui
 
 import android.graphics.Movie
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -22,13 +23,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -41,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import dev.pinkcollab.R
 import dev.pinkcollab.data.AppState
 import dev.pinkcollab.data.InitialSyncTimeoutMillis
@@ -107,7 +105,7 @@ internal fun StartupLoadingScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            AnimatedStartupLogo()
+            AnimatedLoadingLogo()
             Spacer(Modifier.height(20.dp))
             Text(
                 "PinkCollab",
@@ -153,28 +151,24 @@ internal fun StartupLoadingScreen() {
 }
 
 @Composable
-private fun AnimatedStartupLogo() {
+internal fun AnimatedLoadingLogo(logoSize: Dp = 248.dp) {
     val context = LocalContext.current
     val movie = remember(context) {
         context.resources.openRawResource(R.raw.login_logo).use(Movie::decodeStream)
     }
-    var elapsedMillis by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(movie) {
-        var startNanos = 0L
-        while (true) {
-            withFrameNanos { now ->
-                if (startNanos == 0L) startNanos = now
-                elapsedMillis = (now - startNanos) / 1_000_000L
-            }
-        }
-    }
+    val frameDuration = movie?.duration()?.takeIf { it > 0 } ?: 1920
+    val motion = rememberInfiniteTransition(label = "loadingCharacter")
+    val frameProgress by motion.animateFloat(0f, 1f,
+        infiniteRepeatable(tween(frameDuration, easing = LinearEasing)), label = "gifFrame")
+    val glowProgress by motion.animateFloat(0f, 1f,
+        infiniteRepeatable(tween(2800, easing = LinearEasing)), label = "glow")
 
     Box(
-        modifier = Modifier.size(248.dp),
+        modifier = Modifier.size(logoSize),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            val phase = (elapsedMillis % 2_800L) / 2_800f
+            val phase = glowProgress
             val wave = sin(PI * phase).toFloat()
             val breath = wave * wave
             val center = Offset(size.width * 0.51f, size.height * 0.5f)
@@ -193,12 +187,11 @@ private fun AnimatedStartupLogo() {
             )
         }
         if (movie != null) {
-            Canvas(Modifier.size(176.dp)) {
-                val frameDuration = movie.duration().takeIf { it > 0 } ?: 1920
+            Canvas(Modifier.size(logoSize * (176f / 248f))) {
                 val canvas = drawContext.canvas.nativeCanvas
                 val saved = canvas.save()
                 canvas.scale(size.width / movie.width(), size.height / movie.height())
-                movie.setTime((elapsedMillis % frameDuration).toInt())
+                movie.setTime((frameProgress * frameDuration).toInt())
                 movie.draw(canvas, 0f, 0f)
                 canvas.restoreToCount(saved)
             }
@@ -206,7 +199,7 @@ private fun AnimatedStartupLogo() {
             Image(
                 painter = painterResource(R.drawable.pinkcollab_logo),
                 contentDescription = null,
-                modifier = Modifier.size(176.dp),
+                modifier = Modifier.size(logoSize * (176f / 248f)),
             )
         }
     }

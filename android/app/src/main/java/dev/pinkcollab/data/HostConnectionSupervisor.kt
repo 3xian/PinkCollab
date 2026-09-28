@@ -21,6 +21,7 @@ internal class HostConnectionSupervisor(
     private val api: GatewayTransport,
     private val onState: (String, ConnectionState) -> Unit,
     private val onFrame: (String, JSONObject) -> Unit,
+    private val onSubscriptionEnded: (String, String) -> Unit,
 ) {
     private val lock = Any()
     private val connections = mutableMapOf<String, HostConnection>()
@@ -28,6 +29,7 @@ internal class HostConnectionSupervisor(
 
     fun connect(paired: PairedHost) {
         synchronized(lock) {
+            invalidateSubscriptions(paired.host.id)
             val connection = HostConnection(paired)
             connections.put(paired.host.id, connection)?.stop()
             connection.start()
@@ -35,12 +37,17 @@ internal class HostConnectionSupervisor(
     }
 
     fun forget(hostId: String) {
-        synchronized(lock) { connections.remove(hostId)?.stop(); desiredSessions.remove(hostId) }
+        synchronized(lock) {
+            invalidateSubscriptions(hostId)
+            connections.remove(hostId)?.stop()
+            desiredSessions.remove(hostId)
+        }
     }
 
     fun subscribe(hostId: String, sessionId: String) {
         synchronized(lock) {
             desiredSessions.getOrPut(hostId) { mutableSetOf() }.add(sessionId)
+            onSubscriptionEnded(hostId, sessionId)
             connections[hostId]?.subscribe(sessionId)
         }
     }
@@ -52,24 +59,32 @@ internal class HostConnectionSupervisor(
         synchronized(lock) {
             desiredSessions.forEach { (otherHost, sessions) ->
                 sessions.toList().filter { otherHost != hostId || it != sessionId }.forEach { old ->
-                    sessions.remove(old)
-                    connections[otherHost]?.unsubscribe(old)
+                    unsubscribe(otherHost, old)
                 }
             }
-            desiredSessions.getOrPut(hostId) { mutableSetOf() }.add(sessionId)
-            connections[hostId]?.subscribe(sessionId)
+            subscribe(hostId, sessionId)
         }
     }
 
     fun unsubscribe(hostId: String, sessionId: String) {
         synchronized(lock) {
             desiredSessions[hostId]?.remove(sessionId)
+            onSubscriptionEnded(hostId, sessionId)
             connections[hostId]?.unsubscribe(sessionId)
         }
     }
 
     fun networkUnavailable(hostIds: Collection<String>) {
-        synchronized(lock) { hostIds.forEach { connections[it]?.markOffline() } }
+        synchronized(lock) {
+            hostIds.forEach {
+                invalidateSubscriptions(it)
+                connections[it]?.markOffline()
+            }
+        }
+    }
+
+    private fun invalidateSubscriptions(hostId: String) {
+        desiredSessions[hostId]?.forEach { onSubscriptionEnded(hostId, it) }
     }
 
     private inner class HostConnection(private val paired: PairedHost) {
@@ -137,6 +152,8 @@ internal class HostConnectionSupervisor(
         private fun emitState(expectedGeneration: Long, state: ConnectionState) {
             synchronized(lock) {
                 if (generation.get() == expectedGeneration && connections[paired.host.id] === this) {
+                    if (state == ConnectionState.Reconnecting || state == ConnectionState.AuthenticationRequired ||
+                        state == ConnectionState.UpgradeRequired) invalidateSubscriptions(paired.host.id)
                     onState(paired.host.id, state)
                 }
             }
@@ -145,6 +162,9 @@ internal class HostConnectionSupervisor(
         private fun handleFrame(expectedGeneration: Long, frame: JSONObject) {
             synchronized(lock) {
                 if (generation.get() == expectedGeneration && connections[paired.host.id] === this) {
+                    val resource = frame.optString("resource")
+                    if (resource.startsWith("session/") &&
+                        desiredSessions[paired.host.id]?.contains(resource.removePrefix("session/")) != true) return
                     onFrame(paired.host.id, frame)
                 }
             }

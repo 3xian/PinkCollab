@@ -183,6 +183,12 @@ class V2ReducerTest {
         val mapped = reduceV2(beforeMapping.state, "host", metadata)
         assertEquals(listOf(GatewayEffect.LoadHistory(sessionKey)), mapped.effects)
         assertEquals(SavedHistory.Loading, mapped.state.details.getValue(sessionKey).savedHistory)
+        metadata.getJSONArray("changes").getJSONObject(0).getJSONObject("value")
+            .put("historyChanged", false)
+        val titleOnly = reduceV2(beforeMapping.state, "host", metadata)
+        assertTrue(titleOnly.effects.isEmpty())
+        assertEquals(beforeMapping.state.details.getValue(sessionKey).savedHistory,
+            titleOnly.state.details.getValue(sessionKey).savedHistory)
     }
 
     @Test fun runtime_exit_clears_previous_history_until_the_new_page_arrives() {

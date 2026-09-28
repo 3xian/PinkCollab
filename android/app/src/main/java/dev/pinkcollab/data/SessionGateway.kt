@@ -1,6 +1,9 @@
 package dev.pinkcollab.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -32,9 +35,22 @@ internal class SessionGateway(
 
     suspend fun detail(hostId: String, id: String) {
         val key = SessionKey(hostId, id)
-        mutable.update { it.copy(details = it.details - key) }
+        invalidateSubscription(hostId, id)
         focus(hostId, id)
         awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[key]?.subscriptionId != null }
+    }
+
+    /** Release subscription-owned work without evicting the last visible session or transcript. */
+    fun invalidateSubscription(hostId: String, id: String) {
+        val key = SessionKey(hostId, id)
+        mutable.update { app ->
+            val current = app.details[key] ?: return@update app
+            app.copy(details = app.details + (key to current.copy(
+                subscriptionId = null,
+                cursor = null,
+                savedHistory = if (current.savedHistory is SavedHistory.Loading) SavedHistory.Failed else current.savedHistory,
+            )))
+        }
     }
 
     suspend fun loadHistory(hostId: String, id: String, subscriptionId: String?) {
@@ -48,8 +64,9 @@ internal class SessionGateway(
         val request = HistoryRequest(subscriptionId, before.historyEpoch)
         val p = paired(hostId)
         val page = try {
-            parseHistoryPage(api.request(p.url, p.credential, "/api/v2/sessions/$id/history", query = "limit" to "100"))
+            firstHistoryPage(key, request, p) ?: return
         } catch (failure: Exception) {
+            if (failure is CancellationException) throw failure
             // A visible page stays visible. An in-flight first page must not become "no messages".
             updateMatched(key, request) { current ->
                 if (current.savedHistory is SavedHistory.Ready) current else current.copy(savedHistory = SavedHistory.Failed)
@@ -61,6 +78,35 @@ internal class SessionGateway(
                 savedHistory = SavedHistory.Ready(page.source, page.items, page.nextCursor),
                 liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
             )
+        }
+    }
+
+    private suspend fun firstHistoryPage(key: SessionKey, request: HistoryRequest, p: PairedHost): HistoryPage? {
+        var retries = 0
+        while (true) {
+            val current = state.value.details[key] ?: return null
+            if (!request.matches(current)) return null
+            try {
+                return parseHistoryPage(api.request(p.url, p.credential,
+                    "/api/v2/sessions/${key.sessionId}/history", query = "limit" to "100"))
+            } catch (failure: GatewayHttpException) {
+                if (failure.errorCode !in setOf("history_unavailable", "stale_cursor")) throw failure
+                val latest = state.value.details[key] ?: return null
+                if (!request.matches(latest)) return null
+                // First-prompt metadata may arrive before OMP creates its transcript.
+                // Wait for that turn to settle, without treating missing data as empty history.
+                if (latest.savedHistory.sourceId == null && latest.session.isActive &&
+                    latest.session.runtimeExecution != RuntimeExecution.Quiescent) {
+                    state.first { app ->
+                        val detail = app.details[key]
+                        detail == null || !request.matches(detail) || !detail.session.isActive ||
+                            detail.session.runtimeExecution == RuntimeExecution.Quiescent
+                    }
+                    continue
+                }
+                if (retries++ >= 2) throw failure
+                delay(250)
+            }
         }
     }
 

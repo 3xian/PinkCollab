@@ -73,7 +73,7 @@ class ComposerRailDeviceTest {
             })
         }
 
-        compose.onNodeWithContentDescription("Choose model: Not selected").performClick()
+        compose.onNodeWithContentDescription("Choose model: Select model").performClick()
         compose.onNodeWithText("Start runtime").assertExists()
         compose.runOnIdle { assertTrue(actions.isEmpty()) }
         compose.onNodeWithText("Start runtime").performClick()

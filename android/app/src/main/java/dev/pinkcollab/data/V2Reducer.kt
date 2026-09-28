@@ -132,7 +132,7 @@ internal fun reduceV2(app: AppState, hostId: String, frame: JSONObject, nowEpoch
                         "v2.metadata.updated" -> {
                             updated = updated.copy(session = updated.session.withMetadata(value.getJSONObject("session")))
                             // Startup publishes the OMP mapping here; its path is intentionally absent from the wire.
-                            if (updated.savedHistory.sourceId == null) {
+                            if (value.optBoolean("historyChanged", true) && updated.savedHistory.sourceId == null) {
                                 if (updated.savedHistory !is SavedHistory.Ready) updated = updated.copy(savedHistory = SavedHistory.Loading)
                                 loadHistory = true
                             }

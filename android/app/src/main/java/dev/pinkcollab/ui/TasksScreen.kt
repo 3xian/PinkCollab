@@ -34,6 +34,8 @@ import androidx.compose.ui.zIndex
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 internal data class TasksScreenState(
     val app: AppState,
@@ -77,8 +79,38 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
     val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }
     val pagerKeys = remember(sessionKeys) { sessionKeys.map { it.pagerKey() } }
+    val displayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
+    SideEffect {
+        displayCache.keys.toList().filter { it !in sessionKeys }.forEach(displayCache::remove)
+        app.details.forEach { (key, detail) ->
+            if (key in sessionKeys) {
+                sessionDetailForDisplay(detail, displayCache[key])?.let { displayCache[key] = it }
+            }
+        }
+    }
 
     val scope = rememberCoroutineScope()
+    val latestSessions by rememberUpdatedState(sessions)
+    val latestHosts by rememberUpdatedState(app.hosts)
+    val latestActions by rememberUpdatedState(actions)
+    LaunchedEffect(pagerState) {
+        var lastRequested: Pair<SessionKey, String?>? = null
+        snapshotFlow {
+            if (pagerState.isScrollInProgress) null else {
+                latestSessions.getOrNull(pagerState.settledPage)?.let {
+                    SessionKey(it.hostId, it.id) to latestHosts[it.hostId]?.subscriptionId
+                }
+            }
+        }.collectLatest { target ->
+            if (target == null || target == lastRequested) return@collectLatest
+            delay(200)
+            val session = latestSessions.firstOrNull {
+                SessionKey(it.hostId, it.id) == target.first
+            } ?: return@collectLatest
+            latestActions.session(session, SessionAction.Retry)
+            lastRequested = target
+        }
+    }
 
     LaunchedEffect(selectedSession, sessionKeys) {
         val target = sessionKeys.indexOf(selectedSession)
@@ -137,23 +169,26 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                 val session = sessions[pageIndex]
                 val key = SessionKey(session.hostId, session.id)
                 val detail = app.details[key]
-                LaunchedEffect(key, pagerState.currentPage, app.hosts[session.hostId]?.subscriptionId) {
-                    if (pageIndex == pagerState.currentPage) actions.session(session, SessionAction.Retry)
-                }
-                val detailState = detail?.let { LoadState.Ready(it) }
+                val displayed = sessionDetailForDisplay(detail, displayCache[key])
+                val detailState = displayed?.let { LoadState.Ready(it.detail) }
                     ?: when (val request = detailLoads[key]) {
                         is LoadState.Failed -> request
                         else -> LoadState.Loading
                     }
                 SessionPage(
+                    isActive = pageIndex == pagerState.settledPage,
                     state = SessionPageState(
                         detail = detailState,
-                        host = app.hosts[session.hostId],
+                        summary = session,
+                        host = app.hosts[session.hostId].takeIf { detail != null },
                         draft = drafts[key] ?: SessionDraft(),
                         selectingFiles = fileSelections[key] ?: 0,
                         activity = sessionOperations.activity(key),
                         sendProgress = sendProgress[key],
                         model = modelLoads[key],
+                        historyItems = displayed?.historyItems,
+                        refreshError = if (detailLoads[key] is LoadState.Failed)
+                            "Could not refresh this conversation" else null,
                     ),
                     onAction = { action -> actions.session(session, action) },
                     onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
