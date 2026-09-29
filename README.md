@@ -2,7 +2,7 @@
 
 <h1 align="center">PinkCollab</h1>
 
-<p align="center"><a href="https://3xian.github.io/PinkCollab/">PinkCollab</a>, <strong>Android client for Oh My Pi (OMP).</strong></p>
+[PinkCollab](https://3xian.github.io/PinkCollab/), **Android client for Oh My Pi (OMP).**
 
 Trigger or continue [OMP](https://omp.sh/) sessions remotely. Swipe to switch between sessions smoothly and quickly.
 
