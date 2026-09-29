@@ -24,6 +24,27 @@ class ProtocolReducerTest {
         .put("upsert", JSONArray().also { if (text != null) it.put(item(text)) })
         .put("remove", JSONArray().also { if (remove) it.put("item") })
 
+    @Test fun discovery_adoption_replaces_card_without_losing_history() {
+        val frame = session(history = true).also { it.getJSONObject("session").put("origin", "discovered") }
+        var state = reduce(app(), frame).state
+        val detail = state.details.getValue(key)
+        assertEquals(SessionOrigin.Discovered, detail.session.origin)
+        assertFalse(detail.session.runtimeAttached)
+        assertNull(detail.session.workTiming)
+        assertNull(detail.session.generation)
+        assertEquals("History on host", detail.session.activity)
+        val saved = SavedHistory.Ready("source", listOf(TimelineItem("old", "user", "old prompt", "", "")), null)
+        state = state.copy(details = mapOf(key to detail.copy(savedHistory = saved)))
+        val managed = JSONObject().put("type", "session_upsert").put("sessionId", "session")
+            .put("session", record().put("origin", "managed")).put("runtime", JSONObject.NULL)
+        state = reduce(state, managed).state
+        assertEquals(1, state.hosts.getValue("host").sessions.size)
+        assertEquals(SessionOrigin.Managed, state.hosts.getValue("host").sessions.single().origin)
+        state = reduce(state, session("session_state", runtime("starting"))).state
+        assertEquals(SessionOrigin.Managed, state.details.getValue(key).session.origin)
+        assertEquals(saved, state.details.getValue(key).savedHistory)
+    }
+
     @Test fun snapshot_and_reconnect_replace_state_and_invalidate_old_history_requests() {
         val first = reduce(app(), session(runtime = runtime("idle"), history = true)).state
         val detail = first.details.getValue(key)

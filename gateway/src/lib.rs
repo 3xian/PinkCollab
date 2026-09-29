@@ -1,6 +1,7 @@
 pub mod api;
 pub mod command;
 pub mod config;
+pub mod discovery;
 pub mod domain;
 pub mod events;
 pub mod funnel;

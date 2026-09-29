@@ -34,6 +34,18 @@ impl SessionController {
             .context("OMP runtime limit reached")?;
         let session = { self.state.lock().await.session.clone() };
         let cwd = self.browser.validate(Path::new(&session.cwd))?;
+        let lookup = session.id.clone();
+        let expected_omp_id = self
+            .store
+            .run(move |store| store.adopted_omp_id(&lookup))
+            .await?;
+        if let Some(expected) = expected_omp_id.as_deref() {
+            let source =
+                crate::discovery::validate_mapping(&session, expected, self.browser.clone())
+                    .await?;
+            crate::discovery::ensure_quiet(&source.path).await?;
+            crate::history::history_page(&source.path, &session.id, None, 1).await?;
+        }
         let generation = storage::id("run_");
         let reserve_session = session.id.clone();
         let reserve_generation = generation.clone();
@@ -141,6 +153,12 @@ impl SessionController {
             }
             let response = runtime.request(json!({"type":"get_state"})).await?;
             let data = &response["data"];
+            ensure!(
+                expected_omp_id
+                    .as_deref()
+                    .is_none_or(|expected| omp::string(data, "sessionId") == expected),
+                "history_unavailable: OMP loaded a different session identity"
+            );
             let reference = omp::string(data, "sessionFile");
             ensure!(
                 !reference.is_empty(),

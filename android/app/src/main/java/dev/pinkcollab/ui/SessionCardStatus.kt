@@ -8,7 +8,7 @@ internal enum class SessionCardStatus(val label: String) {
     Connecting("Connecting"), Syncing("Syncing"), Reconnecting("Reconnecting"),
     Offline("Offline"), SignIn("Sign in"), UpdateRequired("Update required"),
     Starting("Starting"), Stopping("Stopping"), Working("Working"),
-    NeedsInput("Needs you"), Ready("Ready"), Inactive("Inactive"), Unknown("Unknown"),
+    History("History"), NeedsInput("Needs you"), Ready("Ready"), Inactive("Inactive"), Unknown("Unknown"),
 }
 
 /** Host connectivity qualifies all retained runtime evidence. Idle alone is not a pause or completion. */
@@ -23,6 +23,7 @@ internal fun sessionCardStatus(session: Session, connection: ConnectionState?): 
         is ConnectionState.Online -> Unit
     }
     return when {
+        session.origin == dev.pinkcollab.data.SessionOrigin.Discovered -> SessionCardStatus.History
         session.status == SessionStatus.Starting -> SessionCardStatus.Starting
         session.status == SessionStatus.Stopping -> SessionCardStatus.Stopping
         !session.runtimeAttached -> SessionCardStatus.Inactive

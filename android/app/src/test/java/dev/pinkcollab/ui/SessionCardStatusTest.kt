@@ -11,6 +11,13 @@ class SessionCardStatusTest {
     private val session = Session("s", "h", "/work", "Work", SessionStatus.Idle, "", false, null,
         "", "", true)
 
+    @Test fun discovered_card_is_history() {
+        val historical = session.copy(runtimeAttached = false, generation = null, origin = dev.pinkcollab.data.SessionOrigin.Discovered)
+        assertEquals(SessionCardStatus.History, sessionCardStatus(historical, online))
+        assertEquals("History", sessionCardStatus(historical, online).label)
+        assertEquals(SessionCardStatus.Offline, sessionCardStatus(historical, null))
+    }
+
     @Test fun `idle distinguishes ready absent runtime and startup`() {
         assertEquals(SessionCardStatus.Ready, sessionCardStatus(session, online))
         assertEquals(SessionCardStatus.Inactive, sessionCardStatus(session.copy(runtimeAttached = false), online))

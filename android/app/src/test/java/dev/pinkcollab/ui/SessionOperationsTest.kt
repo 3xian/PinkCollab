@@ -60,6 +60,25 @@ class SessionOperationsTest {
         }
     }
 
+    @Test fun discovered_send_and_failed_adoption_preserve_draft() = runTest {
+        val historical = session.copy(origin = dev.pinkcollab.data.SessionOrigin.Discovered,
+            runtimeAttached = false, generation = null, status = SessionStatus.Idle)
+        val drafts = SessionDraftStore()
+        drafts.setText(key, "continue")
+        val errors = mutableListOf<String>()
+        val failed = FakeActions(onPrompt = { throw IllegalStateException("History unavailable") })
+        SessionOperations(backgroundScope, failed, drafts, drafts::clearIfVersion, errors::add).send(historical)
+        runCurrent()
+        assertEquals(listOf("prompt"), failed.commands)
+        assertEquals(listOf("History unavailable"), errors)
+        assertEquals("continue", drafts.state.value.getValue(key).text)
+        val actions = FakeActions()
+        SessionOperations(backgroundScope, actions, drafts, drafts::clearIfVersion, errors::add).send(historical)
+        runCurrent()
+        assertEquals(listOf("prompt"), actions.commands)
+        assertTrue(key !in drafts.state.value)
+    }
+
     @Test fun stop_cancels_upload_without_submitting_prompt() = runTest {
         val drafts = SessionDraftStore()
         drafts.setText(key, "send me")

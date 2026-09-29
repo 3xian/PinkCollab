@@ -143,6 +143,8 @@ impl Command {
 }
 
 pub enum SubmitError {
+    HistoryUnavailable,
+    ExternalBusy,
     NotFound,
     Invalid(String),
     Persistence,
@@ -185,6 +187,8 @@ pub struct SessionController {
     args: Vec<String>,
 }
 pub struct SessionDirectory {
+    adoption: Mutex<()>,
+    discovery: Arc<Mutex<crate::discovery::Discovery>>,
     controllers: Mutex<HashMap<String, std::sync::Weak<SessionController>>>,
     store: Arc<Store>,
     browser: Arc<Browser>,
@@ -242,6 +246,7 @@ impl SessionController {
             .as_ref()
             .map(|_| "omp".to_string());
         Ok(SessionView {
+            origin: crate::protocol::SessionOrigin::Managed,
             session,
             runtime,
             recent_operations,
@@ -754,7 +759,9 @@ fn start_failure(err: anyhow::Error) -> CommandFailure {
     let message = format!("{err:#}");
     let code = if message.contains("limit") {
         "runtime_limit"
-    } else if message.contains("stored OMP session") {
+    } else if message.contains("external_session_busy") {
+        "external_session_busy"
+    } else if message.contains("history_unavailable") || message.contains("stored OMP session") {
         "history_unavailable"
     } else {
         "runtime_start_failed"

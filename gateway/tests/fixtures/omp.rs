@@ -118,7 +118,7 @@ fn main() {
         }
         spawn_lingering_child(&cwd);
     }
-    let log =
+    let mut log =
         std::env::current_dir()
             .unwrap()
             .join(if args.iter().any(|arg| arg == "--lazy-history") {
@@ -134,6 +134,7 @@ fn main() {
             .unwrap();
     }
     let mut parent = String::new();
+    let mut session_id = "fixture".to_owned();
     let all_models = [
         json!({"provider":"fixture","id":"fast","name":"Fixture Fast","reasoning":true,
             "thinking":{"mode":"effort","efforts":["low","high"]}}),
@@ -173,7 +174,7 @@ fn main() {
         };
         match frame["type"].as_str().unwrap_or_default() {
             "get_state" => ack(
-                json!({"sessionFile":log,"sessionId":"fixture","sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none() && !args.iter().any(|arg| arg == "--unknown-execution"),"isStreaming":pending_prompt_id.is_some()}),
+                json!({"sessionFile":log,"sessionId":session_id,"sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none() && !args.iter().any(|arg| arg == "--unknown-execution"),"isStreaming":pending_prompt_id.is_some()}),
             ),
             "get_available_thinking_levels" => {
                 let mut levels = vec![json!("off")];
@@ -187,6 +188,14 @@ fn main() {
                 ack(json!({"levels":levels}));
             }
             "switch_session" => {
+                log = std::path::PathBuf::from(frame["sessionPath"].as_str().unwrap());
+                session_id = std::fs::read_to_string(&log)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                    .find(|entry| entry["type"] == "session")
+                    .and_then(|entry| entry["id"].as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "fixture".into());
                 parent = std::fs::read_to_string(&log)
                     .unwrap_or_default()
                     .lines()

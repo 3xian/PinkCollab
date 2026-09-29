@@ -36,7 +36,9 @@ data class ModelInfo(
 data class ModelCatalog(val models: List<ModelInfo>, val thinkingLevels: List<String>)
 enum class SessionStatus { Starting, Running, NeedsInput, Stopping, Idle }
 
-data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val generation: String? = null, val workTiming: WorkTiming? = null) {
+enum class SessionOrigin { Managed, Discovered }
+
+data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val generation: String? = null, val workTiming: WorkTiming? = null, val origin: SessionOrigin = SessionOrigin.Managed) {
     /** A session is active while its OMP runtime is live, including the startup hand-off. */
     val isActive: Boolean get() = status == SessionStatus.Starting || runtimeAttached
 }
@@ -195,6 +197,7 @@ enum class TaskListLoadState { Loading, Ready, Unavailable }
 fun JSONObject.host() = Host(getString("id"), getString("name"), getString("os"), optString("ompVersion"), optString("gatewayVersion"))
 fun Host.json() = JSONObject().put("id", id).put("name", name).put("os", os).put("ompVersion", ompVersion).put("gatewayVersion", gatewayVersion)
 fun JSONObject.session(runtime: JSONObject? = null): Session {
+    require(optString("origin", "managed") != "discovered" || runtime == null) { "Discovered session has a runtime" }
     val pending = runtime?.optJSONArray("pendingInputs")?.objects().orEmpty()
     val a = pending.firstOrNull()?.let { Attention(it.getString("id"), AttentionType.fromWire(it.getString("type")), it.optString("text"), it.optJSONArray("options")?.strings().orEmpty()) }
     val status = when (runtime?.getString("state")) {
@@ -210,11 +213,15 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
         SessionStatus.Stopping -> "Stopping OMP"
         SessionStatus.Running -> "Working"
         SessionStatus.NeedsInput -> "Waiting for input"
-        SessionStatus.Idle -> "Ready to continue"
+        SessionStatus.Idle -> if (optString("origin") == "discovered") "History on host" else "Ready to continue"
     }
     return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() },
         runtime?.optJSONObject("workTiming")?.takeIf { it.has("elapsedMs") }?.let {
             WorkTiming(it.optLong("elapsedMs").coerceAtLeast(0), it.optBoolean("running"), it.optBoolean("completed"))
+        }, when (optString("origin", "managed")) {
+            "managed" -> SessionOrigin.Managed
+            "discovered" -> SessionOrigin.Discovered
+            else -> error("Unsupported session origin")
         })
 }
 fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))

@@ -8,10 +8,18 @@ use serde::Serialize;
 
 pub const GATEWAY_PROTOCOL_VERSION: u32 = 3;
 
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOrigin {
+    Managed,
+    Discovered,
+}
+
 /// Public models deliberately exclude persistence and dispatch bookkeeping.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionDto {
+    pub origin: SessionOrigin,
     pub id: String,
     pub host_id: String,
     pub cwd: String,
@@ -22,6 +30,7 @@ pub struct SessionDto {
 impl From<&SessionRecord> for SessionDto {
     fn from(s: &SessionRecord) -> Self {
         Self {
+            origin: SessionOrigin::Managed,
             id: s.id.clone(),
             host_id: s.host_id.clone(),
             cwd: s.cwd.clone(),
@@ -90,6 +99,8 @@ impl From<&OperationRecord> for OperationDto {
                 OperationErrorDto {
                     code: code.into(),
                     message: match code {
+                        "external_session_busy" => "Close the external OMP session and retry",
+                        "history_unavailable" => "OMP history is unavailable; refresh and retry",
                         "generation_mismatch" => "Runtime generation changed",
                         "input_pending" => "Answer the pending input first",
                         "runtime_required" => "No attached runtime",
@@ -122,7 +133,10 @@ impl SessionView {
     pub fn dto(&self) -> SessionSnapshot {
         SessionSnapshot {
             summary: SessionSummary {
-                session: SessionDto::from(&self.session),
+                session: SessionDto {
+                    origin: self.origin,
+                    ..SessionDto::from(&self.session)
+                },
                 runtime: self.runtime.as_ref().map(RuntimeDto::from),
             },
             timeline: self.messages.clone(),

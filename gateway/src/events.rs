@@ -102,6 +102,7 @@ mod tests {
             summary: SessionSummary {
                 runtime: None,
                 session: SessionDto {
+                    origin: crate::protocol::SessionOrigin::Managed,
                     id: "a".into(),
                     host_id: "h".into(),
                     cwd: "/work".into(),

@@ -235,6 +235,16 @@ async fn api_command(
         .submit(client_id, id, body.command_id, body.command)
         .await
         .map_err(|err| match err {
+            SubmitError::HistoryUnavailable => ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "history_unavailable",
+                "OMP history cannot be continued; refresh and retry".into(),
+            ),
+            SubmitError::ExternalBusy => ApiError(
+                StatusCode::CONFLICT,
+                "external_session_busy",
+                "Close the external OMP session and retry".into(),
+            ),
             SubmitError::NotFound => ApiError(
                 StatusCode::NOT_FOUND,
                 "session_not_found",
@@ -276,18 +286,14 @@ async fn api_upload(
     bytes: Bytes,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let read_id = id.clone();
-    let exists = app
-        .store
-        .run(move |store| Ok(store.v2_session(&read_id)?.is_some()))
-        .await
-        .map_err(|_| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "persistence_unavailable",
-                "Session record unavailable".into(),
-            )
-        })?;
-    if !exists {
+    let exists = app.sessions.view(&read_id).await.map_err(|_| {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "persistence_unavailable",
+            "Session record unavailable".into(),
+        )
+    })?;
+    if exists.is_none() {
         return Err(ApiError(
             StatusCode::NOT_FOUND,
             "session_not_found",
@@ -389,14 +395,14 @@ async fn api_history(
 ) -> Result<Json<Value>, ApiError> {
     let read_id = id.clone();
     let session = app
-        .store
-        .run(move |store| store.v2_session(&read_id))
+        .sessions
+        .history_view(&read_id)
         .await
         .map_err(|_| {
             ApiError(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "persistence_unavailable",
-                "Session record unavailable".into(),
+                "history_unavailable",
+                "OMP history is unavailable".into(),
             )
         })?
         .ok_or_else(|| {
@@ -406,7 +412,7 @@ async fn api_history(
                 "Session not found".into(),
             )
         })?;
-    let Some(reference) = session.engine_session_ref else {
+    let Some(reference) = session.session.engine_session_ref else {
         return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
     };
     if tokio::fs::metadata(&reference)

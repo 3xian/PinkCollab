@@ -48,6 +48,18 @@ class SessionGatewayTest {
         { _, _ -> },
     )
 
+    @Test fun discovered_history_load_and_recoverable_error() = runTest {
+        val key = SessionKey("host", "session")
+        val initial = loadingDetail().let { it.copy(session = it.session.copy(origin = SessionOrigin.Discovered)) }
+        val state = MutableStateFlow(AppState(details = mapOf(key to initial)))
+        val failing = gatewayWith(state, HistoryTransport { throw GatewayHttpException(503, "history_unavailable", "History unavailable") })
+        try { failing.loadHistory("host", "session", "sub"); error("Expected history failure") } catch (_: IOException) { }
+        assertEquals(SavedHistory.Failed, state.value.details.getValue(key).savedHistory)
+        gatewayWith(state, HistoryTransport { historyPage }).loadHistory("host", "session", "sub")
+        assertTrue(state.value.details.getValue(key).savedHistory is SavedHistory.Ready)
+        assertFalse(state.value.details.getValue(key).session.runtimeAttached)
+    }
+
     @Test fun history_page_becomes_ready() = runTest {
         val key = SessionKey("host", "session")
         val state = MutableStateFlow(AppState(details = mapOf(key to loadingDetail())))

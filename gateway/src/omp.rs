@@ -299,7 +299,7 @@ impl Runtime {
             // choice and stays an open observation on saturated pipe namespaces.
             .args(["--mode", "rpc-ui"])
             .args(args)
-            .current_dir(cwd)
+            .current_dir(crate::workspace::display(cwd))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());

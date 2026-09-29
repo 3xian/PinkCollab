@@ -60,3 +60,9 @@ node .github/actions/check-website/check-site.mjs
 ```
 
 API changes must match the [protocol](protocol.md).
+
+## Discovery regression checks
+
+`cargo test --all-features --locked` includes the external-OMP discovery/adoption fixtures. `cargo test --all-features --locked --test discovery` isolates the REST, history, race and restart cases. If Windows has the normal debug executable running, pass `--target-dir target-discovery` to Cargo instead of stopping that service. Run Android unit tests and `:app:assembleDebugAndroidTest` to compile the device suites; run `:app:connectedDebugAndroidTest` only with an attached test device. Storage-format evidence and supported scope are recorded in [OMP discovery](omp-discovery.md).
+
+With OMP installed, run `cargo test --all-features --locked --test discovery real_omp_resumes -- --ignored` for a real resume without a provider request. Set `OMP_EXECUTABLE` when it is not on PATH.

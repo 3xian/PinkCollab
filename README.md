@@ -4,7 +4,7 @@
 
 <p align="center"><a href="https://3xian.github.io/PinkCollab/">PinkCollab</a>, <strong>Android client for Oh My Pi (OMP).</strong></p>
 
-[OMP](https://omp.sh/) runs on your computer or server. Use the PinkCollab mobile app to start sessions and steer their progress.
+Continue sessions from your computer or start new ones remotely. Swipe to switch between conversations. [OMP](https://omp.sh/) runs on your computer or server.
 
 <p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="480" alt="PinkCollab app showing an OMP session on a phone" /></p>
 
@@ -95,3 +95,7 @@ flowchart TD
 ## License
 
 [MIT](LICENSE)
+
+### Continue an existing OMP conversation
+
+Conversations already saved by OMP in an allowed workspace also appear in Tasks with a **History** label. Open one to read it, then send a message to continue; PinkCollab adopts it automatically without copying its transcript. Close the external OMP instance first. See [supported storage and refresh behavior](docs/omp-discovery.md).

@@ -53,6 +53,7 @@ pub struct RuntimeSnapshot {
 
 #[derive(Clone, Debug)]
 pub struct SessionView {
+    pub origin: crate::protocol::SessionOrigin,
     pub session: SessionRecord,
     pub runtime: Option<RuntimeSnapshot>,
     pub recent_operations: Vec<OperationRecord>,

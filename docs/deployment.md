@@ -301,3 +301,7 @@ Repeated setup asks `Pair another phone? [y/N]` when devices already exist. Pres
 Enter to finish without generating a token. Non-interactive setup never generates
 one. Cancelling pairing leaves the Gateway running; use `pinkcollab pair` later.
 After a five-minute pairing expiry, press Enter to regenerate or Ctrl+C to finish.
+
+## Discovering host OMP conversations
+
+Run Gateway under the account owning the OMP sessions and allowlist their project directories. Existing supported OMP histories appear as History in Tasks. Default storage, profiles, absolute `omp_args: ["--session-dir", "/absolute/session-directory"]`, refresh budgets and service-account caveats are described in [OMP discovery](omp-discovery.md). Close an external OMP session before continuing it on the phone; concurrent writers are unsupported. Discovery does not grant access to projects outside configured workspaces.

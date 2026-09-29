@@ -36,6 +36,15 @@ class SessionWorkStatusTest {
         completed: Boolean = false,
     ) = TimelineItem(id, "tool", "", "", "", ToolTrace(id, name, ToolArguments(strings = arguments), "", false, completed))
 
+    @Test fun historical_session_never_claims_ready_or_completed_work() {
+        val historical = session.copy(origin = dev.pinkcollab.data.SessionOrigin.Discovered,
+            runtimeAttached = false, generation = null, status = SessionStatus.Idle)
+        val status = sessionWorkStatus(SessionDetail(session = historical), online)
+        assertEquals("History on host", status.title)
+        assertFalse(status.active)
+        assertEquals(null, status.timing)
+    }
+
     @Test fun timing_survives_work_label_changes_but_is_hidden_offline() {
         val timing = WorkTiming(23_000, true, false, 0)
         val detail = SessionDetail(session.copy(workTiming = timing))

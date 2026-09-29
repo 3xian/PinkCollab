@@ -10,7 +10,7 @@ Paths below are relative to `/api/v3`. JSON fields use camelCase.
 
 ## Core models
 
-- **Session**: `{id,hostId,cwd,title,createdAt,updatedAt}`. Persistent conversation metadata, independent of the process. Titles default to `New session`; an accepted prompt replaces the title with its normalized first 80 characters. Attachment-only prompts retain the title.
+- **Session**: `{id,hostId,cwd,title,createdAt,updatedAt,origin}`. `origin` is `managed` or `discovered`; clients must use this field rather than infer origin from ID/title/runtime. Missing origin from older Gateway builds is interpreted as managed. Managed records are persistent conversation metadata, independent of the process. Titles default to `New session`; an accepted prompt replaces the title with its normalized first 80 characters. Attachment-only prompts retain the title.
 - **Runtime**: `null`, or `{generation,state,activity,model,pendingInputs,workTiming}`. `state` is `starting`, `idle`, `running`, `waiting_input`, or `stopping`. Completing a prompt can leave an idle runtime attached. `model` contains `{provider,id,name,thinkingLevel,thinkingLevels}`; unavailable values can be null. Input requests contain `{id,type,text,options}`.
 - **Operation**: `{id,kind,state,error}`. `id` is the submitted commandId; `kind` is its command type. `state` is `pending`, `succeeded`, `failed`, `cancelled`, or `unknown`. `error` is null or `{code,message}`. Persistence fingerprints, dispatch stages and result objects are private.
 - **Timeline item**: `{id,kind,text,detail,timestamp,tool?}`. Tool traces contain `{callId,name,arguments,result,isError,completed}`. Live IDs are generation-scoped; live previews are bounded to 64 items with bounded text. Full text belongs to history.
@@ -88,3 +88,11 @@ Other core reads: `GET /fs/list?path=...` returns `{path,parent,directories}` wi
 Errors use `{code,message}`. Program logic uses `code`; `message` is display text, never a parser contract. Typical codes: `authentication_required`, `workspace_forbidden`, `generation_mismatch`, `runtime_required`, `runtime_not_ready`, `input_pending`, `input_expired`, `invalid_request`, `invalid_file`, `idempotency_conflict`, `persistence_unavailable`, `stale_cursor`, `history_unavailable`. Durable command failures appear in the Operation, even if acceptance returned 202. Internal error chains and raw OMP error objects are not public DTOs.
 
 Optional inspection APIs (Android uses snapshots instead): `GET /host`, `GET /workspaces`, `GET /sessions?limit=50&cursor=...` (creation-order paging), and `GET /sessions/:id` (session snapshot fields without event type/sessionId). These use the same public DTOs.
+
+## Discovered OMP history
+
+Existing host OMP sessions share `/sessions` pagination, host snapshots, session snapshots, history and commands. `origin: discovered` always has `runtime: null`; its session snapshot has `hasHistory: true`, empty `timeline` and empty `operations`. Timestamps describe stored metadata only. No transcript path or OMP-specific representation is exposed. Display it as History, never Ready/running/completed.
+
+A generation-less `prompt` or `start_runtime` lazily adopts it and publishes the normal flattened `session_upsert` followed by normal runtime/session events. Its ID does not change; `origin` becomes `managed`, replacing the existing card. Uploading an attachment or reading a snapshot/history does not adopt. Command IDs, outbox scope, receipt lookup and cursor binding are unchanged.
+
+Admission can return HTTP 409 `external_session_busy` (close external OMP and retry), HTTP 503 `history_unavailable`, or HTTP 404 `session_not_found`. No receipt exists if admission fails before command persistence. Startup after adoption can fail its durable operation with `external_session_busy` or `history_unavailable`; the managed mapping is retained. See [refresh bounds and external-writer limitations](omp-discovery.md).

@@ -8,6 +8,9 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
+mod references;
+use references::{claim_reference, reference_key};
+
 pub struct Store {
     db: Mutex<Connection>,
     blocking_slots: Arc<Semaphore>,
@@ -84,7 +87,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 3,
+            schema_version <= 5,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -113,6 +116,15 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         }
         if schema_version < 3 {
             migrate_history_marker(&db)?;
+        }
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS omp_adoptions (
+            omp_id TEXT PRIMARY KEY, session_id TEXT UNIQUE NOT NULL REFERENCES session_records(id),
+            reference TEXT UNIQUE NOT NULL);
+            ",
+        )?;
+        if schema_version < 5 {
+            references::migrate_references(&db)?;
         }
         Ok(Self {
             db: Mutex::new(db),
@@ -267,6 +279,10 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         fingerprint: &str,
         session: SessionRecord,
     ) -> Result<(SessionRecord, bool)> {
+        let key = session
+            .engine_session_ref
+            .as_deref()
+            .map(|p| reference_key(Path::new(p)));
         let mut db = self.db.lock();
         let tx = db.transaction()?;
         let existing: Option<(String, String)> = tx.query_row(
@@ -286,6 +302,9 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
                 session.created_at.to_rfc3339(), session.updated_at.to_rfc3339(),
                 session.archived_at.map(|v| v.to_rfc3339()), session.engine_session_ref],
         )?;
+        if let Some(key) = key {
+            claim_reference(&tx, &session.id, &key)?;
+        }
         tx.execute(
             "INSERT INTO create_receipts (client_id,command_id,fingerprint,session_id) VALUES (?1,?2,?3,?4)",
             params![client_id, command_id, fingerprint, session.id],
@@ -294,6 +313,38 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         Ok((session, false))
     }
 
+    pub fn adopt(&self, source: &crate::discovery::OmpDiscoveredSession) -> Result<SessionRecord> {
+        let host = self.host_id()?;
+        let session = source.record(host);
+        let reference = session
+            .engine_session_ref
+            .as_ref()
+            .context("missing OMP reference")?;
+        let mut db = self.db.lock();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(existing) = read_v2_session(&tx, &session.id)? {
+            return Ok(existing);
+        }
+        tx.execute("INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref,history_may_have_been_written) VALUES (?1,?2,?3,?4,0,?5,?6,?7,1)", params![session.id, session.host_id, session.cwd, session.title, session.created_at.to_rfc3339(), session.updated_at.to_rfc3339(), reference])?;
+        claim_reference(&tx, &session.id, &references::canonical_key(&source.path))?;
+        tx.execute(
+            "INSERT INTO omp_adoptions (omp_id,session_id,reference) VALUES (?1,?2,?3)",
+            params![source.omp_id, session.id, reference],
+        )?;
+        tx.commit()?;
+        Ok(session)
+    }
+    pub fn adopted_omp_id(&self, id: &str) -> Result<Option<String>> {
+        Ok(self
+            .db
+            .lock()
+            .query_row(
+                "SELECT omp_id FROM omp_adoptions WHERE session_id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
     pub fn v2_sessions(&self) -> Result<Vec<SessionRecord>> {
         let db = self.db.lock();
         let mut query = db.prepare("SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref FROM session_records ORDER BY updated_at DESC,id DESC")?;
@@ -354,12 +405,21 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         old_reference: &str,
         reference: &str,
     ) -> Result<bool> {
-        Ok(self.db.lock().execute(
+        let key = reference_key(Path::new(reference));
+        let mut db = self.db.lock();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
             "UPDATE session_records SET engine_session_ref=?1,metadata_revision=metadata_revision+1,updated_at=?2
              WHERE id=?3 AND metadata_revision=?4 AND engine_session_ref=?5
              AND history_may_have_been_written=0",
             params![reference, Utc::now().to_rfc3339(), id, expected_revision, old_reference],
-        )? == 1)
+        )? == 1;
+        if changed {
+            tx.execute("DELETE FROM engine_references WHERE session_id=?1", [id])?;
+            claim_reference(&tx, id, &key)?;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     pub fn set_engine_ref(
@@ -368,10 +428,18 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         expected_revision: i64,
         reference: &str,
     ) -> Result<bool> {
-        Ok(self.db.lock().execute(
+        let key = reference_key(Path::new(reference));
+        let mut db = self.db.lock();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
             "UPDATE session_records SET engine_session_ref=?1,metadata_revision=metadata_revision+1,updated_at=?2 WHERE id=?3 AND metadata_revision=?4 AND engine_session_ref IS NULL",
             params![reference, Utc::now().to_rfc3339(), id, expected_revision],
-        )? == 1)
+        )? == 1;
+        if changed {
+            claim_reference(&tx, id, &key)?;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     pub fn insert_operation(&self, op: &OperationRecord) -> Result<bool> {
