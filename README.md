@@ -4,7 +4,7 @@
 
 <p align="center"><a href="https://3xian.github.io/PinkCollab/">PinkCollab</a>, <strong>Android client for Oh My Pi (OMP).</strong></p>
 
-Continue sessions from your computer or start new ones remotely. Swipe to switch between conversations. [OMP](https://omp.sh/) runs on your computer or server.
+Continue sessions from your computer or start new ones remotely. Swipe to switch between sessions smoothly and quickly. [OMP](https://omp.sh/) runs on your computer or server.
 
 <p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="480" alt="PinkCollab app showing an OMP session on a phone" /></p>
 
