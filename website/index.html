@@ -131,7 +131,7 @@
           <p>Download the Android release APK, install the Gateway on the computer that will run sessions, and install and configure <a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> separately on that host. Run guided setup, scan the QR code, and close the terminal. The Gateway runs in the background.</p>
           <dl class="requirement-list">
             <dt>On your host</dt><dd>Oh My Pi installed and configured separately, with <code>omp --version</code> working in your terminal.</dd>
-            <dt>Guided setup</dt><dd>Install <a class="text-link" href="https://tailscale.com/download">Tailscale</a> on the host. Your account must allow Funnel; the phone does not need Tailscale for this setup.</dd>
+            <dt>Guided setup</dt><dd>Install <a class="text-link" href="https://tailscale.com/download">Tailscale</a> on the host. On macOS, we recommend <code>brew install tailscale</code>, followed by <code>sudo brew services start tailscale</code> and <code>tailscale up</code>; complete sign-in and verify with <code>tailscale status</code>. Existing Tailscale.app users can keep using it. Your account must allow Funnel; the phone does not need Tailscale for this setup.</dd>
             <dt>Gateway install</dt><dd>Node.js 18+ for the npm package; Rust 1.89+ only if building from source. No Rust toolchain is needed for the prebuilt downloads.</dd>
             <dt>Android app</dt><dd>The release APK needs no Android build toolchain. JDK 17+ and Android SDK 36 are only for building the app yourself.</dd>
           </dl>

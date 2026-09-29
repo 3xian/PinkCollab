@@ -16,6 +16,17 @@ Install the [Android app](https://github.com/3xian/PinkCollab/releases/latest/do
 npm install -g pinkcollab@latest
 ```
 
+On macOS, we recommend the [Homebrew Tailscale CLI](https://formulae.brew.sh/formula/tailscale):
+
+```sh
+brew install tailscale
+sudo brew services start tailscale
+tailscale up
+tailscale status
+```
+
+Complete Tailscale sign-in in your browser. If you already use Tailscale.app, you can keep using it.
+
 Make sure OMP works:
 
 ```sh

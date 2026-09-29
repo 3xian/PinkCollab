@@ -19,6 +19,19 @@ pinkcollab pair
 
 `pinkcollab funnel` publishes `127.0.0.1:8787`, writes its HTTPS address to `~/.pinkcollab/config.yaml` as `public_url`, then exits; it does not start the Gateway. The dry run changes nothing. `pair` prints a one-use, five-minute code and a QR in an interactive terminal.
 
+### Recommended Tailscale installation on macOS
+
+For PinkCollab on macOS, we recommend the [Homebrew CLI formula](https://formulae.brew.sh/formula/tailscale):
+
+```sh
+brew install tailscale
+sudo brew services start tailscale
+tailscale up
+tailscale status
+```
+
+The service command starts `tailscaled` now and at system startup. Complete the browser sign-in prompted by `tailscale up`, then run `pinkcollab setup`. Signing in does not enable Funnel by itself; interactive setup guides first-time Funnel/HTTPS approval. Existing Tailscale.app users can keep their installation; switching is optional.
+
 ### Source checkout on macOS (CLI Tailscale)
 
 1. Install the CLI with `brew install tailscale` if needed. In terminal A, run `sudo tailscaled` and leave it open. In terminal B, run `tailscale up`, complete the login/approval, and check `tailscale status`. `up` joins the tailnet; it does **not** publish Funnel. The foreground daemon does not start automatically after reboot.
@@ -163,6 +176,7 @@ Run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.pinkcollab.gate
 ## Troubleshooting
 
 - `tailscale up` hangs before showing a login URL: check `tailscale status` and `tailscale debug daemon-logs`. A control-plane timeout can mean DNS or proxy interference. If the host has a **verified** local HTTP proxy, restart the foreground daemon as `sudo env HTTPS_PROXY=http://127.0.0.1:<port> HTTP_PROXY=http://127.0.0.1:<port> tailscaled`, keep the proxy running, then retry `tailscale up`.
+- First-time Funnel approval: interactive `pinkcollab setup` displays Tailscale instructions live and allows up to five minutes for browser approval. Non-interactive setup requires Funnel/HTTPS to already be enabled. If setup times out, run `tailscale funnel --bg --https=443 http://127.0.0.1:8787` in a terminal, complete approval, then rerun setup with your original options. Substitute your selected HTTPS port (443, 8443 or 10000) and Gateway loopback port. Check `tailscale funnel status` for the exact backend mapping.
 - `pair` has no URL: set `public_url` or pass `--url https://…`. A phone cannot use host loopback. If Funnel status shows a mapping but the phone cannot connect, also check that the Gateway is running. A code used or older than five minutes needs a new `pair`.
 - A failed service update can be retried with `pinkcollab service install`. The installer tracks unfinished updates, including restarts; copying the new binary alone does not mark the update complete.
 - Setup rejects another data directory's service or an occupied unmanaged listener before changing configuration or Funnel. Use the original `--data-dir` to manage an existing service.
@@ -209,7 +223,7 @@ The npm package name is `pinkcollab`. The standalone and source-built executable
 pinkcollab setup --non-interactive --workspace /srv/projects
 ```
 
-Requires explicit workspace roots and an already connected Tailscale installation. It never asks questions, starts a login flow, prints pairing credentials, or waits for a phone. It exits successfully after the managed Gateway passes its local health check; use `pinkcollab pair` separately to add devices. Errors are non-zero. `setup` does not automatically install OMP or Tailscale.
+Requires explicit workspace roots and an already connected Tailscale installation with Funnel/HTTPS enabled. It never asks questions, starts a login flow, prints pairing credentials, or waits for a phone. It exits successfully after the managed Gateway passes its local health check; use `pinkcollab pair` separately to add devices. Errors are non-zero. `setup` does not automatically install OMP or Tailscale.
 
 The sequence is: load configuration → check service ownership, listener conflicts and Windows service prerequisites → confirm/canonicalize workspaces → validate OMP → merge/save configuration → connect Tailscale → inspect/reconcile Funnel → install/update service → start → retry local health for up to 20 seconds → generate a five-minute QR → wait for a new paired device. Cancellation leaves completed configuration and service steps available for the next run.
 

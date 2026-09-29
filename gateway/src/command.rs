@@ -6,6 +6,16 @@ use std::{
     time::{Duration, Instant},
 };
 pub fn output(command: &mut Command, timeout: Duration) -> Result<Output> {
+    run(command, timeout, false)
+}
+/// Inherit all terminal streams. Output bytes are empty in this mode;
+/// the child displays diagnostics directly without parent forwarding threads.
+pub fn interactive_output(command: &mut Command, timeout: Duration) -> Result<Output> {
+    run(command, timeout, true)
+}
+fn run(command: &mut Command, timeout: Duration, interactive: bool) -> Result<Output> {
+    #[cfg(unix)]
+    let terminal = terminal::Foreground::prepare(command, interactive)?;
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -18,9 +28,21 @@ pub fn output(command: &mut Command, timeout: Duration) -> Result<Output> {
     }
     let deadline = Instant::now() + timeout;
     let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdin(if interactive {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        })
+        .stdout(if interactive {
+            Stdio::inherit()
+        } else {
+            Stdio::piped()
+        })
+        .stderr(if interactive {
+            Stdio::inherit()
+        } else {
+            Stdio::piped()
+        })
         .spawn()
         .context("cannot start administrative command")?;
     #[cfg(windows)]
@@ -44,10 +66,16 @@ pub fn output(command: &mut Command, timeout: Duration) -> Result<Output> {
             let _ = send.send((stream, result));
         });
     }
-    collect(child.stdout.take().unwrap(), 0, send.clone());
-    collect(child.stderr.take().unwrap(), 1, send);
+    if !interactive {
+        collect(child.stdout.take().unwrap(), 0, send.clone());
+        collect(child.stderr.take().unwrap(), 1, send);
+    }
     let result = (|| {
-        let mut streams = [None, None];
+        let mut streams = if interactive {
+            [Some(Vec::new()), Some(Vec::new())]
+        } else {
+            [None, None]
+        };
         let mut status = None;
         loop {
             while let Ok((stream, bytes)) = receive.try_recv() {
@@ -83,7 +111,32 @@ pub fn output(command: &mut Command, timeout: Duration) -> Result<Output> {
     drop(job);
     let _ = child.kill();
     let _ = child.wait();
-    result
+    #[cfg(unix)]
+    drop(terminal);
+    let output = result?;
+    if interrupted(output.status) {
+        return Err(Interrupted.into());
+    }
+    Ok(output)
+}
+#[derive(Debug)]
+pub struct Interrupted;
+impl std::fmt::Display for Interrupted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Administrative command interrupted.")
+    }
+}
+impl std::error::Error for Interrupted {}
+fn interrupted(status: std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if status.signal() == Some(libc::SIGINT) {
+            return true;
+        }
+    }
+    // Shell convention and Windows STATUS_CONTROL_C_EXIT.
+    matches!(status.code(), Some(130) | Some(-1073741510))
 }
 
 #[cfg(all(test, unix))]
@@ -112,3 +165,55 @@ mod tests {
         assert!(start.elapsed() < Duration::from_millis(500));
     }
 }
+
+// Give the isolated process group terminal input without SIGTTIN, and restore
+// the parent's foreground group on every exit path (including spawn failures).
+#[cfg(unix)]
+mod terminal {
+    use super::*;
+    use std::os::unix::process::CommandExt;
+    pub(super) struct Foreground(Option<libc::pid_t>);
+    unsafe fn foreground(group: libc::pid_t) -> std::io::Result<()> {
+        unsafe {
+            let mut mask = std::mem::zeroed();
+            let mut old = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            libc::sigaddset(&mut mask, libc::SIGTTOU);
+            let error = libc::pthread_sigmask(libc::SIG_BLOCK, &mask, &mut old);
+            if error != 0 {
+                return Err(std::io::Error::from_raw_os_error(error));
+            }
+            let result = libc::tcsetpgrp(libc::STDIN_FILENO, group);
+            let error = std::io::Error::last_os_error();
+            libc::pthread_sigmask(libc::SIG_SETMASK, &old, std::ptr::null_mut());
+            if result == -1 { Err(error) } else { Ok(()) }
+        }
+    }
+    impl Foreground {
+        pub(super) fn prepare(command: &mut Command, interactive: bool) -> Result<Self> {
+            let group = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) };
+            if !interactive || group == -1 {
+                return Ok(Self(None));
+            }
+            ensure!(
+                group == unsafe { libc::getpgrp() },
+                "interactive command requires a foreground terminal"
+            );
+            unsafe {
+                command.pre_exec(|| foreground(libc::getpid()));
+            }
+            Ok(Self(Some(group)))
+        }
+    }
+    impl Drop for Foreground {
+        fn drop(&mut self) {
+            if let Some(group) = self.0 {
+                let _ = unsafe { foreground(group) };
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "command_tests.rs"]
+mod execution_tests;

@@ -7,6 +7,14 @@ use std::{
 };
 
 pub const TAILSCALE: &str = "tailscale";
+/// Platform-specific installation guidance, shared by setup and CLI diagnostics.
+pub fn installation_help() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "On macOS, we recommend the Homebrew CLI:\n\n  brew install tailscale\n  sudo brew services start tailscale\n  tailscale up\n  tailscale status\n\nComplete Tailscale sign-in before rerunning setup. If you already use Tailscale.app, you can keep using it."
+    } else {
+        "Install Tailscale from https://tailscale.com/download and make sure `tailscale status` works."
+    }
+}
 /// Ports Tailscale accepts for a public Funnel HTTPS endpoint.
 const FUNNEL_PORTS: [u16; 3] = [443, 8443, 10000];
 
@@ -31,10 +39,15 @@ pub fn public_url(host: &str, https_port: u16) -> String {
     }
 }
 fn status(binary: &Path) -> Result<serde_json::Value> {
-    let output = crate::command::output(Command::new(binary).args(["status", "--json"]), Duration::from_secs(10)).with_context(|| {
+    let output = crate::command::output(
+        Command::new(binary).args(["status", "--json"]),
+        Duration::from_secs(10),
+    )
+    .with_context(|| {
         format!(
-            "cannot run `{}`; install Tailscale from https://tailscale.com/download or pass --tailscale <path>",
-            binary.display()
+            "cannot run `{}`; pass --tailscale <path> if installed elsewhere.\n\n{}",
+            binary.display(),
+            installation_help()
         )
     })?;
     let value: serde_json::Value =
@@ -83,16 +96,33 @@ pub fn state(binary: &Path) -> Result<NodeStatus> {
 ///
 /// Returns the public URL it published, or `None` when this was a dry run.
 pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<Option<String>> {
-    apply(dir, config, options, false)
+    apply(dir, config, options)
 }
-pub fn reconcile(dir: &Path, config: &Config, binary: &Path) -> Result<String> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Interaction {
+    Allowed,
+    Forbidden,
+}
+pub fn reconcile(
+    dir: &Path,
+    config: &Config,
+    binary: &Path,
+    interaction: Interaction,
+) -> Result<String> {
+    reconcile_with_timeout(dir, config, binary, interaction, apply_timeout(interaction))
+}
+fn reconcile_with_timeout(
+    dir: &Path,
+    config: &Config,
+    binary: &Path,
+    interaction: Interaction,
+    timeout: Duration,
+) -> Result<String> {
     ensure!(
         config.listen.ip() == std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
         "Tailscale setup requires the Gateway's IPv4 local address. Keep your custom listener with manual setup."
     );
-    let host = state(binary)?
-        .dns_name
-        .context("Tailscale has no DNS name")?;
+    let host = node(&status(binary)?)?.to_owned();
     let port = if config.public_url.is_empty() {
         443
     } else {
@@ -127,21 +157,34 @@ pub fn reconcile(dir: &Path, config: &Config, binary: &Path) -> Result<String> {
             "Tailscale is already forwarding another application on this port. Use manual setup to choose a separate remote-access port."
         );
     }
-    let public = apply(
-        dir,
-        config,
-        Options {
-            https_port: port,
-            dry_run: false,
-            binary: Some(binary),
-        },
-        true,
-    )?
-    .context("remote access was not configured")?;
     ensure!(
-        inspect(binary, &host, port, config.listen.port())?,
-        "Tailscale has not enabled the requested remote access. Check Funnel permissions in the Tailscale admin console."
+        allows_https_port(port),
+        "Funnel serves HTTPS on 443, 8443 or 10000 only"
     );
+    let applied =
+        match publish_with_timeout(binary, port, config.listen.port(), interaction, timeout) {
+            Err(error) if error.is::<crate::command::Interrupted>() => {
+                return Err(error.context("Setup cancelled. No further setup steps were started."));
+            }
+            result => result,
+        };
+    let retry = if interaction == Interaction::Forbidden {
+        "pinkcollab setup --non-interactive --workspace <directory> (with your original options)"
+    } else {
+        "pinkcollab setup (with your original options)"
+    };
+    // A command may time out after the daemon committed its configuration.
+    // Only the exact desired mapping can turn an ambiguous result into success.
+    let verified = inspect(binary, &host, port, config.listen.port());
+    if !matches!(verified, Ok(true)) {
+        applied.with_context(|| approval_help(port, config.listen.port(), retry))?;
+        verified?;
+        anyhow::bail!(
+            "Tailscale has not enabled the requested remote access. {}",
+            approval_help(port, config.listen.port(), retry)
+        );
+    }
+    set_public_url(&dir.join("config.yaml"), &public)?;
     Ok(public)
 }
 /// Verify both public exposure and the exact HTTP backend, not merely a DNS name.
@@ -172,7 +215,7 @@ fn mapping_matches(value: &serde_json::Value, host: &str, port: u16, backend: u1
         && value["TCP"][port.to_string()]["HTTPS"] == true
         && value["Web"][&key]["Handlers"]["/"]["Proxy"].as_str() == Some(target(backend).as_str())
 }
-fn apply(dir: &Path, config: &Config, options: Options<'_>, quiet: bool) -> Result<Option<String>> {
+fn apply(dir: &Path, config: &Config, options: Options<'_>) -> Result<Option<String>> {
     let port = config.listen.port();
     ensure!(
         allows_https_port(options.https_port),
@@ -194,9 +237,7 @@ fn apply(dir: &Path, config: &Config, options: Options<'_>, quiet: bool) -> Resu
         Err(e) => return Err(e),
     };
     let public = public_url(&host, options.https_port);
-    if !quiet {
-        println!("Funnel: {public} -> {target}");
-    }
+    println!("Funnel: {public} -> {target}");
     if options.dry_run {
         println!(
             "dry run, nothing changed; this would run:\n  {} funnel --bg --https={} --yes {target}\nand set public_url: {public} in {}",
@@ -206,44 +247,81 @@ fn apply(dir: &Path, config: &Config, options: Options<'_>, quiet: bool) -> Resu
         );
         return Ok(None);
     }
-    let output = crate::command::output(
-        Command::new(binary).args([
-            "funnel",
-            "--bg",
-            &format!("--https={}", options.https_port),
-            "--yes",
-            &target,
-        ]),
-        Duration::from_secs(30),
-    )
-    .with_context(|| format!("cannot run `{}`", binary.display()))?;
-    if !output.status.success() && funnel_policy_denied(&String::from_utf8_lossy(&output.stderr)) {
-        anyhow::bail!(
-            "Tailscale is connected, but Funnel is not allowed for this device.\n\nEnable the funnel node attribute for this device in Tailscale, then rerun:\n\n  pinkcollab setup\n\nAlternatively, use a manual HTTPS deployment described in docs/deployment.md"
-        );
-    }
-    ensure!(
-        output.status.success(),
-        "`tailscale funnel` failed: {}{}",
-        String::from_utf8_lossy(&output.stdout).trim(),
-        String::from_utf8_lossy(&output.stderr).trim()
+    let retry = format!(
+        "pinkcollab funnel --https={} (with your original --data-dir, --tailscale and other options)",
+        options.https_port
     );
+    let output = publish_with_timeout(
+        binary,
+        options.https_port,
+        port,
+        Interaction::Forbidden,
+        apply_timeout(Interaction::Forbidden),
+    )
+    .with_context(|| approval_help(options.https_port, port, &retry))?;
     let report = String::from_utf8_lossy(&output.stdout);
     let report = report.trim();
-    if !quiet && !report.is_empty() {
+    if !report.is_empty() {
         println!("{report}");
     }
     let path = dir.join("config.yaml");
     set_public_url(&path, &public)?;
-    if !quiet {
-        println!(
-            "public_url set to {public} in {}\n\
+    println!(
+        "public_url set to {public} in {}\n\
          This URL is reachable from the internet: keep pairing single-use, keep credentials revocable,\n\
          and do not rely on the URL being hard to guess.",
-            path.display()
+        path.display()
+    );
+    Ok(Some(public))
+}
+fn approval_help(https: u16, backend: u16, retry: &str) -> String {
+    format!(
+        "Tailscale may be waiting for one-time Funnel/HTTPS approval. Run in a terminal:\n\n  tailscale funnel --bg --https={https} {}\n\nComplete the Tailscale approval, then rerun:\n\n  {retry}",
+        target(backend)
+    )
+}
+fn apply_timeout(interaction: Interaction) -> Duration {
+    Duration::from_secs(if interaction == Interaction::Allowed {
+        300
+    } else {
+        30
+    })
+}
+
+fn publish_with_timeout(
+    binary: &Path,
+    https: u16,
+    backend: u16,
+    interaction: Interaction,
+    timeout: Duration,
+) -> Result<std::process::Output> {
+    let mut command = Command::new(binary);
+    command.args(["funnel", "--bg", &format!("--https={https}")]);
+    let run = if interaction == Interaction::Allowed {
+        crate::command::interactive_output
+    } else {
+        command.arg("--yes");
+        crate::command::output
+    };
+    command.arg(target(backend));
+    let output = run(&mut command, timeout).with_context(|| {
+        format!(
+            "Cannot configure Tailscale Funnel using `{}`",
+            binary.display()
+        )
+    })?;
+    if !output.status.success() && funnel_policy_denied(&String::from_utf8_lossy(&output.stderr)) {
+        anyhow::bail!(
+            "Tailscale is connected, but Funnel is not allowed for this device.\n\nEnable the funnel node attribute for this device in Tailscale, then retry your original command.\n\nAlternatively, use a manual HTTPS deployment described in docs/deployment.md"
         );
     }
-    Ok(Some(public))
+    ensure!(
+        output.status.success(),
+        "`tailscale funnel` failed: {}{}\nCheck the Tailscale output above and Funnel/HTTPS permissions in the admin console.",
+        String::from_utf8_lossy(&output.stdout).trim(),
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output)
 }
 /// Rewrite only the public_url line, so hand-written comments survive.
 fn set_public_url(path: &Path, url: &str) -> Result<()> {
@@ -336,3 +414,7 @@ mod policy_tests {
         }
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "funnel_tests.rs"]
+mod execution_tests;

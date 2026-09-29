@@ -5,7 +5,16 @@ use std::{path::Path, time::Duration};
 use tokio::process::Command;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
-const TIMEOUT_HELP: &str = "Tailscale still isn't connected.\n\nOpen the Tailscale app and finish signing in.\n\nThen run:\n\n  pinkcollab setup\n\nFor diagnostics:\n\n  pinkcollab doctor";
+const SIGN_IN_HELP: &str = if cfg!(target_os = "macos") {
+    "For the recommended Homebrew CLI, run `sudo brew services start tailscale`, then `tailscale up` and complete sign-in. If you use Tailscale.app, open it and finish signing in."
+} else {
+    "Open the Tailscale app and finish signing in."
+};
+fn timeout_help() -> String {
+    format!(
+        "Tailscale still isn't connected.\n\n{SIGN_IN_HELP}\n\nThen run:\n\n  pinkcollab setup\n\nFor diagnostics:\n\n  pinkcollab doctor"
+    )
+}
 
 #[derive(Debug, PartialEq)]
 enum State {
@@ -74,7 +83,7 @@ async fn connect_with_timeout(
         }
         ensure!(
             !non_interactive,
-            "Tailscale isn't connected. Sign in to Tailscale before running non-interactive setup."
+            "Tailscale isn't connected. Sign in to Tailscale before running non-interactive setup.\n\n{SIGN_IN_HELP}"
         );
         println!("{}", state.message());
         child = Some(
@@ -82,9 +91,7 @@ async fn connect_with_timeout(
                 .arg("up")
                 .kill_on_drop(true)
                 .spawn()
-                .context(
-                    "Open the Tailscale app and complete sign-in, then run pinkcollab setup.",
-                )?,
+                .with_context(|| format!("{SIGN_IN_HELP} Then run pinkcollab setup."))?,
         );
         let mut exited = false;
         let mut reminder = tokio::time::Instant::now();
@@ -97,9 +104,7 @@ async fn connect_with_timeout(
                         "Tailscale command completed, but the connection is not ready yet.\nWaiting for Tailscale..."
                     );
                 } else {
-                    println!(
-                        "Tailscale needs attention.\n\nOpen the Tailscale app and complete sign-in."
-                    );
+                    println!("Tailscale needs attention.\n\n{SIGN_IN_HELP}");
                 }
             }
             let next = probe(binary).await;
@@ -120,7 +125,7 @@ async fn connect_with_timeout(
         .wait(async {
             tokio::time::timeout(timeout, work)
                 .await
-                .unwrap_or_else(|_| Err(anyhow::anyhow!(TIMEOUT_HELP)))
+                .unwrap_or_else(|_| Err(anyhow::anyhow!(timeout_help())))
         })
         .await;
     if let Some(mut child) = child {

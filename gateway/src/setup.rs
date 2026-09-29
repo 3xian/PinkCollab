@@ -153,7 +153,12 @@ pub async fn run(
     }
     Store::open(dir)?;
     println!("✓ Workspaces configured");
-    let binary = funnel::tailscale_binary().context("Tailscale wasn't found. Install Tailscale and make sure `tailscale status` works.\n\nInstall Tailscale:\nhttps://tailscale.com/download\n\nThen run:\n  pinkcollab setup")?;
+    let binary = funnel::tailscale_binary().with_context(|| {
+        format!(
+            "Tailscale wasn't found.\n\n{}\n\nThen run:\n  pinkcollab setup",
+            funnel::installation_help()
+        )
+    })?;
     println!("Connecting Tailscale...");
     crate::setup_connect::connect(&control, &binary, non_interactive).await?;
     control.checkpoint().await?;
@@ -163,7 +168,18 @@ pub async fn run(
     let remote_config = config.clone();
     config.public_url = control
         .blocking(
-            move || funnel::reconcile(&remote_dir, &remote_config, &binary),
+            move || {
+                funnel::reconcile(
+                    &remote_dir,
+                    &remote_config,
+                    &binary,
+                    if non_interactive {
+                        funnel::Interaction::Forbidden
+                    } else {
+                        funnel::Interaction::Allowed
+                    },
+                )
+            },
             None,
         )
         .await
