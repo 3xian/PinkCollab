@@ -361,6 +361,7 @@ mod tests {
             )
             .unwrap()
         );
+        assert_eq!(config.omp, workspace::display(&executable));
         assert_eq!(config.workspaces.len(), 2);
         assert_eq!(config.name, "Keep me");
         assert_eq!(config.max_sessions, 3);

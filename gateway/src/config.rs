@@ -105,14 +105,12 @@ impl Config {
     }
 }
 /// Resolves an executable to an absolute path, looking up bare names on `PATH` and honouring
-/// `PATHEXT` on Windows.
+/// `PATHEXT` on Windows. Both PATH entries and explicit paths retain symlinks/shims.
 pub fn resolve_executable(name: &str) -> Option<PathBuf> {
     let given = Path::new(name);
     if given.components().count() > 1 {
-        return given
-            .canonicalize()
-            .ok()
-            .filter(|candidate| executable(candidate));
+        let candidate = std::path::absolute(given).ok()?;
+        return executable(&candidate).then_some(candidate);
     }
     let extensions: Vec<String> = if cfg!(windows) {
         std::env::var("PATHEXT")
@@ -131,7 +129,7 @@ pub fn resolve_executable(name: &str) -> Option<PathBuf> {
             // Windows needs the bare name too, for a caller that already spelled out `omp.exe`.
             .chain(std::iter::once(dir.join(name)))
             .find(|candidate| executable(candidate))
-            .map(|candidate| candidate.canonicalize().unwrap_or(candidate))
+            .and_then(|candidate| std::path::absolute(candidate).ok())
     })
 }
 fn executable(path: &Path) -> bool {
