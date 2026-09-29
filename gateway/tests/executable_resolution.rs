@@ -1,5 +1,5 @@
 //! Executable lookup stores absolute paths without resolving symlink targets.
-use pinkcollab_gateway::config::{Config, resolve_executable};
+use pinkcollab_gateway::config::resolve_executable;
 use std::{path::Path, process::Command};
 
 // PATH and PATHEXT are process-global. Run their assertions in a dedicated test process so
@@ -119,7 +119,7 @@ fn persisted_path_survives_symlink_target_upgrade() {
 
 #[cfg(unix)]
 fn upgrade_and_spawn(root: &Path, bin: &Path) {
-    use pinkcollab_gateway::omp::Runtime;
+    use pinkcollab_gateway::{config::Config, omp::Runtime};
     use std::os::unix::fs::symlink;
 
     let first = root.join("first");
