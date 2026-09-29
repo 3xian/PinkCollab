@@ -21,7 +21,7 @@ From `gateway/`:
 cargo build --release --locked --bin pinkcollab-gateway
 ```
 
-Binary: `target/release/pinkcollab-gateway` (`.exe` on Windows). Copy it out of `target/` before using it as a [background service](deployment.md#run-as-a-background-service).
+Binary: `target/release/pinkcollab-gateway` (`.exe` on Windows). Run `./target/release/pinkcollab-gateway setup` for guided setup, or `./target/release/pinkcollab-gateway service install` to update an existing [background service](deployment.md#run-as-a-background-service). The installer copies it to a stable user directory. When registering a service manually, copy it out of `target/` yourself.
 
 ## Build Android
 
@@ -43,6 +43,8 @@ cargo fmt --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-features --locked
 ```
+
+Onboarding regressions use temporary homes and fake administrative tools; they do not modify the host’s installed service or Tailscale configuration. They cover service-update retries, setup preflight conflicts, command timeouts (including inherited output handles), and manual remote-access diagnostics.
 
 Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smoke -- --ignored`.
 

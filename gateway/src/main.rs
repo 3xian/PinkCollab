@@ -12,6 +12,10 @@ use pinkcollab_gateway::{
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 mod admin;
+mod health;
+mod remote;
+mod service;
+mod setup;
 
 #[cfg(windows)]
 mod windows;
@@ -26,18 +30,38 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Commands {
-    /// One-time bootstrap: write config.yaml with the allowed workspace roots.
+    /// Set up PinkCollab on this computer.
+    #[command(display_order = 0)]
+    Setup {
+        #[arg(long)]
+        workspace: Vec<PathBuf>,
+        #[arg(long)]
+        non_interactive: bool,
+        #[arg(long, default_value = "tailscale")]
+        transport: String,
+    },
+    /// Manage the background Gateway.
+    #[command(display_order = 3)]
+    Service {
+        #[command(subcommand)]
+        action: service::Action,
+    },
+    /// Diagnose installation and connection problems.
+    #[command(display_order = 4)]
+    Doctor,
+    /// Advanced/manual bootstrap: write config.yaml with the allowed workspace roots.
     Init {
         /// Allowed root directory; repeat the flag for more than one root.
         #[arg(long, required = true, num_args = 1..)]
         workspace: Vec<PathBuf>,
     },
-    /// Run the Gateway. This is what a bare invocation does.
+    /// Run the Gateway in the foreground (advanced/manual).
     Serve,
-    /// Run under the Windows Service Control Manager.
     #[cfg(windows)]
-    Service,
-    /// Print a single-use pairing code for one phone.
+    #[command(hide = true)]
+    ServiceRun,
+    /// Pair another phone.
+    #[command(display_order = 2)]
     Pair {
         /// Gateway root URL the phone dials; defaults to the configured public_url.
         #[arg(long)]
@@ -48,9 +72,10 @@ enum Commands {
     },
     /// List the devices paired with this Gateway.
     Clients,
-    /// Preflight the configuration, roots, OMP, database and listen port.
+    /// Show PinkCollab status.
+    #[command(display_order = 1)]
     Status,
-    /// Publish the loopback Gateway with Tailscale Funnel and exit. Does not start the Gateway.
+    /// Advanced/manual: publish the Gateway with Tailscale Funnel. Does not start the Gateway.
     Funnel {
         /// Public HTTPS port offered by Funnel: 443, 8443 or 10000.
         #[arg(long, default_value_t = 443)]
@@ -86,10 +111,23 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     #[cfg(windows)]
-    if matches!(cli.command, Some(Commands::Service)) {
+    if matches!(cli.command, Some(Commands::ServiceRun)) {
         return windows::dispatch(cli.data_dir);
     }
     match cli.command.unwrap_or(Commands::Serve) {
+        Commands::Setup {
+            workspace,
+            non_interactive,
+            transport,
+        } => match setup::run(&cli.data_dir, &workspace, non_interactive, &transport).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                eprintln!("{error}\n\nFor details, run pinkcollab doctor.");
+                std::process::exit(1);
+            }
+        },
+        Commands::Service { action } => service::execute(&cli.data_dir, action),
+        Commands::Doctor => admin::doctor(&cli.data_dir).await,
         Commands::Init { workspace } => admin::init(&cli.data_dir, &workspace),
         Commands::Pair { url, qr } => admin::pair(&cli.data_dir, url, qr),
         Commands::Clients => admin::clients(&cli.data_dir),
@@ -120,7 +158,7 @@ async fn main() -> Result<()> {
             serve_until(config, Arc::new(Store::open(&cli.data_dir)?), shutdown()).await
         }
         #[cfg(windows)]
-        Commands::Service => unreachable!(),
+        Commands::ServiceRun => unreachable!(),
     }
 }
 async fn serve_until(

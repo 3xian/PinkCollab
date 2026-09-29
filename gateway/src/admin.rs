@@ -85,14 +85,7 @@ fn issue_pairing(
     qr: Option<PathBuf>,
 ) -> Result<()> {
     let url = pairing_url(config, url)?;
-    validate_pairing_url(&url)?;
-    let token = store.new_pairing()?;
-    let payload = serde_json::json!({
-        "version": 1,
-        "url": url.trim_end_matches('/'),
-        "token": token,
-    })
-    .to_string();
+    let payload = pairing_payload(store, &url)?;
     let terminal = std::io::stderr().is_terminal();
     let code = if terminal || qr.is_some() {
         Some(QrCode::new(payload.as_bytes())?)
@@ -121,6 +114,18 @@ fn issue_pairing(
         eprintln!("QR image: {}", path.display());
     }
     Ok(())
+}
+
+pub(crate) fn pairing_payload(store: &Store, url: &str) -> Result<String> {
+    validate_pairing_url(url)?;
+    let token = store.new_pairing()?;
+    let payload = serde_json::json!({
+        "version": 1,
+        "url": url.trim_end_matches('/'),
+        "token": token,
+    })
+    .to_string();
+    Ok(payload)
 }
 
 pub fn clients(dir: &Path) -> Result<()> {
@@ -204,78 +209,189 @@ pub fn setup_funnel(dir: &Path, options: funnel::Options<'_>, with_pair: bool) -
     issue_pairing(&config, &store, Some(url), None)
 }
 
-/// Preflight checks for a Gateway that is not currently running.
+/// Concise operational status; a running listener is expected.
 pub async fn status(dir: &Path) -> Result<()> {
     let config = Config::load(dir)?;
+    let running = crate::health::healthy(config.listen).await;
+    let version = omp::version(&config.omp).await;
+    let remote = crate::remote::inspect(dir, &config);
+    let counts = Store::counts(dir)?;
+    println!(
+        "PinkCollab\n\nGateway       {}\nRemote access {}\nOMP           {}\nWorkspaces    {}\nDevices       {}\nSessions      {}",
+        if running {
+            "Running"
+        } else {
+            "Stopped or unavailable"
+        },
+        remote.label(),
+        version,
+        config.workspaces.len(),
+        counts.clients,
+        counts.sessions
+    );
+    ensure!(
+        running && !remote.failed() && version != "unavailable",
+        "PinkCollab needs attention; run pinkcollab doctor."
+    );
+    Ok(())
+}
+/// Full diagnostics continue through independent failures, including an invalid config.
+pub async fn doctor(dir: &Path) -> Result<()> {
     let mut problems = Vec::new();
-    println!("config: {}", dir.join("config.yaml").display());
-    println!("listen: {}", config.listen);
-    if config.public_url.trim().is_empty() {
-        println!("public URL: unset");
-    } else if let Err(error) = validate_pairing_url(&config.public_url) {
-        println!("public URL: {} (invalid)", config.public_url);
-        problems.push(format!("invalid public URL: {error:#}"));
-    } else {
-        println!("public URL: {}", config.public_url);
-    }
-    for root in &config.workspaces {
-        match root.canonicalize() {
-            Ok(path) if path.is_dir() => println!("workspace: {} (ok)", path.display()),
-            Ok(path) => {
-                println!("workspace: {} (not a directory)", path.display());
-                problems.push(format!("workspace is not a directory: {}", root.display()));
-            }
-            Err(error) => {
-                println!("workspace: {} (unavailable: {error})", root.display());
-                problems.push(format!("workspace unavailable: {}", root.display()));
-            }
+    println!("Config\n  path: {}", dir.join("config.yaml").display());
+    let config = match Config::load(dir) {
+        Ok(config) => {
+            println!("  parsed: yes");
+            Some(config)
         }
-    }
-    match config::resolve_executable(&config.omp) {
-        Some(executable) => {
-            let executable = workspace::display(&executable);
-            let version = omp::version(&executable).await;
-            println!("omp: {executable} ({version})");
+        Err(error) => {
+            println!("  parsed: no ({error:#})");
+            problems.push("Config");
+            None
+        }
+    };
+    println!("OMP");
+    let executable = config.as_ref().map_or("omp", |c| c.omp.as_str());
+    match config::resolve_executable(executable) {
+        Some(path) => {
+            let version = omp::version(&workspace::display(&path)).await;
+            println!("  executable: {}\n  version: {version}", path.display());
             if version == "unavailable" {
-                problems.push(format!("OMP did not answer `{executable} --version`"));
+                problems.push("OMP");
             }
         }
         None => {
-            println!("omp: {} (unavailable)", config.omp);
-            problems.push(format!("OMP executable is unavailable: {}", config.omp));
+            println!("  executable: {executable} (unavailable)");
+            problems.push("OMP");
         }
     }
-    // Informational: a loopback development setup needs no front end at all.
-    match funnel::state(Path::new(funnel::TAILSCALE)) {
-        Ok(state) => match state.dns_name {
-            Some(host) => println!("tailscale: {} ({host})", state.backend_state),
-            None => println!("tailscale: {}", state.backend_state),
-        },
-        Err(error) => println!("tailscale: unavailable ({error:#})"),
+    println!("Tailscale");
+    match funnel::tailscale_binary() {
+        Some(binary) => {
+            println!("  binary: {}", binary.display());
+            match funnel::state(&binary) {
+                Ok(state) => println!(
+                    "  backend: {}\n  dns: {}",
+                    state.backend_state,
+                    state.dns_name.as_deref().unwrap_or("unavailable")
+                ),
+                Err(error) => println!("  unavailable: {error:#}"),
+            }
+        }
+        None => println!("  binary: unavailable (optional for externally managed access)"),
     }
-    match TcpListener::bind(config.listen) {
-        Ok(_) => println!("listen port: free"),
+    println!("Funnel");
+
+    if let Some(config) = &config {
+        let remote = crate::remote::inspect(dir, config);
+        println!("  public URL: {}\n  {}", config.public_url, remote.label());
+        if let crate::remote::Access::Failed(error) = &remote {
+            println!("  {error}");
+            problems.push("Remote access");
+        }
+    }
+    println!("Service");
+    match crate::service::Installation::new(dir) {
+        Ok(installation) => {
+            println!(
+                "  binary: {}\n  definition: {}",
+                installation.binary.display(),
+                installation.definition.display()
+            );
+            match installation
+                .check_owner()
+                .and_then(|()| crate::service::manager(&installation).status())
+            {
+                Ok(state) => {
+                    println!("  state: {state:?}");
+                    if state != crate::service::ServiceStatus::Running {
+                        problems.push("Service");
+                    }
+                }
+                Err(error) => {
+                    println!("  state: unavailable ({error:#})");
+                    problems.push("Service");
+                }
+            }
+        }
         Err(error) => {
-            println!("listen port: unavailable ({error})");
-            problems.push(format!("cannot bind {}: {error}", config.listen));
+            println!("  unavailable: {error:#}");
+            problems.push("Service");
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        let user = std::env::var("USER").unwrap_or_default();
+        let linger = std::process::Command::new("loginctl")
+            .args(["show-user", &user, "--property=Linger", "--value"])
+            .output();
+        if !linger
+            .is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "yes")
+        {
+            println!(
+                "  note: user service may stop after logout; ask your administrator about user lingering"
+            );
+        }
+    }
+    println!("Gateway");
+    if let Some(config) = &config {
+        let healthy = crate::health::healthy(config.listen).await;
+        println!("  listen: {}\n  local health: {healthy}", config.listen);
+        if !healthy {
+            problems.push("Gateway");
+            println!(
+                "  listen port: {}",
+                if TcpListener::bind(config.listen).is_ok() {
+                    "free (Gateway stopped)"
+                } else {
+                    "occupied by an unverified listener"
+                }
+            );
+        }
+        for root in &config.workspaces {
+            println!(
+                "  workspace: {} ({})",
+                root.display(),
+                if root.is_dir() {
+                    "available"
+                } else {
+                    "unavailable"
+                }
+            );
+            if !root.is_dir() {
+                problems.push("Workspace");
+            }
+        }
+    } else {
+        println!("  local health: unknown (invalid config)");
+    }
+    println!("Database");
     match Store::counts(dir) {
         Ok(counts) => {
-            println!("paired devices: {}", counts.clients);
-            println!("recorded sessions: {}", counts.sessions);
+            println!(
+                "  clients: {}\n  sessions: {}",
+                counts.clients, counts.sessions
+            );
+            match Store::open(dir).and_then(|s| s.runtime_leases()) {
+                Ok(leases) => println!("  leases: {}", leases.len()),
+                Err(error) => {
+                    println!("  leases: unavailable ({error:#})");
+                    problems.push("Database leases");
+                }
+            }
         }
-        Err(error) => problems.push(format!("cannot read Gateway database: {error:#}")),
-    }
-    if problems.is_empty() {
-        println!("status: ready");
-        return Ok(());
-    }
-    for problem in &problems {
-        println!("problem: {problem}");
+        Err(error) => {
+            println!("  unavailable: {error:#}");
+            problems.push("Database");
+        }
     }
     std::io::stdout().flush()?;
-    anyhow::bail!("{} problem(s) found", problems.len())
+    ensure!(
+        problems.is_empty(),
+        "Problems found: {}",
+        problems.join(", ")
+    );
+    Ok(())
 }
 
 #[cfg(test)]

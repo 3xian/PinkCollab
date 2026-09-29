@@ -10,45 +10,43 @@
 
 ## Install
 
-Install the app and Gateway from the same release.
-
-1. **Host:** Node.js 18+. Install Tailscale and allow Funnel for this node.
-2. **Phone:** install the [release APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
+Install the [Android app](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) and PinkCollab CLI from the same release. The guided setup needs Node.js 18+, [OMP](https://omp.sh/), and [Tailscale](https://tailscale.com/download) on the host. Manual deployments can use Tailscale Serve or another HTTPS proxy.
 
 ```sh
 npm install -g pinkcollab@latest
 ```
 
+Make sure OMP works:
+
+```sh
+omp --version
+```
+
+Then, from the directory containing your projects:
+
+```sh
+cd ~/projects
+pinkcollab setup
+```
+
+Scan the QR code with the PinkCollab Android app. PinkCollab keeps the Gateway running in the background; you can close this terminal after pairing.
+
+Setup guides Tailscale sign-in when needed. Your Tailscale account must permit Funnel. Windows service installation needs an administrator terminal **as the same user**, that user's service login credentials, and the Windows *Log on as a service* right. macOS starts the service when you log in; Linux user services start with your user session (see [logout behavior](docs/deployment.md#run-as-a-background-service)).
+
 ## Use
 
-1. **Set up the host once.** Make sure `omp --version` works, then choose an existing directory for your projects:
+In the app, open **Workspaces**, choose a directory, create a session, and send a prompt. Use **Stop** to interrupt a turn and **Exit** to end its runtime.
 
-   ```sh
-   pinkcollab init --workspace /absolute/path/to/projects
-   pinkcollab funnel
-   ```
+- Pair another phone: `pinkcollab pair`.
+- Check the host: `pinkcollab status`; diagnose problems: `pinkcollab doctor`.
+- Add project roots: `pinkcollab setup --workspace /path/to/code --workspace /path/to/work`.
+- Update the installed background Gateway after an npm upgrade: `pinkcollab setup` or `pinkcollab service install`.
 
-   On Windows, use a path such as `C:/code`. To allow more than one directory, repeat `--workspace` in the same `init` command. `funnel` sets up the public HTTPS address used by the phone.
+Setup checks service ownership and listener conflicts before changing configuration or remote access. It can be repeated: it merges workspaces and preserves existing settings and paired devices. If a service update fails, resolve the reported error and rerun the same command; unfinished updates are retried. Applying changed configuration or upgrading the binary may restart the Gateway and stop active OMP runtimes; stored sessions remain.
 
-2. **Start the Gateway.** Run this on the host and leave the terminal open while using the app:
+`status` checks local Gateway health and OMP. It also verifies Funnel when configured by PinkCollab; other remote access is labeled externally managed and is not connectivity-tested.
 
-   ```sh
-   pinkcollab serve
-   ```
-
-3. **Pair your phone.** Open another terminal on the host and run:
-
-   ```sh
-   pinkcollab pair
-   ```
-
-   Scan the QR code in the PinkCollab app. The code can be used once within five minutes. Run `pinkcollab pair` again if it expires.
-
-4. **Start a session.** In the app, open **Workspaces**, choose a directory, create a session, and send a prompt. Use **Stop** to interrupt the current turn, **Exit** to end the runtime after confirmation, and **Send** to submit a prompt.
-
-For later use, start the Gateway with `pinkcollab serve` and open the app on your paired phone. To change the allowed directories, edit `workspaces` in `~/.pinkcollab/config.yaml`. `init` will not overwrite an existing configuration.
-
-For Funnel permissions, connection troubleshooting, or running the Gateway in the background, see [Deployment and networking](docs/deployment.md).
+For [manual setup](docs/deployment.md#tailscale-funnel), automation, service management, and troubleshooting, see [Deployment and networking](docs/deployment.md).
 
 ## How it works
 

@@ -54,6 +54,23 @@ pub fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     o.open(path)?.write_all(bytes)?;
     Ok(())
 }
+/// Replace a private metadata/configuration file without exposing a partial write.
+pub fn replace_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    let temporary = path.with_file_name(format!(".{}", id("write_")));
+    let result = (|| {
+        private_file(&temporary, bytes)?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&temporary)?
+            .sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
 impl Store {
     pub fn open(dir: &Path) -> Result<Self> {
         private_dir(dir)?;

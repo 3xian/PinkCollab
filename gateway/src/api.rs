@@ -56,6 +56,7 @@ pub fn router(app: App) -> Router {
         .route("/api/v3/events", get(api_stream))
         .route_layer(middleware::from_fn_with_state(app.clone(), authenticate));
     Router::new()
+        .route("/health", get(|| async { "pinkcollab:ok" }))
         .route("/api/v3/pair", post(api_pair))
         .route("/api/v1/{*path}", any(upgrade_required))
         .route("/api/v2/{*path}", any(upgrade_required))

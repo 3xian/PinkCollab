@@ -128,9 +128,10 @@
         <div class="start-copy">
           <p class="eyebrow">LET’S GET YOU CONNECTED</p>
           <h2 id="start-title">Built for your setup.<br>Open from the start.</h2>
-          <p>Download the Android release APK, install the Gateway on the computer that will run sessions, and install and configure <a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> separately on that host. Then pair the phone and create your first session.</p>
+          <p>Download the Android release APK, install the Gateway on the computer that will run sessions, and install and configure <a class="text-link" href="https://omp.sh/">Oh My Pi (OMP)</a> separately on that host. Run guided setup, scan the QR code, and close the terminal. The Gateway runs in the background.</p>
           <dl class="requirement-list">
             <dt>On your host</dt><dd>Oh My Pi installed and configured separately, with <code>omp --version</code> working in your terminal.</dd>
+            <dt>Guided setup</dt><dd>Install <a class="text-link" href="https://tailscale.com/download">Tailscale</a> on the host. Your account must allow Funnel; the phone does not need Tailscale for this setup.</dd>
             <dt>Gateway install</dt><dd>Node.js 18+ for the npm package; Rust 1.89+ only if building from source. No Rust toolchain is needed for the prebuilt downloads.</dd>
             <dt>Android app</dt><dd>The release APK needs no Android build toolchain. JDK 17+ and Android SDK 36 are only for building the app yourself.</dd>
           </dl>
@@ -139,10 +140,12 @@
           <span class="build-note">Install the signed APK and Gateway from the same release; <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">Gateway binaries and checksums</a> are available there too. A debug APK may require uninstalling the release app first because it uses a different signing key.</span>
         </div>
         <div class="install-panel">
-          <div class="install-top"><span class="terminal-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Install the gateway</span></div>
+          <div class="install-top"><span class="terminal-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Install and connect</span></div>
           <div class="install-route">
             <div class="route-head"><h3>Install with npm</h3><span class="route-badge">Easiest · Node.js 18+</span><button class="copy-button" type="button" data-copy="command-npm" aria-label="Copy the prebuilt gateway command">Copy <span aria-hidden="true">⧉</span></button></div>
-            <pre><code id="command-npm">npm install -g pinkcollab@latest</code></pre>
+            <pre><code id="command-npm">npm install -g pinkcollab@latest
+cd ~/projects
+pinkcollab setup</code></pre>
             <p class="route-note">Installs the released native Gateway binary without Rust. Prefer a direct download? Choose your platform’s Gateway binary and verify it against SHA256SUMS on the <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">latest release</a>.</p>
           </div>
           <div class="install-route">
@@ -154,12 +157,14 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
           <div class="install-next">
             <span>Next steps</span>
             <ol class="next-steps">
-              <li>Allow a project directory that already exists: <code>pinkcollab init --workspace /absolute/path/to/projects</code>.</li>
-              <li>Publish it with Tailscale Funnel: <code>pinkcollab funnel</code>. Tailscale runs on the host. The phone does not install Tailscale.</li>
-              <li>Start the Gateway with <code>pinkcollab serve</code> and leave that terminal open.</li>
-              <li>In another terminal, print a pairing code with <code>pinkcollab pair</code>.</li>
-              <li>Open PinkCollab on Android, scan the code within 5 minutes, choose a workspace, and create your first session.</li>
+              <li>Check <code>omp --version</code>, then run <code>pinkcollab setup</code> from your projects directory. Confirm the workspace and sign in to Tailscale if prompted.</li>
+              <li>Scan the QR code in PinkCollab on Android within five minutes. Setup can generate another code if it expires.</li>
+              <li>Close the terminal after pairing. Choose a workspace in the app and create your first session.</li>
+              <li>Check the host with <code>pinkcollab status</code>; investigate problems with <code>pinkcollab doctor</code>. Pair another phone with <code>pinkcollab pair</code>.</li>
             </ol>
+            <p class="next-note">Windows service installation needs an administrator terminal as the same user, service login credentials and the Log on as a service right. macOS starts at login; Linux user services may stop on logout. See the deployment guide for details.</p>
+            <p class="next-note">After an npm upgrade, run <code>pinkcollab setup</code> or <code>pinkcollab service install</code> again. Updates may stop active OMP runtimes; stored sessions and pairings remain. Fix any reported error and rerun to finish an interrupted update.</p>
+            <p class="next-note">Manual Tailscale Serve and HTTPS proxies are also supported. Their remote access is reported as externally managed, not verified; PinkCollab checks Funnel only when it configured that mapping.</p>
             <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>, and build the matching Android app from source. For a direct release download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory.</p>
             <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>
             <a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment and networking guide <span aria-hidden="true">→</span></a>

@@ -6,7 +6,7 @@ The Gateway listens only on loopback (`127.0.0.1:8787`); Tailscale or a reverse 
 
 Funnel publishes the Gateway to the **public internet**. The URL is not a secret; pairing credentials and the workspace allowlist provide access control. Tailscale terminates TLS. Your tailnet must allow the node's `funnel` attribute.
 
-### Installed Gateway
+### Manual setup (advanced)
 
 After `pinkcollab init`, keep `pinkcollab serve` running in one terminal. With Tailscale connected, run in another:
 
@@ -50,11 +50,39 @@ pinkcollab pair
 
 ## Pairing and access
 
-`pair` uses `public_url` or an explicit `--url`; it will not guess a Tailscale hostname. Its token works once for five minutes. Only `/api/v3/pair` is accessible without a credential; other API requests and WebSocket upgrades require a paired Bearer token. To remove a phone's **host-side** access, run `pinkcollab clients`, then `pinkcollab revoke --client <clientId>` (from source: `cargo run -- clients` / `cargo run -- revoke --client <clientId>`). Removing a host in the app alone does not revoke it.
+`pair` uses `public_url` or an explicit `--url`; it will not guess a Tailscale hostname. Its token works once for five minutes. `/health` returns only a fixed process-health marker without authentication; `/api/v3/pair` accepts the single-use pairing token. Other API requests and WebSocket upgrades require a paired Bearer token. To remove a phone's **host-side** access, run `pinkcollab clients`, then `pinkcollab revoke --client <clientId>` (from source: `cargo run -- clients` / `cargo run -- revoke --client <clientId>`). Removing a host in the app alone does not revoke it.
 
 OMP runs with the Gateway user's filesystem permissions; the workspace allowlist is not an OS sandbox. OMP sends model traffic under its own provider configuration.
 
 ## Run as a background service
+
+`pinkcollab setup` installs and starts the service automatically. To manage an existing configuration:
+
+```sh
+pinkcollab service install
+pinkcollab service start
+pinkcollab service status
+pinkcollab service restart
+pinkcollab service stop
+pinkcollab service uninstall
+```
+
+`service install` registers a new service; use `service start` to start it, or `setup` to do both. Updating a running service restarts it when the binary, configuration, service definition or launch environment changes. Identical completed installs do not restart it. An interrupted update retains its pending activation: after fixing the error, rerun `service install` even if files were already copied.
+
+The installer copies the currently executing native binary to a stable user directory, so npm upgrades do not remove the running service. Repeat `service install` after upgrading npm. It preserves the current absolute PATH for OMP launchers and records the data directory; a conflicting installation for another data directory is rejected. Uninstall removes the service registration, leaving configuration, sessions and paired devices intact.
+
+On macOS this is a launchd user agent; it starts at login. Linux uses a systemd user service. Without user lingering it may stop on logout; `doctor` reports this, but PinkCollab never enables lingering automatically. Windows uses SCM with the current user's explicit credentials, never LocalSystem. Run installation in an administrator terminal as that same user and grant *Log on as a service* if Windows requires it. Passwordless accounts may need a Windows-supported service login credential or manual foreground operation. Non-interactive setup requires the Windows service to have been installed interactively already.
+
+### Remote-access diagnostics
+
+`setup` and `pinkcollab funnel` record the configured Funnel URL in `<data-dir>/funnel-url`. When it matches `public_url`, `status` and `doctor` check the Tailscale connection, hostname and Funnel mapping. This verifies the host configuration, not end-to-end reachability from a phone.
+
+With no marker, or after changing `public_url`, diagnostics label remote access **Externally managed (not verified)**. This supports manual reverse proxies and private Tailscale Serve without requiring a public Funnel. An empty URL is **Local only**. Existing configurations created before this tracking was added are treated as externally managed; rerun `pinkcollab funnel` to adopt a Funnel mapping. Tailscale information in `doctor` is informational for these modes; other failed checks, including a missing background service, still affect its exit status.
+
+### Manual service setup / troubleshooting reference
+
+The following platform examples are for manual deployments. Normal installations should use the commands above.
+
 
 Use the **same OS user and data directory** as `init`. Copy the native Gateway binary to a stable path: neither npm's global installation tree nor Cargo's `target/` is suitable for a service that survives updates. Preserve a `PATH` that lets the configured OMP launcher find `bun` or `node`. For a source build, copy `gateway/target/release/pinkcollab-gateway` after [building it](development.md#build-the-gateway); for npm, locate the platform binary as below.
 
@@ -66,7 +94,7 @@ New-Item -ItemType Directory -Force $dir | Out-Null
 $root = Join-Path (npm root -g) "pinkcollab"
 $manifest = node -e "console.log(require.resolve('@pinkcollab/gateway-win32-x64/package.json', { paths: [process.argv[1]] }))" $root
 Copy-Item (Join-Path (Split-Path $manifest) "bin/pinkcollab-gateway.exe") $dir
-sc.exe create PinkCollab binPath= "`"$dir\pinkcollab-gateway.exe`" --data-dir `"$env:USERPROFILE\.pinkcollab`" service" start= auto
+sc.exe create PinkCollab binPath= "`"$dir\pinkcollab-gateway.exe`" --data-dir `"$env:USERPROFILE\.pinkcollab`" service-run" start= auto obj= "$env:USERDOMAIN\$env:USERNAME"
 ```
 
 In **Services → PinkCollab → Properties → Log On**, select the user who owns the data and OMP credentials (not LocalSystem), grant *Log on as a service*, then `sc.exe start PinkCollab`. Stop with `sc.exe stop PinkCollab`.
@@ -136,7 +164,9 @@ Run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.pinkcollab.gate
 
 - `tailscale up` hangs before showing a login URL: check `tailscale status` and `tailscale debug daemon-logs`. A control-plane timeout can mean DNS or proxy interference. If the host has a **verified** local HTTP proxy, restart the foreground daemon as `sudo env HTTPS_PROXY=http://127.0.0.1:<port> HTTP_PROXY=http://127.0.0.1:<port> tailscaled`, keep the proxy running, then retry `tailscale up`.
 - `pair` has no URL: set `public_url` or pass `--url https://…`. A phone cannot use host loopback. If Funnel status shows a mapping but the phone cannot connect, also check that the Gateway is running. A code used or older than five minutes needs a new `pair`.
-- Run `pinkcollab status` (or `cargo run -- status`) **only while the Gateway is stopped**; a live listener makes its port check fail. An unavailable OMP may be a missing executable or a service `PATH` that cannot run its launcher.
+- A failed service update can be retried with `pinkcollab service install`. The installer tracks unfinished updates, including restarts; copying the new binary alone does not mark the update complete.
+- Setup rejects another data directory's service or an occupied unmanaged listener before changing configuration or Funnel. Use the original `--data-dir` to manage an existing service.
+- Run `pinkcollab status` for operational status and `pinkcollab doctor` for detailed diagnostics, whether the Gateway is running or stopped. An unavailable OMP may be a missing executable or a service `PATH` that cannot run its launcher.
 - A proxy must forward WebSocket Upgrade and `Authorization`. Remove obsolete `tls_cert`/`tls_key` from old configs; the Gateway no longer terminates TLS.
 
 ## CLI and configuration
@@ -161,14 +191,29 @@ The npm package name is `pinkcollab`. The standalone and source-built executable
 | --- | --- |
 | `init --workspace <dir>...` | One-time bootstrap. `--workspace` is required and repeatable. Each path must already exist, must be a directory, and is stored in canonical form. Fails if `config.yaml` already exists. Resolves `omp` on `PATH` to an absolute path and fails if it cannot. Creates the data directory, writes `config.yaml`, and opens the database. |
 | `serve` | Loads config, opens the database, and serves until SIGINT or, on Unix, SIGTERM. Foreground. Default when no subcommand is given. A graceful shutdown stops OMP runtimes this Gateway started. |
-| `status` | Preflight only. Prints config path, listen address, public URL, each workspace, the resolved OMP path and version, Tailscale state if the `tailscale` binary answers, whether the listen port can be bound, and paired-device and session counts. Prints `status: ready` and exits 0 when nothing is wrong. Exits non-zero while a problem remains. Run it while the Gateway is stopped: a running listener makes the port check fail. Tailscale being absent is printed, not by itself a failure. |
+| `setup [--workspace <dir>]... [--non-interactive] [--transport tailscale]` | Reconciles config, OMP, Tailscale, remote access and the user background service; waits for local health before showing a QR and waiting for pairing. Default workspace is cwd, with confirmation. Existing roots are merged and deduplicated. Interactive codes can be regenerated after five minutes. Only the tailscale transport is implemented. |
+| `status` | Shows Gateway health, remote-access mode, OMP version and workspace/device/session counts. Verifies the Funnel mapping configured by PinkCollab. An empty public URL is local-only; manual Serve/proxy URLs are externally managed, not verified. Missing Tailscale alone does not fail those modes. Exits non-zero for unavailable Gateway/OMP or a failed managed Funnel check. |
+| `doctor` | Reports Config, OMP, Tailscale, Funnel, Service, Gateway and Database sections, including failures, paths and underlying errors. Does not change transport or service configuration. |
+| `service install/start/stop/restart/status/uninstall` | Manages the current user's background Gateway with this data directory. Stable binary locations and OS details are below. |
 | `pair [--url <root>] [--qr <file>]` | Mints a single-use pairing token, prints pairing JSON on stdout, and renders a QR on stderr when stderr is a terminal. `--qr` also writes a PNG. `--url` overrides `public_url`. If neither is set, the command fails and tells you to pass `--url` or run `funnel`. It does not guess a Tailscale hostname and does not start HTTPS. The URL must be `https`, or `http` only for `127.0.0.1`, `localhost`, or `10.0.2.2`. |
 | `clients` | Lists paired devices: `clientId`, escaped name, pairing time. Prints `No paired devices.` when the list is empty. |
 | `revoke --client <clientId>` | Deletes that device's credential on the host. Fails when the id is unknown. Does not contact the phone. |
 | `leases` | Lists session IDs and runtime generations whose process exit was not confirmed before a Gateway restart. |
 | `clear-lease --session <id> --generation <generation> --verified-exited` | Clears one exact lease. Requires the Gateway to be stopped; use only after checking the old OMP process and descendants are gone. |
 | `funnel [--https 443] [--dry-run] [--tailscale <path>] [--pair]` | Publishes the loopback listener with Tailscale Funnel, writes `public_url`, and exits. It does not start the Gateway. With `--pair` it prints a pairing code. `--https` must be 443, 8443, or 10000. `--dry-run` prints the plan and does not change Tailscale or mint a code. `--tailscale` is the CLI path when `tailscale` is not on `PATH`. Requires the node `funnel` attribute; otherwise the Tailscale CLI stops with `Funnel not available; "funnel" node attribute not set`. |
-| `service` | Windows only. Runs under the Service Control Manager. Starting it from a normal terminal fails with `service must be started by the Windows Service Control Manager`. |
+| `service-run` | Hidden Windows-only internal entry. Runs under the Service Control Manager. Starting it from a normal terminal fails with `service must be started by the Windows Service Control Manager`. |
+
+### Automation
+
+```sh
+pinkcollab setup --non-interactive --workspace /srv/projects
+```
+
+Requires explicit workspace roots and an already connected Tailscale installation. It never asks questions, starts a login flow, prints pairing credentials, or waits for a phone. It exits successfully after the managed Gateway passes its local health check; use `pinkcollab pair` separately to add devices. Errors are non-zero. `setup` does not automatically install OMP or Tailscale.
+
+The sequence is: load configuration → check service ownership, listener conflicts and Windows service prerequisites → confirm/canonicalize workspaces → validate OMP → merge/save configuration → connect Tailscale → inspect/reconcile Funnel → install/update service → start → retry local health for up to 20 seconds → generate a five-minute QR → wait for a new paired device. Cancellation leaves completed configuration and service steps available for the next run.
+
+PinkCollab Relay is not part of this implementation.
 
 ### Configuration
 
@@ -198,7 +243,7 @@ A completed session whose process has not exited still occupies a slot. Creating
 | Topic | Behavior |
 | --- | --- |
 | Windows executable lookup | `init` honors `PATHEXT` when resolving a bare `omp` name. |
-| Windows service | `service` exists only in the Windows build. Install steps are in [Windows](#windows). |
+| Windows service | Management commands are cross-platform; the hidden `service-run` entry is Windows-only. |
 | Windows paths | Workspace display strips the `\\?\` and `\\?\UNC\` prefixes from canonical paths. |
 | Unix permissions | The data directory is created mode `0700`, and new files mode `0600`, on Unix. Windows uses default ACLs. |
 | Stop signals | Unix `serve` stops on SIGINT or SIGTERM. Elsewhere it stops on Ctrl+C. The Windows service also stops on Service Control stop or shutdown. |

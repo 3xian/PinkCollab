@@ -61,6 +61,35 @@ fn run() -> Result<()> {
         let dir = DATA_DIR
             .get()
             .context("service data directory unavailable")?;
+        if dir.join("service-environment.json").exists() {
+            let values: std::collections::BTreeMap<String, String> =
+                serde_json::from_slice(&std::fs::read(dir.join("service-environment.json"))?)
+                    .context("cannot read installed service environment")?;
+            // Windows permits environment updates; restore the installer's user directories
+            // and launcher PATH before constructing any OMP process. No credentials are stored.
+            for key in ["PATH", "USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA"] {
+                if let Some(value) = values.get(key) {
+                    unsafe {
+                        std::env::set_var(key, value);
+                    }
+                }
+            }
+        }
+        let identity = pinkcollab_gateway::command::output(
+            std::process::Command::new("whoami").args(["/user", "/fo", "csv", "/nh"]),
+            Duration::from_secs(10),
+        )?;
+        anyhow::ensure!(
+            identity.status.success() && !identity.stdout.is_empty(),
+            "cannot verify service user identity"
+        );
+        let identity = String::from_utf8_lossy(&identity.stdout);
+        anyhow::ensure!(
+            !["S-1-5-18", "S-1-5-19", "S-1-5-20"]
+                .iter()
+                .any(|sid| identity.contains(sid)),
+            "PinkCollab must run as the user who owns its data and OMP credentials, not a built-in service account"
+        );
         let config = Config::load(dir)?;
         let store = Arc::new(Store::open(dir)?);
         let runtime = tokio::runtime::Runtime::new()?;

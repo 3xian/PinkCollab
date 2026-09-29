@@ -1,6 +1,10 @@
 use crate::{config::Config, storage};
 use anyhow::{Context, Result, ensure};
-use std::{path::Path, process::Command};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 pub const TAILSCALE: &str = "tailscale";
 /// Ports Tailscale accepts for a public Funnel HTTPS endpoint.
@@ -27,17 +31,19 @@ pub fn public_url(host: &str, https_port: u16) -> String {
     }
 }
 fn status(binary: &Path) -> Result<serde_json::Value> {
-    let output = Command::new(binary).args(["status", "--json"]).output().with_context(|| {
+    let output = crate::command::output(Command::new(binary).args(["status", "--json"]), Duration::from_secs(10)).with_context(|| {
         format!(
             "cannot run `{}`; install Tailscale from https://tailscale.com/download or pass --tailscale <path>",
             binary.display()
         )
     })?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("cannot parse `tailscale status --json`")?;
     ensure!(
-        output.status.success(),
+        output.status.success() || value["BackendState"].is_string(),
         "`tailscale status` failed; run `tailscale up` and log in first"
     );
-    serde_json::from_slice(&output.stdout).context("cannot parse `tailscale status --json`")
+    Ok(value)
 }
 fn node(status: &serde_json::Value) -> Result<&str> {
     let state = status["BackendState"].as_str().unwrap_or("unknown");
@@ -77,6 +83,96 @@ pub fn state(binary: &Path) -> Result<NodeStatus> {
 ///
 /// Returns the public URL it published, or `None` when this was a dry run.
 pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<Option<String>> {
+    apply(dir, config, options, false)
+}
+pub fn reconcile(dir: &Path, config: &Config, binary: &Path) -> Result<String> {
+    ensure!(
+        config.listen.ip() == std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+        "Tailscale setup requires the Gateway's IPv4 local address. Keep your custom listener with manual setup."
+    );
+    let host = state(binary)?
+        .dns_name
+        .context("Tailscale has no DNS name")?;
+    let port = if config.public_url.is_empty() {
+        443
+    } else {
+        let url = crate::config::root_url(&config.public_url)?;
+        ensure!(
+            url.host_str()
+                .is_some_and(|name| name == host || name.ends_with(".ts.net"))
+                && url.scheme() == "https",
+            "Existing remote address belongs to another transport. Keep it with manual setup, or update the configuration before using Tailscale setup."
+        );
+        url.port().unwrap_or(443)
+    };
+    let public = public_url(&host, port);
+    let value = inspect_configuration(binary)?;
+    if mapping_matches(&value, &host, port, config.listen.port()) {
+        set_public_url(&dir.join("config.yaml"), &public)?;
+        return Ok(public);
+    }
+    if config.public_url.is_empty() {
+        let key = format!("{host}:{port}");
+        let handlers = &value["Web"][&key]["Handlers"];
+        ensure!(
+            handlers.is_null()
+                || (handlers.as_object().is_some_and(|h| h.len() == 1)
+                    && handlers["/"]["Proxy"].as_str()
+                        == Some(target(config.listen.port()).as_str())),
+            "Tailscale is already sharing another application at this address. Use manual setup to choose a separate remote-access port."
+        );
+        ensure!(
+            value["TCP"][port.to_string()].is_null()
+                || value["TCP"][port.to_string()]["HTTPS"] == true,
+            "Tailscale is already forwarding another application on this port. Use manual setup to choose a separate remote-access port."
+        );
+    }
+    let public = apply(
+        dir,
+        config,
+        Options {
+            https_port: port,
+            dry_run: false,
+            binary: Some(binary),
+        },
+        true,
+    )?
+    .context("remote access was not configured")?;
+    ensure!(
+        inspect(binary, &host, port, config.listen.port())?,
+        "Tailscale has not enabled the requested remote access. Check Funnel permissions in the Tailscale admin console."
+    );
+    Ok(public)
+}
+/// Verify both public exposure and the exact HTTP backend, not merely a DNS name.
+pub fn inspect(binary: &Path, host: &str, port: u16, backend: u16) -> Result<bool> {
+    Ok(mapping_matches(
+        &inspect_configuration(binary)?,
+        host,
+        port,
+        backend,
+    ))
+}
+fn inspect_configuration(binary: &Path) -> Result<serde_json::Value> {
+    let output = crate::command::output(
+        Command::new(binary).args(["funnel", "status", "--json"]),
+        Duration::from_secs(10),
+    )
+    .context("cannot inspect remote access")?;
+    ensure!(
+        output.status.success(),
+        "cannot inspect Tailscale Funnel: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).context("cannot parse Tailscale Funnel configuration")
+}
+fn mapping_matches(value: &serde_json::Value, host: &str, port: u16, backend: u16) -> bool {
+    let key = format!("{host}:{port}");
+    value["AllowFunnel"][&key] == true
+        && value["TCP"][port.to_string()]["HTTPS"] == true
+        && value["Web"][&key]["Handlers"]["/"]["Proxy"].as_str() == Some(target(backend).as_str())
+}
+fn apply(dir: &Path, config: &Config, options: Options<'_>, quiet: bool) -> Result<Option<String>> {
     let port = config.listen.port();
     ensure!(
         allows_https_port(options.https_port),
@@ -98,7 +194,9 @@ pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<Option
         Err(e) => return Err(e),
     };
     let public = public_url(&host, options.https_port);
-    println!("Funnel: {public} -> {target}");
+    if !quiet {
+        println!("Funnel: {public} -> {target}");
+    }
     if options.dry_run {
         println!(
             "dry run, nothing changed; this would run:\n  {} funnel --bg --https={} --yes {target}\nand set public_url: {public} in {}",
@@ -108,16 +206,17 @@ pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<Option
         );
         return Ok(None);
     }
-    let output = Command::new(binary)
-        .args([
+    let output = crate::command::output(
+        Command::new(binary).args([
             "funnel",
             "--bg",
             &format!("--https={}", options.https_port),
             "--yes",
             &target,
-        ])
-        .output()
-        .with_context(|| format!("cannot run `{}`", binary.display()))?;
+        ]),
+        Duration::from_secs(30),
+    )
+    .with_context(|| format!("cannot run `{}`", binary.display()))?;
     ensure!(
         output.status.success(),
         "`tailscale funnel` failed: {}{}",
@@ -126,17 +225,19 @@ pub fn setup(dir: &Path, config: &Config, options: Options<'_>) -> Result<Option
     );
     let report = String::from_utf8_lossy(&output.stdout);
     let report = report.trim();
-    if !report.is_empty() {
+    if !quiet && !report.is_empty() {
         println!("{report}");
     }
     let path = dir.join("config.yaml");
     set_public_url(&path, &public)?;
-    println!(
-        "public_url set to {public} in {}\n\
+    if !quiet {
+        println!(
+            "public_url set to {public} in {}\n\
          This URL is reachable from the internet: keep pairing single-use, keep credentials revocable,\n\
          and do not rely on the URL being hard to guess.",
-        path.display()
-    );
+            path.display()
+        );
+    }
     Ok(Some(public))
 }
 /// Rewrite only the public_url line, so hand-written comments survive.
@@ -151,5 +252,53 @@ fn set_public_url(path: &Path, url: &str) -> Result<()> {
         Some(i) => lines[i] = &line,
         None => lines.push(&line),
     }
-    storage::private_file(path, format!("{}\n", lines.join("\n")).as_bytes())
+    storage::replace_private_file(path, format!("{}\n", lines.join("\n")).as_bytes())?;
+    storage::replace_private_file(&path.parent().unwrap().join("funnel-url"), url.as_bytes())
+}
+
+pub fn tailscale_binary() -> Option<PathBuf> {
+    if let Some(binary) = crate::config::resolve_executable("tailscale") {
+        return Some(binary);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::config::resolve_executable("/Applications/Tailscale.app/Contents/MacOS/Tailscale")
+    }
+    #[cfg(windows)]
+    {
+        std::env::var_os("ProgramFiles").and_then(|root| {
+            crate::config::resolve_executable(
+                &PathBuf::from(root)
+                    .join("Tailscale/tailscale.exe")
+                    .to_string_lossy(),
+            )
+        })
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        None
+    }
+}
+
+#[cfg(test)]
+mod onboarding_tests {
+    use super::*;
+    #[test]
+    fn mapping_requires_public_https_and_exact_backend() {
+        let mut value = serde_json::json!({
+            "TCP": {"443": {"HTTPS": true}},
+            "Web": {"host.ts.net:443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8787"}}}},
+            "AllowFunnel": {"host.ts.net:443": true}
+        });
+        assert!(mapping_matches(&value, "host.ts.net", 443, 8787));
+        assert!(!mapping_matches(&value, "host.ts.net", 443, 8888));
+        value["AllowFunnel"]["host.ts.net:443"] = false.into();
+        assert!(!mapping_matches(&value, "host.ts.net", 443, 8787));
+        assert!(!mapping_matches(
+            &serde_json::json!({}),
+            "host.ts.net",
+            443,
+            8787
+        ));
+    }
 }
