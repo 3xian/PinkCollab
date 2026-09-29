@@ -202,6 +202,7 @@ fn terminal_ctrl_c_is_reported_and_foreground_is_restored() {
         });
     }
     let mut child = command.spawn().unwrap();
+    drop(command);
     let reader = master.try_clone().unwrap();
     let (send, receive) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -210,8 +211,8 @@ fn terminal_ctrl_c_is_reported_and_foreground_is_restored() {
                 break;
             };
             if line.contains("terminal-ready") {
+                // Keep draining: macOS can wait for terminal output during child exit.
                 let _ = send.send(());
-                break;
             }
         }
     });
