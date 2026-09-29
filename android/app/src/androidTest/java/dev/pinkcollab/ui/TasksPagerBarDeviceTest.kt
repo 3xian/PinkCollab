@@ -160,7 +160,8 @@ class TasksPagerBarDeviceTest {
         compose.onNodeWithTag("sessionCard:s2").performClick()
         compose.waitForIdle()
         assertEquals(SessionKey("host", "s2"), selected)
-        assertEquals(listOf("Session 2", "project-2", "Needs you"),
+        // Host connectivity takes precedence over cached session attention.
+        assertEquals(listOf("Session 2", "project-2", "Connecting"),
             compose.onNodeWithTag("sessionCard:s2").fetchSemanticsNode().config[SemanticsProperties.Text].map { it.text })
         assertCentered("s2")
 
