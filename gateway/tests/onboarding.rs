@@ -4,7 +4,7 @@ use pinkcollab_gateway::{config::Config, storage::Store};
 use std::{
     io::{Read, Write},
     os::unix::fs::PermissionsExt,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
 };
 fn executable(path: &Path, script: &str) {
@@ -27,6 +27,13 @@ fn tools(home: &Path) {
         &home.join("bin/tailscale"),
         "echo '{\"BackendState\":\"Stopped\"}'",
     );
+}
+fn versioned_omp(home: &Path) -> PathBuf {
+    let entry = home.join("bin/omp");
+    let versioned = home.join("bin/omp-0.1.0");
+    std::fs::rename(&entry, &versioned).unwrap();
+    std::os::unix::fs::symlink(&versioned, &entry).unwrap();
+    entry
 }
 #[test]
 fn doctor_reports_all_sections_even_when_config_and_tools_fail() {
@@ -119,6 +126,111 @@ fn noninteractive_setup_rejects_implicit_workspace_without_writing_config() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("requires --workspace"));
     assert!(!data.exists());
 }
+#[test]
+fn init_persists_the_absolute_omp_symlink() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let entry = versioned_omp(home.path());
+    let data = home.path().join("data");
+    let output = cli(home.path(), &data)
+        .args(["init", "--workspace"])
+        .arg(home.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(Config::load(&data).unwrap().omp, entry.to_str().unwrap());
+}
+
+#[test]
+fn setup_persists_the_absolute_omp_symlink_across_runs() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let entry = versioned_omp(home.path());
+    let data = home.path().join("data");
+    std::fs::create_dir(&data).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let config = Config {
+        listen: listener.local_addr().unwrap(),
+        workspaces: vec![home.path().into()],
+        ..Config::default()
+    };
+    drop(listener);
+    std::fs::write(
+        data.join("config.yaml"),
+        serde_yaml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    let added = tempfile::tempdir().unwrap();
+    let output = cli(home.path(), &data)
+        .args(["setup", "--non-interactive", "--workspace"])
+        .arg(added.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(Config::load(&data).unwrap().omp, entry.to_str().unwrap());
+    assert!(
+        Config::load(&data)
+            .unwrap()
+            .workspaces
+            .contains(&added.path().canonicalize().unwrap())
+    );
+    let another = tempfile::tempdir().unwrap();
+    let output = cli(home.path(), &data)
+        .args(["setup", "--non-interactive", "--workspace"])
+        .arg(another.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let saved = Config::load(&data).unwrap();
+    assert_eq!(saved.omp, entry.to_str().unwrap());
+    assert!(
+        saved
+            .workspaces
+            .contains(&another.path().canonicalize().unwrap())
+    );
+}
+
+#[test]
+fn setup_preserves_an_explicit_omp_reference() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let data = home.path().join("data");
+    std::fs::create_dir(&data).unwrap();
+    let pinned = home.path().join("bin/pinned-omp");
+    std::os::unix::fs::symlink(home.path().join("bin/omp"), &pinned).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let config = Config {
+        listen: listener.local_addr().unwrap(),
+        omp: pinned.to_string_lossy().into_owned(),
+        workspaces: vec![home.path().into()],
+        ..Config::default()
+    };
+    drop(listener);
+    std::fs::write(
+        data.join("config.yaml"),
+        serde_yaml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    let added = tempfile::tempdir().unwrap();
+    let output = cli(home.path(), &data)
+        .args(["setup", "--non-interactive", "--workspace"])
+        .arg(added.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(Config::load(&data).unwrap().omp, config.omp);
+    assert!(
+        Config::load(&data)
+            .unwrap()
+            .workspaces
+            .contains(&added.path().canonicalize().unwrap())
+    );
+}
+
 #[test]
 fn pair_command_keeps_its_machine_readable_payload() {
     let home = tempfile::tempdir().unwrap();

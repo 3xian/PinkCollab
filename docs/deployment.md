@@ -203,7 +203,7 @@ The npm package name is `pinkcollab`. The standalone and source-built executable
 
 | Command | What it does |
 | --- | --- |
-| `init --workspace <dir>...` | One-time bootstrap. `--workspace` is required and repeatable. Each path must already exist, must be a directory, and is stored in canonical form. Fails if `config.yaml` already exists. Resolves `omp` on `PATH` to an absolute path and fails if it cannot. Creates the data directory, writes `config.yaml`, and opens the database. |
+| `init --workspace <dir>...` | One-time bootstrap. `--workspace` is required and repeatable. Each path must already exist, must be a directory, and is stored in canonical form. Fails if `config.yaml` already exists or `omp` cannot be found on `PATH`. Creates the data directory, writes `config.yaml` with the absolute executable entry (without resolving symlinks), and opens the database. |
 | `serve` | Loads config, opens the database, and serves until SIGINT or, on Unix, SIGTERM. Foreground. Not the default: pass `serve` explicitly. A graceful shutdown stops OMP runtimes this Gateway started. |
 | `setup [--workspace <dir>]... [--non-interactive] [--transport tailscale]` | Reconciles config, OMP, Tailscale, remote access and the user background service; waits for local health before showing a QR and waiting for pairing. Default workspace is cwd, with confirmation. Existing roots are merged and deduplicated. Interactive codes can be regenerated after five minutes. Only the tailscale transport is implemented. |
 | `status` | Shows Gateway health, managed-service state, remote-access mode, OMP version, and workspace/device/session counts. Verifies the Funnel mapping configured by PinkCollab. An empty public URL is local-only; manual Serve/proxy URLs are externally managed, not verified. Missing Tailscale alone does not fail those modes. Exits nonzero unless the Gateway is healthy, the managed service is running, OMP is available, and a managed Funnel check passes. A healthy foreground Gateway without the managed service is degraded; that does not invalidate externally managed HTTPS. |
@@ -239,7 +239,7 @@ File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/confi
 | `public_url` | empty | Optional until you pair without `--url`. When set, it must be an absolute `http` or `https` root URL: no userinfo, path, query, or fragment. Production phone URLs are `https`. `funnel` rewrites this line and leaves other comments in place. |
 | `name` | `COMPUTERNAME`, else `HOSTNAME`, else `my-host` | Label shown for this host in Android. |
 | `workspaces` | empty until `init` | At least one directory at startup. Gateway browse and session-creation boundary only. Not an OS sandbox. |
-| `omp` | `omp` in the template; `init` replaces it | Executable path. `init` stores the absolute path it resolved, which a service needs. A bare `omp` fails when the service `PATH` does not match your terminal. |
+| `omp` | `omp` in the template; setup/init resolve it | Executable reference. Setup/init persist an absolute executable entry without resolving symlinks/shims to their current targets, so package-manager upgrades can replace the target without changing config. Explicit paths also retain symlinks; broken paths do not fall back to `PATH`. A manually configured bare name still depends on the Gateway's runtime `PATH`. |
 | `omp_args` | `[]` | Extra arguments placed after `--mode rpc-ui`. Must not set `--mode`, `--no-session`, `--session`, or the `--mode=` / `--session=` forms. |
 | `max_sessions` | `8` | Integer from 1 to 100. See below. |
 | `tls_cert`, `tls_key` | unset | Accepted by the parser only so old files fail clearly. Any config that still sets either key is rejected. Move TLS to Funnel, Serve, or a reverse proxy. |
@@ -256,7 +256,7 @@ A completed session whose process has not exited still occupies a slot. Creating
 
 | Topic | Behavior |
 | --- | --- |
-| Windows executable lookup | `init` honors `PATHEXT` when resolving a bare `omp` name. |
+| Windows executable lookup | Setup/init honor `PATHEXT` when resolving a bare executable name and persist the matched absolute entry, including its extension. |
 | Windows service | Management commands are cross-platform; the hidden `service-run` entry is Windows-only. |
 | Windows paths | Workspace display strips the `\\?\` and `\\?\UNC\` prefixes from canonical paths. |
 | Unix permissions | The data directory is created mode `0700`, and new files mode `0600`, on Unix. Windows uses default ACLs. |
