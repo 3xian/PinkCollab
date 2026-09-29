@@ -74,4 +74,19 @@ If a first publication leaves new scoped packages private, change each package t
 
 Linux packages use musl so they are not tied to the runner's glibc. macOS and Windows packages are built on native runners.
 
+### Workflow scheduling and caches
+
+`prepare` validates versions, tag notes and the npm launcher, then starts
+`gateway-checks`, the five-platform `build` matrix and `android` in parallel.
+`npm-publish` waits for Gateway builds and Rust checks, but not Android, so an
+Android failure can leave published npm packages without a GitHub Release.
+`github-release` requires every job; recovery skips only npm publication.
+
+CI warms `release-<target>` Rust caches on Gateway-relevant pushes to `main`.
+Wait for the `release-cache` matrix to finish before pushing a tag when warming
+a new cache; releases restore the default-branch caches. Caches hold
+dependencies, not binaries: each release still builds and smoke-tests its own
+artifacts. Release has no concurrency group, so avoid overlapping runs for the
+same tag.
+
 Build and test commands for local development stay in [development](development.md). Do not treat this workflow as a way to install a Gateway.

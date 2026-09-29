@@ -43,7 +43,7 @@ Running `pinkcollab` later shows host status. Rerun `pinkcollab setup` after upg
 <details>
 <summary>Windows background service</summary>
 
-Run setup in an Administrator terminal **as the same Windows user**. Windows requires that account's password (not a PIN) and the *Log on as a service* right. Setup explains the credentials prompt before opening it. If login fails, correct the account in Windows Services and rerun setup; keep your existing configuration. See [troubleshooting](docs/deployment.md#troubleshooting-guided-setup).
+Run setup in an Administrator terminal **as the same Windows user**. Windows requires that account's password (not a PIN) and the *Log on as a service* right. Setup explains the credentials prompt before opening it. If login fails, correct the account in Windows Services and rerun setup; keep your existing configuration. See [troubleshooting](docs/deployment.md#troubleshooting-setup).
 
 </details>
 
@@ -91,11 +91,13 @@ flowchart TD
 - [Deployment and networking](docs/deployment.md): HTTPS access, pairing, background services, and Gateway CLI/configuration
 - [Development](docs/development.md): contributor setup, builds, and validation
 - [Releases](docs/npm-release.md): maintainer guide to signing and publishing Android, Gateway, and npm releases
+- [External OMP conversations](docs/omp-discovery.md): discovering and continuing host OMP history
+- [Windows background options](docs/windows-background-options.md): why the Gateway runs as a Windows service
+
+## Continue an existing OMP conversation
+
+Conversations already saved by OMP in an allowed workspace also appear in Tasks with a **History** label. Open one to read it, then send a message to continue; PinkCollab adopts it automatically without copying its transcript. Close the external OMP instance first. See [supported storage and refresh behavior](docs/omp-discovery.md).
 
 ## License
 
 [MIT](LICENSE)
-
-### Continue an existing OMP conversation
-
-Conversations already saved by OMP in an allowed workspace also appear in Tasks with a **History** label. Open one to read it, then send a message to continue; PinkCollab adopts it automatically without copying its transcript. Close the external OMP instance first. See [supported storage and refresh behavior](docs/omp-discovery.md).

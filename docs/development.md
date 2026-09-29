@@ -44,13 +44,10 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-features --locked
 ```
 
-Onboarding regressions use temporary homes and fake administrative tools; they do not modify the host’s installed service or Tailscale configuration. They cover service-update retries, setup preflight conflicts, command timeouts (including inherited output handles), and manual remote-access diagnostics.
-
-The Unix Ctrl+C regression owns a pseudo-terminal. Its parent closes retained slave handles after spawning and drains output through child exit; stopping the reader at readiness can hang macOS child reaping.
-
 Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smoke -- --ignored`.
 
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
+Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
 
 From the repository root:
 

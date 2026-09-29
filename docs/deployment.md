@@ -8,7 +8,7 @@ Funnel publishes the Gateway to the **public internet**. The URL is not a secret
 
 ### Manual setup (advanced)
 
-After `pinkcollab init`, keep `pinkcollab serve` running in one terminal. With Tailscale connected, run in another:
+Guided `pinkcollab setup` performs these steps for you. For a manual install, run `pinkcollab init`, keep `pinkcollab serve` running in one terminal, and with Tailscale connected run in another:
 
 ```sh
 pinkcollab funnel --dry-run
@@ -92,12 +92,9 @@ On macOS this is a launchd user agent; it starts at login. Linux uses a systemd 
 
 With no marker, or after changing `public_url`, diagnostics label remote access **Externally managed (not verified)**. This supports manual reverse proxies and private Tailscale Serve without requiring a public Funnel. An empty URL is **Local only**. Existing configurations created before this tracking was added are treated as externally managed; rerun `pinkcollab funnel` to adopt a Funnel mapping. Tailscale information in `doctor` is informational for these modes; other failed checks, including a missing background service, still affect its exit status.
 
-### Manual service setup / troubleshooting reference
+### Manual service setup
 
-The following platform examples are for manual deployments. Normal installations should use the commands above.
-
-
-Use the **same OS user and data directory** as `init`. Copy the native Gateway binary to a stable path: neither npm's global installation tree nor Cargo's `target/` is suitable for a service that survives updates. Preserve a `PATH` that lets the configured OMP launcher find `bun` or `node`. For a source build, copy `gateway/target/release/pinkcollab-gateway` after [building it](development.md#build-the-gateway); for npm, locate the platform binary as below.
+The following platform examples are for manual deployments. Normal installations should use the commands above. Use the **same OS user and data directory** as `init`. Copy the native Gateway binary to a stable path: neither npm's global installation tree nor Cargo's `target/` is suitable for a service that survives updates. Preserve a `PATH` that lets the configured OMP launcher find `bun` or `node`. For a source build, copy `gateway/target/release/pinkcollab-gateway` after [building it](development.md#build-the-gateway); for npm, locate the platform binary as below.
 
 ### Windows
 
@@ -173,7 +170,7 @@ Write `~/Library/LaunchAgents/dev.pinkcollab.gateway.plist`, replacing `YOUR_USE
 
 Run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.pinkcollab.gateway.plist` to load it. Update by stopping the service, copying the new binary, and starting it again. A graceful Gateway stop terminates its OMP runtimes; stored sessions and pairings remain, but processes do not resume automatically. See [recovery](architecture.md#data-ownership-and-recovery).
 
-## Troubleshooting
+## Troubleshooting remote access
 
 - `tailscale up` hangs before showing a login URL: check `tailscale status` and `tailscale debug daemon-logs`. A control-plane timeout can mean DNS or proxy interference. If the host has a **verified** local HTTP proxy, restart the foreground daemon as `sudo env HTTPS_PROXY=http://127.0.0.1:<port> HTTP_PROXY=http://127.0.0.1:<port> tailscaled`, keep the proxy running, then retry `tailscale up`.
 - First-time Funnel approval: interactive `pinkcollab setup` displays Tailscale instructions live and allows up to five minutes for browser approval. Non-interactive setup requires Funnel/HTTPS to already be enabled. If setup times out, run `tailscale funnel --bg --https=443 http://127.0.0.1:8787` in a terminal, complete approval, then rerun setup with your original options. Substitute your selected HTTPS port (443, 8443 or 10000) and Gateway loopback port. Check `tailscale funnel status` for the exact backend mapping.
@@ -181,7 +178,7 @@ Run `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.pinkcollab.gate
 - A failed service update can be retried with `pinkcollab service install`. The installer tracks unfinished updates, including restarts; copying the new binary alone does not mark the update complete.
 - Setup rejects another data directory's service or an occupied unmanaged listener before changing configuration or Funnel. Use the original `--data-dir` to manage an existing service.
 - Run `pinkcollab status` for operational status and `pinkcollab doctor` for detailed diagnostics, whether the Gateway is running or stopped. An unavailable OMP may be a missing executable or a service `PATH` that cannot run its launcher.
-- A proxy must forward WebSocket Upgrade and `Authorization`. Remove obsolete `tls_cert`/`tls_key` from old configs; the Gateway no longer terminates TLS.
+- A proxy must forward WebSocket Upgrade and `Authorization`.
 
 ## CLI and configuration
 
@@ -227,8 +224,6 @@ Requires explicit workspace roots and an already connected Tailscale installatio
 
 The sequence is: load configuration → check service ownership, listener conflicts and Windows service prerequisites → confirm/canonicalize workspaces → validate OMP → merge/save configuration → connect Tailscale → inspect/reconcile Funnel → install/update service → start → retry local health for up to 20 seconds → generate a five-minute QR → wait for a new paired device. Cancellation leaves completed configuration and service steps available for the next run.
 
-PinkCollab Relay is not part of this implementation.
-
 ### Configuration
 
 File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/config.example.yaml`](../gateway/config.example.yaml). Unknown keys are rejected. `~` and `~/…` in `workspaces` expand when the file is loaded.
@@ -242,7 +237,6 @@ File: `<data-dir>/config.yaml`. The example in the repository is [`gateway/confi
 | `omp` | `omp` in the template; setup/init resolve it | Executable reference. Setup/init persist an absolute executable entry without resolving symlinks/shims to their current targets, so package-manager upgrades can replace the target without changing config. Explicit paths also retain symlinks; broken paths do not fall back to `PATH`. A manually configured bare name still depends on the Gateway's runtime `PATH`. |
 | `omp_args` | `[]` | Extra arguments placed after `--mode rpc-ui`. Must not set `--mode`, `--no-session`, `--session`, or the `--mode=` / `--session=` forms. |
 | `max_sessions` | `8` | Integer from 1 to 100. See below. |
-| `tls_cert`, `tls_key` | unset | Accepted by the parser only so old files fail clearly. Any config that still sets either key is rejected. Move TLS to Funnel, Serve, or a reverse proxy. |
 
 <a id="max_sessions"></a>
 
@@ -257,7 +251,7 @@ A completed session whose process has not exited still occupies a slot. Creating
 | Topic | Behavior |
 | --- | --- |
 | Windows executable lookup | Setup/init honor `PATHEXT` when resolving a bare executable name and persist the matched absolute entry, including its extension. |
-| Windows service | Management commands are cross-platform; the hidden `service-run` entry is Windows-only. |
+| Windows service | Management commands are cross-platform; the hidden `service-run` entry is Windows-only. PinkCollab uses a same-user SCM service rather than a Task Scheduler logon task; see [Windows background options](windows-background-options.md). |
 | Windows paths | Workspace display strips the `\\?\` and `\\?\UNC\` prefixes from canonical paths. |
 | Unix permissions | The data directory is created mode `0700`, and new files mode `0600`, on Unix. Windows uses default ACLs. |
 | Stop signals | Unix `serve` stops on SIGINT or SIGTERM. Elsewhere it stops on Ctrl+C. The Windows service also stops on Service Control stop or shutdown. |
@@ -265,13 +259,9 @@ A completed session whose process has not exited still occupies a slot. Creating
 
 OMP itself is not shipped. `omp --version` must succeed for the user who runs the Gateway before sessions can start.
 
-## Troubleshooting guided setup
+## Troubleshooting setup
 
-`pinkcollab` now shows status (or suggests setup on an unconfigured host). Use
-`pinkcollab serve` explicitly for a foreground Gateway. `status` checks Gateway
-health and the managed service independently. A healthy foreground Gateway with
-no running managed service is degraded and returns a nonzero exit code; this does
-not invalidate externally managed HTTPS, Tailscale Serve, or custom proxies.
+`pinkcollab` shows status, or suggests setup on an unconfigured host. Use `pinkcollab serve` explicitly for a foreground Gateway; `status` checks Gateway health and the managed service independently.
 
 - **Tailscale sign-in timeout:** setup waits at most 120 seconds, including status
   probes. Finish signing in using the Tailscale app or the URL printed by its CLI,

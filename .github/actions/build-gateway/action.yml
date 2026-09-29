@@ -1,0 +1,33 @@
+name: Build Gateway release target
+description: Build a Gateway release binary with the shared target-specific dependency cache.
+
+inputs:
+  target:
+    description: Rust target triple
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install musl build tools
+      if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install --yes musl-tools
+    - name: Isolate Rust toolchains
+      shell: bash
+      run: echo "RUSTUP_HOME=$RUNNER_TEMP/pinkcollab-rustup" >> "$GITHUB_ENV"
+    - uses: dtolnay/rust-toolchain@1.89.0
+      with:
+        targets: ${{ inputs.target }}
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: gateway
+        shared-key: release-${{ inputs.target }}
+    - name: Build Gateway
+      shell: bash
+      working-directory: gateway
+      env:
+        TARGET: ${{ inputs.target }}
+        CC_aarch64_unknown_linux_musl: musl-gcc
+        CC_x86_64_unknown_linux_musl: musl-gcc
+      run: cargo build --release --locked --bin pinkcollab-gateway --target "$TARGET"

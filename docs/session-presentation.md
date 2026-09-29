@@ -12,6 +12,7 @@
 8. [Visual and interaction rules](#8-visual-and-interaction-rules)
 9. [Acceptance scenarios](#9-acceptance-scenarios)
 10. [Extension checklist and implementation map](#10-extension-checklist-and-implementation-map)
+- [Host history entries](#host-history-entries)
 
 ## 1. Scope and terminology
 
@@ -180,7 +181,7 @@ Stages control grouping and specialized change details. They do not prove what a
 
 A running structured activity animates only when it belongs to the live section, the host is connected, and runtime execution is active. Otherwise it uses an hourglass and `Last seen running`. This changes presentation, not the stored tool result.
 
-Group status labels omit the numeric `operation(s)` suffix. Completed and Failed groups represent the total operation count with vertically stacked checks or error icons, capped at five. Each icon is 18 dp tall with a 9 dp vertical step (half overlap); top-to-bottom opacity is 100%, 80%, 60%, 40%, and 20%. The stack reserves its full height. Running groups retain one spinner or hourglass, and mixed running groups retain their failed-operation count. Accessibility announces the exact total count once, even above the visual cap; expansion still shows every operation.
+Group status labels omit the numeric `operation(s)` suffix. Completed and Failed groups represent the total operation count with vertically stacked checks or error icons, capped at five, fading toward the bottom. The stack reserves its full height. Running groups retain one spinner or hourglass, and mixed running groups retain their failed-operation count. Accessibility announces the exact total count once, even above the visual cap; expansion still shows every operation.
 
 **Current limitation:** that timeline qualification is section-wide. Unlike the work-status strip, it does not filter individual groups to the newest user turn. Do not interpret every retained unfinished live tool as independent proof of current execution.
 
@@ -330,6 +331,10 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 - Status is not action permission. `sessionControls` independently gates sending, attachment, model selection, interrupt, and runtime exit. For example, Ready does not override an input-busy operation.
 - Stop interrupts the turn; Exit is a separate runtime action with confirmation. A status-label change must not change those meanings.
 
+## Host history entries
+
+Session `origin` is an explicit protocol fact. A discovered entry uses the compact **History** card label and **History on host** work-status text, with “Send a message to continue”. Connectivity still qualifies the card status. No runtime, elapsed time, completion or success is inferred from saved messages. Opening loads the existing history pipeline and recoverable error presentation. The composer submits its ordinary generation-less prompt; adoption replaces the same ID with managed state, preserving Tasks pager/card selection, draft/outbox identity and cached history. No import dialog is required.
+
 ## 9. Acceptance scenarios
 
 These are behavior checks, not requirements to pin exact wording in tests.
@@ -374,7 +379,3 @@ Before adding a new presentation type or changing a mapping:
 | Page composition and scrolling | [SessionPage.kt](../android/app/src/main/java/dev/pinkcollab/ui/SessionPage.kt) |
 | Control gating and receipt copy | [SessionPresentation.kt](../android/app/src/main/java/dev/pinkcollab/ui/SessionPresentation.kt) |
 | Attention controls | [AttentionCard.kt](../android/app/src/main/java/dev/pinkcollab/ui/AttentionCard.kt) |
-
-## Host history entries
-
-Session `origin` is an explicit protocol fact. A discovered entry uses the compact **History** card label and **History on host** work-status text, with “Send a message to continue”. Connectivity still qualifies the card status. No runtime, elapsed time, completion or success is inferred from saved messages. Opening loads the existing history pipeline and recoverable error presentation. The composer submits its ordinary generation-less prompt; adoption replaces the same ID with managed state, preserving Tasks pager/card selection, draft/outbox identity and cached history. No import dialog is required.

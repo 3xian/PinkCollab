@@ -21,6 +21,7 @@ jobs:
     outputs:
       gateway: ${{ steps.scope.outputs.full == 'true' || steps.filter.outputs.gateway == 'true' }}
       android: ${{ steps.scope.outputs.full == 'true' || steps.filter.outputs.android == 'true' }}
+      matrix: ${{ steps.matrix.outputs.value }}
     steps:
       - uses: actions/checkout@v5
         if: github.event_name == 'push'
@@ -54,11 +55,17 @@ jobs:
               - '.github/**'
               - '.gitattributes'
               - 'docs/protocol.md'
+              - 'npm/pinkcollab/platforms.json'
+              - 'npm/scripts/build-matrix.mjs'
             android:
               - 'android/**'
               - '.github/**'
               - '.gitattributes'
               - 'docs/protocol.md'
+      - name: Export release cache matrix
+        id: matrix
+        if: github.event_name == 'push'
+        run: echo "value=$(node npm/scripts/build-matrix.mjs)" >> "$GITHUB_OUTPUT"
   npm:
     strategy:
       matrix:
@@ -66,6 +73,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
+      # check-release.mjs invokes cargo metadata --locked.
       - uses: dtolnay/rust-toolchain@1.89.0
       - uses: actions/setup-node@v5
         with:
@@ -91,12 +99,16 @@ jobs:
         working-directory: gateway
     steps:
       - uses: actions/checkout@v5
+      - name: Isolate Rust toolchains
+        shell: bash
+        run: echo "RUSTUP_HOME=$RUNNER_TEMP/pinkcollab-rustup" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.89.0
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: gateway
+          shared-key: gateway-checks
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - run: cargo test --all-features --locked
@@ -104,6 +116,20 @@ jobs:
         run: cargo build --locked --bin pinkcollab-gateway
       - if: github.event_name != 'pull_request'
         run: cargo build --release --locked --bin pinkcollab-gateway
+  # Tag caches are scoped to that tag. Populate the default-branch caches with
+  # the same runners, targets and build flags used by Release.
+  release-cache:
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.gateway == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/build-gateway
+        with:
+          target: ${{ matrix.target }}
   android:
     needs: changes
     if: ${{ needs.changes.outputs.android == 'true' }}

@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  prepare:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.matrix.outputs.value }}
@@ -28,11 +28,6 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@1.89.0
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: gateway
       - uses: actions/setup-node@v5
         with:
           node-version: "24"
@@ -51,6 +46,24 @@ jobs:
         run: npm test --prefix npm/pinkcollab
       - name: Inspect main npm package
         run: npm pack ./npm/pinkcollab --dry-run
+
+  gateway-checks:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Isolate Rust toolchains
+        shell: bash
+        run: echo "RUSTUP_HOME=$RUNNER_TEMP/pinkcollab-rustup" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gateway
+          shared-key: gateway-checks
       - name: Check Gateway formatting
         working-directory: gateway
         run: cargo fmt --check
@@ -62,10 +75,10 @@ jobs:
         run: cargo test --all-features --locked
 
   build:
-    needs: verify
+    needs: prepare
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -75,22 +88,17 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
-      - name: Install musl build tools
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes musl-tools
-      - uses: dtolnay/rust-toolchain@1.89.0
+      # Old recovery tags may not contain the shared action. Load its definition
+      # from the workflow commit, while building the release-tag checkout.
+      - uses: actions/checkout@v5
         with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+          ref: ${{ github.workflow_sha }}
+          path: .release-workflow
+          sparse-checkout: .github/actions/build-gateway
+          persist-credentials: false
+      - uses: ./.release-workflow/.github/actions/build-gateway
         with:
-          workspaces: gateway
-          key: ${{ matrix.target }}
-      - name: Build Gateway
-        working-directory: gateway
-        env:
-          CC_aarch64_unknown_linux_musl: musl-gcc
-          CC_x86_64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --locked --bin pinkcollab-gateway --target ${{ matrix.target }}
+          target: ${{ matrix.target }}
       - name: Stage binary
         shell: pwsh
         run: |
@@ -108,7 +116,7 @@ jobs:
           if-no-files-found: error
 
   android:
-    needs: verify
+    needs: prepare
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -164,7 +172,7 @@ jobs:
 
 
   npm-publish:
-    needs: [build, android]
+    needs: [build, gateway-checks]
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
@@ -174,6 +182,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_TAG }}
+      # check-release.mjs invokes cargo metadata --locked.
       - uses: dtolnay/rust-toolchain@1.89.0
       - uses: actions/setup-node@v5
         with:
@@ -208,8 +217,8 @@ jobs:
 
 
   github-release:
-    needs: [build, android, npm-publish]
-    if: ${{ always() && needs.build.result == 'success' && needs.android.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.npm-publish.result == 'success') }}
+    needs: [build, android, gateway-checks, npm-publish]
+    if: ${{ always() && needs.build.result == 'success' && needs.android.result == 'success' && needs.gateway-checks.result == 'success' && (github.event_name == 'workflow_dispatch' || needs.npm-publish.result == 'success') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write

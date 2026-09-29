@@ -4,9 +4,7 @@ PinkCollab can inspect an existing host conversation before owning a runtime. Ta
 
 ## Storage evidence and adapter
 
-Implementation was checked against the installed `omp/18.4.2` package, specifically `session/session-entries.ts`, `session/session-listing.ts`, `session/session-index.ts`, `session/session-storage.ts`, `session/session-manager.ts`, `modes/rpc/rpc-types.ts`, and `pi-utils/src/dirs.ts`.
-
-OMP exposes `SessionManager.list/listAll` in its JavaScript SDK, but no listing command in its RPC/CLI. Its SDK enumerates `*/*.jsonl` and reads file windows; local listing can also recover backup files and inspect whole transcripts. `history.db`'s `session_titles` index only maps IDs to titles, not paths/cwd, so it cannot enumerate authoritative history sources. The Gateway uses a small read-only Rust adapter rather than embedding Bun/the SDK or performing its repair writes. It understands version-3 session headers and the fixed first-line `title` slot; other versions are excluded. Android never parses OMP records.
+Check the adapter against the installed OMP package when its storage changes; it was last verified against `omp/18.4.2`. It reads OMP storage with a small read-only Rust adapter rather than embedding Bun or OMP's JavaScript SDK, understands version-3 session headers and the fixed first-line `title` slot, and excludes other versions. Android never parses OMP records.
 
 ## Scope and refresh
 
