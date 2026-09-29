@@ -93,16 +93,16 @@ fi"#,
             .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npinkcollab:ok")
             .unwrap();
     });
-    let output = cli(home.path(), &data).arg("status").output().unwrap();
+    let output = cli(home.path(), &data).output().unwrap();
     assert!(
-        output.status.success(),
+        !output.status.success(),
         "{} {}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("Gateway       Running"));
     server.join().unwrap();
-    let output = cli(home.path(), &data).arg("status").output().unwrap();
+    let output = cli(home.path(), &data).output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains("Stopped"));
 }
@@ -240,7 +240,7 @@ fn status_accepts_manual_remote_access_without_tailscale() {
         let output = cli(home.path(), &data).arg("status").output().unwrap();
         server.join().unwrap();
         assert!(
-            output.status.success(),
+            !output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
@@ -251,4 +251,95 @@ fn status_accepts_manual_remote_access_without_tailscale() {
             "Externally managed"
         }));
     }
+}
+
+#[test]
+fn bare_fresh_is_read_only_and_version_is_branded() {
+    let home = tempfile::tempdir().unwrap();
+    let data = home.path().join("absent");
+    let output = cli(home.path(), &data).output().unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("pinkcollab setup"));
+    assert!(!data.exists());
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0);
+    let version = cli(home.path(), &data).arg("--version").output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout).trim(),
+        format!("pinkcollab {}", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn bare_and_status_share_healthy_output() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let data = home.path().join("data");
+    Store::open(&data).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let config = Config {
+        listen: listener.local_addr().unwrap(),
+        public_url: "https://proxy.example".into(),
+        omp: home.path().join("bin/omp").to_string_lossy().into(),
+        workspaces: vec![home.path().into()],
+        ..Config::default()
+    };
+    std::fs::write(
+        data.join("config.yaml"),
+        serde_yaml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    #[cfg(target_os = "macos")]
+    let (base, definition) = (
+        home.path().join("Library/Application Support/PinkCollab"),
+        home.path()
+            .join("Library/LaunchAgents/dev.pinkcollab.gateway.plist"),
+    );
+    #[cfg(target_os = "linux")]
+    let (base, definition) = (
+        home.path().join(".local/share/pinkcollab"),
+        home.path().join(".config/systemd/user/pinkcollab.service"),
+    );
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    std::fs::create_dir_all(definition.parent().unwrap()).unwrap();
+    std::fs::write(&definition, "fake definition").unwrap();
+    std::fs::write(
+        base.join("bin/data-dir"),
+        data.canonicalize().unwrap().to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    executable(&home.path().join("bin/id"), "echo 501");
+    executable(&home.path().join("bin/launchctl"), "echo 'state = running'");
+    executable(&home.path().join("bin/systemctl"), "echo active");
+    let server = std::thread::spawn(move || {
+        for _ in 0..4 {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            assert!(socket.read(&mut request).unwrap() > 0);
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npinkcollab:ok")
+                .unwrap();
+        }
+    });
+    let bare = cli(home.path(), &data).output().unwrap();
+    let status = cli(home.path(), &data).arg("status").output().unwrap();
+    std::fs::copy(
+        env!("CARGO_BIN_EXE_pinkcollab-gateway"),
+        base.join("bin/pinkcollab-gateway"),
+    )
+    .unwrap();
+    let current = cli(home.path(), &data).arg("doctor").output().unwrap();
+    assert!(String::from_utf8_lossy(&current.stdout).contains("build: current"));
+    std::fs::write(base.join("bin/pinkcollab-gateway"), "older build").unwrap();
+    let old = cli(home.path(), &data).arg("doctor").output().unwrap();
+    assert!(!old.status.success());
+    assert!(String::from_utf8_lossy(&old.stdout).contains("from another PinkCollab build"));
+    server.join().unwrap();
+    assert!(
+        bare.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bare.stderr)
+    );
+    assert!(status.status.success());
+    assert_eq!(bare.stdout, status.stdout);
+    assert!(String::from_utf8_lossy(&bare.stdout).contains("Service       Running"));
 }

@@ -1,3 +1,4 @@
+use crate::setup_control::{Control, Phase};
 use anyhow::{Context, Result, ensure};
 use pinkcollab_gateway::{
     config::{self, Config},
@@ -57,7 +58,7 @@ fn save(dir: &Path, config: &Config) -> Result<()> {
         serde_yaml::to_string(config)?.as_bytes(),
     )
 }
-async fn enter(prompt: &str) -> Result<String> {
+async fn enter(control: &Control, prompt: &str) -> Result<String> {
     print!("{prompt}");
     std::io::stdout().flush()?;
     // A detached reader lets Ctrl+C cancel without Tokio waiting on a blocked stdin task.
@@ -73,40 +74,9 @@ async fn enter(prompt: &str) -> Result<String> {
         })();
         let _ = send.send(result);
     });
-    tokio::select! {
-        result = receive => result.context("input reader stopped")?,
-        _ = tokio::signal::ctrl_c() => anyhow::bail!("Setup cancelled."),
-    }
-}
-async fn connect(binary: &Path, non_interactive: bool) -> Result<()> {
-    if funnel::state(binary).is_ok_and(|state| state.backend_state == "Running") {
-        return Ok(());
-    }
-    ensure!(
-        !non_interactive,
-        "Tailscale isn't connected. Sign in to Tailscale before running non-interactive setup."
-    );
-    println!(
-        "Tailscale is installed but isn't connected.\n\nPinkCollab needs Tailscale for secure remote access.\nComplete Tailscale sign-in and PinkCollab will continue automatically."
-    );
-    let mut child = tokio::process::Command::new(binary)
-        .arg("up")
-        .kill_on_drop(true)
-        .spawn()
-        .context("Open the Tailscale app and complete sign-in.")?;
-    let mut exited = false;
-    loop {
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => { anyhow::bail!("Setup cancelled."); }
-            _ = tokio::time::sleep(Duration::from_secs(2)) => {
-                if funnel::state(binary).is_ok_and(|state| state.backend_state == "Running") { let _ = child.kill().await; return Ok(()); }
-                if !exited && let Some(status) = child.try_wait()? {
-                    exited = true;
-                    if !status.success() { println!("Open the Tailscale app to complete sign-in. Waiting for connection (Ctrl+C to cancel)..."); }
-                }
-            }
-        }
-    }
+    control
+        .wait(async { receive.await.context("input reader stopped")? })
+        .await
 }
 
 pub async fn run(
@@ -123,6 +93,7 @@ pub async fn run(
         non_interactive || std::io::stdin().is_terminal(),
         "Interactive setup needs a terminal. For automation use --non-interactive --workspace <directory>."
     );
+    let mut control = Control::new()?;
     println!("PinkCollab Setup\n");
     let exists = dir.join("config.yaml").exists();
     let mut config = if exists {
@@ -134,12 +105,14 @@ pub async fn run(
     if exists {
         println!("✓ Existing configuration");
     }
-    let installation = crate::service::Installation::new(dir)?;
-    installation.check_owner()?;
-    let manager = crate::service::manager(&installation);
-    let before = manager.status().context(
-        "The background service needs attention. Run pinkcollab service status for details.",
-    )?;
+    let installation = std::sync::Arc::new(crate::service::Installation::new(dir)?);
+    let preflight = installation.clone();
+    let before = control.blocking(move || {
+        preflight.check_owner()?;
+        let manager = crate::service::manager(&preflight);
+        manager.preflight(non_interactive)?;
+        manager.status().context("The background service needs attention. Run pinkcollab service status for details.")
+    }, None).await?;
     if std::net::TcpListener::bind(config.listen).is_err()
         && before != crate::service::ServiceStatus::Running
     {
@@ -147,13 +120,15 @@ pub async fn run(
             "The Gateway address is already in use outside the managed service. Stop the manually started Gateway or resolve the conflict, then run setup again."
         );
     }
-    manager.preflight(non_interactive)?;
+    control.checkpoint().await?;
     let roots = requested_roots(requested, &std::env::current_dir()?, non_interactive)?;
     for root in &roots {
         println!("Workspace: {}", root.display());
     }
     if requested.is_empty() && !non_interactive {
-        let answer = enter("Use this workspace? [Y/n] ").await?;
+        let answer = enter(&control, "Use this workspace? [Y/n] ")
+            .await
+            .context("Setup cancelled. No pairing token was created.")?;
         ensure!(
             matches!(
                 answer.trim().to_ascii_lowercase().as_str(),
@@ -163,39 +138,83 @@ pub async fn run(
         );
     }
     let executable = config::resolve_executable(&config.omp).context(OMP_HELP)?;
-    let version = omp::version(&workspace::display(&executable)).await;
+    let version = control
+        .wait(async { Ok(omp::version(&workspace::display(&executable)).await) })
+        .await?;
     ensure!(
         version != "unavailable" && !version.is_empty(),
         "{OMP_HELP}"
     );
     println!("✓ OMP {}", safe_text(&version));
+    control.checkpoint().await?;
     let changed = merge(&mut config, roots, &executable)?;
     if changed || !exists {
         save(dir, &config)?;
     }
     Store::open(dir)?;
     println!("✓ Workspaces configured");
-    let binary = funnel::tailscale_binary().context("Tailscale is required for this version of PinkCollab.\n\nInstall Tailscale:\nhttps://tailscale.com/download\n\nThen run:\n  pinkcollab setup")?;
-    connect(&binary, non_interactive).await?;
+    let binary = funnel::tailscale_binary().context("Tailscale wasn't found. Install Tailscale and make sure `tailscale status` works.\n\nInstall Tailscale:\nhttps://tailscale.com/download\n\nThen run:\n  pinkcollab setup")?;
+    println!("Connecting Tailscale...");
+    crate::setup_connect::connect(&control, &binary, non_interactive).await?;
+    control.checkpoint().await?;
     println!("✓ Tailscale connected");
-    config.public_url = funnel::reconcile(dir, &config, &binary).context("Secure remote access could not be configured. Check Tailscale permissions with pinkcollab doctor.")?;
+    println!("Configuring secure remote access...");
+    let remote_dir = dir.to_path_buf();
+    let remote_config = config.clone();
+    config.public_url = control
+        .blocking(
+            move || funnel::reconcile(&remote_dir, &remote_config, &binary),
+            None,
+        )
+        .await
+        .context(
+            "Secure remote access could not be configured. Run pinkcollab doctor for details.",
+        )?;
     println!("✓ Secure remote access ready");
-    manager.install().context(
-        "The background service could not be installed. Run pinkcollab service install for details. On Windows, use an administrator terminal as the same user.",
-    )?;
-    println!("✓ Background service installed");
-    manager
-        .start()
-        .context("The background service could not start. Run pinkcollab doctor for details.")?;
-    crate::health::wait(config.listen).await?;
+    let install = installation.clone();
+    let outcome = control
+        .blocking(
+            move || crate::service::manager(&install).install(),
+            Some(Phase::Installed),
+        )
+        .await?;
+    println!("{}", outcome.message());
+    println!("Starting Gateway...");
+    let start = installation.clone();
+    control
+        .blocking(move || crate::service::manager(&start).start(), None)
+        .await?;
+    control.wait(crate::health::wait(config.listen)).await?;
+    control.phase = Phase::Running;
+    control.checkpoint().await?;
     println!("✓ Gateway running");
     if non_interactive {
         println!("PinkCollab is ready. Run pinkcollab pair to pair a phone.");
         return Ok(());
     }
-    pair_and_wait(dir, &config).await?;
+    let paired = Store::open(dir)?.clients()?.len();
+    let answer = if paired > 0 {
+        println!("{paired} device(s) already paired.");
+        Some(
+            enter(&control, "Pair another phone? [y/N] ")
+                .await
+                .context("Gateway remains running. Pair later with pinkcollab pair.")?,
+        )
+    } else {
+        None
+    };
+    control.checkpoint().await?;
+    if should_pair(paired, answer.as_deref()) {
+        pair_and_wait(&control, dir, &config)
+            .await
+            .context("Gateway remains running. Pair later with pinkcollab pair.")?;
+    }
     println!("\nPinkCollab is ready.\nYou can close this terminal.");
     Ok(())
+}
+fn should_pair(existing: usize, answer: Option<&str>) -> bool {
+    existing == 0
+        || answer.is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
 }
 fn safe_text(value: &str) -> String {
     value.chars().flat_map(char::escape_debug).collect()
@@ -224,9 +243,10 @@ impl PairingAttempt {
         self.expires.saturating_sub(now).max(0) as u64
     }
 }
-async fn pair_and_wait(dir: &Path, config: &Config) -> Result<()> {
+async fn pair_and_wait(control: &Control, dir: &Path, config: &Config) -> Result<()> {
     let store = Store::open(dir)?;
     loop {
+        control.checkpoint().await?;
         let attempt = PairingAttempt::new(&store, &config.public_url)?;
         let code = QrCode::new(attempt.payload.as_bytes())?;
         println!(
@@ -248,18 +268,27 @@ async fn pair_and_wait(dir: &Path, config: &Config) -> Result<()> {
                 remaining % 60
             );
             std::io::stdout().flush()?;
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => { anyhow::bail!("Pairing cancelled. Gateway remains running; use pinkcollab pair later."); }
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
-            }
+            control
+                .wait(async {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    Ok(())
+                })
+                .await?;
         }
-        enter("\nPairing code expired.\n\nPress Enter to generate a new one.").await?;
+        enter(control, "\nPairing code expired.\n\nPress Enter to generate a new one, or Ctrl+C to finish setup and pair later with:\n\n  pinkcollab pair\n").await?;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pairing_decision() {
+        assert!(should_pair(0, None));
+        assert!(!should_pair(1, None));
+        assert!(!should_pair(1, Some("\n")));
+        assert!(should_pair(1, Some("yes")));
+    }
     #[test]
     fn workspace_defaults_and_explicit_requirements() {
         let dir = tempfile::tempdir().unwrap();

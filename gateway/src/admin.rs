@@ -209,35 +209,64 @@ pub fn setup_funnel(dir: &Path, options: funnel::Options<'_>, with_pair: bool) -
     issue_pairing(&config, &store, Some(url), None)
 }
 
+pub async fn default_entry(dir: &Path) -> Result<()> {
+    if !dir.join("config.yaml").try_exists()? {
+        println!("PinkCollab is not set up yet.\n\nRun:\n\n  pinkcollab setup");
+        return Ok(());
+    }
+    status(dir).await
+}
+
 /// Concise operational status; a running listener is expected.
 pub async fn status(dir: &Path) -> Result<()> {
     let config = Config::load(dir)?;
     let running = crate::health::healthy(config.listen).await;
     let version = omp::version(&config.omp).await;
     let remote = crate::remote::inspect(dir, &config);
+    let service = crate::service::Installation::new(dir)
+        .and_then(|installation| {
+            installation.check_owner()?;
+            crate::service::manager(&installation).status()
+        })
+        .unwrap_or_else(|e| crate::service::ServiceStatus::Failed(format!("{e:#}")));
     let counts = Store::counts(dir)?;
     println!(
-        "PinkCollab\n\nGateway       {}\nRemote access {}\nOMP           {}\nWorkspaces    {}\nDevices       {}\nSessions      {}",
+        "PinkCollab\n\nGateway       {}\nService       {:?}\nRemote access {}\nOMP           {}\nWorkspaces    {}\nDevices       {}\nSessions      {}",
         if running {
             "Running"
         } else {
             "Stopped or unavailable"
         },
+        service,
         remote.label(),
         version,
         config.workspaces.len(),
         counts.clients,
         counts.sessions
     );
+    if running && service != crate::service::ServiceStatus::Running {
+        println!("Gateway is running outside the managed background service.");
+    }
     ensure!(
-        running && !remote.failed() && version != "unavailable",
-        "PinkCollab needs attention; run pinkcollab doctor."
+        running
+            && service == crate::service::ServiceStatus::Running
+            && !remote.failed()
+            && version != "unavailable",
+        "Run `pinkcollab doctor` for details."
     );
     Ok(())
 }
 /// Full diagnostics continue through independent failures, including an invalid config.
 pub async fn doctor(dir: &Path) -> Result<()> {
     let mut problems = Vec::new();
+    println!(
+        "CLI\n  current executable: {}\n  version: {}",
+        std::env::current_exe()?.display(),
+        env!("CARGO_PKG_VERSION")
+    );
+    if let Ok(version) = std::env::var("PINKCOLLAB_NPM_VERSION") {
+        println!("  npm launcher version: {version}");
+    }
     println!("Config\n  path: {}", dir.join("config.yaml").display());
     let config = match Config::load(dir) {
         Ok(config) => {
@@ -298,10 +327,38 @@ pub async fn doctor(dir: &Path) -> Result<()> {
                 installation.binary.display(),
                 installation.definition.display()
             );
-            match installation
+            println!("  data dir: {}", installation.dir.display());
+            let state = installation
                 .check_owner()
-                .and_then(|()| crate::service::manager(&installation).status())
-            {
+                .and_then(|()| crate::service::manager(&installation).status());
+            match installation.binary_identity() {
+                Ok(identity) => {
+                    let current = identity.current;
+                    if let Some(installed) = identity.installed {
+                        println!(
+                            "  installed binary SHA-256: {installed}\n  CLI binary SHA-256: {current}"
+                        );
+                        if installed != current {
+                            println!(
+                                "The background Gateway is from another PinkCollab build.\n\nRun:\n\n  pinkcollab setup"
+                            );
+                            problems.push("Service build");
+                        } else {
+                            println!("  build: current");
+                        }
+                    } else {
+                        println!("  installed binary: missing (not staged)");
+                        if !matches!(&state, Ok(crate::service::ServiceStatus::NotInstalled)) {
+                            problems.push("Service binary missing");
+                        }
+                    }
+                }
+                Err(error) => {
+                    println!("  fingerprint: unavailable ({error:#})");
+                    problems.push("Service build");
+                }
+            }
+            match state {
                 Ok(state) => {
                     println!("  state: {state:?}");
                     if state != crate::service::ServiceStatus::Running {

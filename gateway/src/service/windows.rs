@@ -24,34 +24,54 @@ impl Manager<'_> {
             .account_name
             .context("service account is missing")?;
         let identity = checked(&SystemRunner, "whoami", &[])?;
-        ensure!(
-            account
-                .to_string_lossy()
-                .eq_ignore_ascii_case(String::from_utf8_lossy(&identity.stdout).trim()),
-            "PinkCollab service must run as the current user; correct its Log On account in Windows Services"
-        );
+        windows_ux::account(
+            &account.to_string_lossy(),
+            String::from_utf8_lossy(&identity.stdout).trim(),
+        )?;
         Ok(())
     }
 }
 fn environment(path: &str) -> Result<String> {
     let mut values = std::collections::BTreeMap::new();
-    values.insert("PATH".to_owned(), path.to_owned());
-    for key in ["USERPROFILE", "HOME", "APPDATA", "LOCALAPPDATA"] {
+    for key in ["HOME", "APPDATA", "LOCALAPPDATA"] {
         if let Ok(value) = std::env::var(key) {
             values.insert(key.to_owned(), value);
         }
     }
-    values.insert(
-        "USERPROFILE".to_owned(),
-        dirs::home_dir()
+    windows_ux::serialize_environment(
+        path,
+        &dirs::home_dir()
             .context("user profile unavailable")?
-            .to_string_lossy()
-            .into_owned(),
-    );
-    Ok(serde_json::to_string(&values)?)
+            .to_string_lossy(),
+        values,
+    )
 }
 impl ServiceManager for Manager<'_> {
     fn preflight(&self, non_interactive: bool) -> Result<()> {
+        let output = checked(
+            &SystemRunner,
+            "powershell.exe",
+            &[
+                "-NoProfile",
+                "-Command",
+                "$p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+            ],
+        )?;
+        windows_ux::elevated(
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .eq_ignore_ascii_case("true"),
+        )?;
+        let identity = checked(&SystemRunner, "whoami", &[])?;
+        let identity: String = String::from_utf8_lossy(&identity.stdout)
+            .trim()
+            .chars()
+            .flat_map(char::escape_debug)
+            .collect();
+        println!("Windows account: {identity}");
+        println!(
+            "Windows service preflight: using the current Windows account. This account needs 'Log on as a service'; a domain deny policy can block startup. Check Local Security Policy or ask your administrator if startup is denied."
+        );
         if self.status()? == ServiceStatus::NotInstalled {
             ensure!(
                 !non_interactive,
@@ -63,7 +83,7 @@ impl ServiceManager for Manager<'_> {
         Ok(())
     }
 
-    fn install(&self) -> Result<()> {
+    fn install(&self) -> Result<InstallOutcome> {
         use std::io::IsTerminal;
         let i = self.installation;
         i.check_owner()?;
@@ -82,17 +102,14 @@ impl ServiceManager for Manager<'_> {
                 configuration.start_type == ServiceStartType::AutoStart,
                 "set PinkCollab service startup type to Automatic in Windows Services"
             );
-            let binary_same = std::fs::read(std::env::current_exe()?)?
-                == std::fs::read(&i.binary).unwrap_or_default();
-            let path_same = std::fs::read_to_string(i.dir.join("service-environment.json"))
-                .is_ok_and(|p| p == environment);
+            let path_same = read_optional(&i.dir.join("service-environment.json"))?
+                .is_some_and(|p| p == environment.as_bytes());
             let expected = windows_command(&i.binary, &i.dir);
-            if binary_same
-                && path_same
+            if path_same
                 && !update.changed
                 && configuration.executable_path.to_string_lossy() == expected
             {
-                return Ok(());
+                return Ok(InstallOutcome::Unchanged);
             }
         } else {
             ensure!(
@@ -100,46 +117,45 @@ impl ServiceManager for Manager<'_> {
                 "Windows service installation needs an administrator terminal and the current user's service login credentials. Run pinkcollab service install interactively first."
             );
         }
+        let outcome = if state == ServiceStatus::NotInstalled {
+            InstallOutcome::Installed
+        } else {
+            InstallOutcome::Updated
+        };
+        outcome.progress();
         update.begin()?;
         if state != ServiceStatus::NotInstalled {
             self.stop()?;
         }
-        i.stage_binary()?;
+        update.stage_binary()?;
         storage::replace_private_file(
             &i.dir.join("service-environment.json"),
             environment.as_bytes(),
         )?;
         // Credentials stay inside PowerShell's PSCredential and are never command arguments or logs.
         // New-Service receives an explicit user credential; it can never default to LocalSystem.
-        let script = r#"$ErrorActionPreference='Stop'
-$identity=[Security.Principal.WindowsIdentity]::GetCurrent()
-$existing=Get-Service -Name PinkCollab -ErrorAction SilentlyContinue
-if (-not $existing) {
-  $credential=Get-Credential -UserName $identity.Name -Message 'PinkCollab must run as your account. Windows requires service login credentials.'
-  if (-not $credential) { throw 'Service installation cancelled' }
-  $sid=(New-Object Security.Principal.NTAccount($credential.UserName)).Translate([Security.Principal.SecurityIdentifier]).Value
-  if ($sid -ne $identity.User.Value) { throw 'Choose the current Windows account' }
-  New-Service -Name PinkCollab -DisplayName 'PinkCollab Gateway' -BinaryPathName $env:PINKCOLLAB_SERVICE_COMMAND -StartupType Automatic -Credential $credential | Out-Null
-} else {
-  sc.exe config PinkCollab binPath= $env:PINKCOLLAB_SERVICE_COMMAND | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw 'Cannot update service; use an administrator terminal' }
-}
-"#;
+        let script = windows_ux::install_script();
+        if state == ServiceStatus::NotInstalled {
+            println!(
+                "Windows requires PinkCollab's background Gateway to run as your user account.\n\nThis keeps access to:\n- your OMP configuration\n- model-provider credentials\n- project files\n\nWindows will now ask for this account's sign-in credentials (password, not PIN)."
+            );
+        }
         let command = windows_command(&i.binary, &i.dir);
         let status = Command::new("powershell.exe")
-            .args(["-NoProfile", "-Command", script])
+            .args(["-NoProfile", "-Command", &script])
             .env("PINKCOLLAB_SERVICE_COMMAND", command)
             .status()?;
         ensure!(
             status.success(),
-            "Windows could not install the service. Use an administrator terminal as the same user, and grant that account Log on as a service in Local Security Policy."
+            "{}",
+            windows_ux::install_recovery(status.code().unwrap_or(0))
         );
         self.verify_account(&self.open()?)?;
         if update.resume {
             self.start()?;
         }
         update.commit()?;
-        Ok(())
+        Ok(outcome)
     }
     fn uninstall(&self) -> Result<()> {
         if self.status()? == ServiceStatus::NotInstalled {
@@ -152,10 +168,12 @@ if (-not $existing) {
         self.installation.forget_owner()
     }
     fn start(&self) -> Result<()> {
-        let service = self.open_with(ServiceAccess::START)?;
+        let service = self.open_with(ServiceAccess::START).map_err(start_error)?;
         self.verify_account(&service)?;
         if service.query_status()?.current_state != ServiceState::Running {
-            service.start::<&str>(&[])?;
+            service
+                .start::<&str>(&[])
+                .map_err(|error| start_error(error.into()))?;
         }
         Ok(())
     }
@@ -205,4 +223,12 @@ if (-not $existing) {
             }
         }
     }
+}
+
+fn start_error(error: anyhow::Error) -> anyhow::Error {
+    let code = match error.downcast_ref::<windows_service::Error>() {
+        Some(windows_service::Error::Winapi(e)) => e.raw_os_error().unwrap_or(0),
+        _ => 0,
+    };
+    error.context(windows_ux::start_recovery(code))
 }

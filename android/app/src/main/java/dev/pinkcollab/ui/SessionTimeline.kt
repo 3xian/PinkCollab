@@ -68,8 +68,8 @@ internal fun Modifier.timelineBand(
     }
 
 /**
- * The user's own turn. Separation comes from structure — a brand-gradient rail on the leading
- * edge — never from a fill: [primaryContainer] was the only solid mid-tone surface in a
+ * The user's own turn. Separation comes from structure: a brand-gradient rail on the leading
+ * edge, never a fill. [primaryContainer] was the only solid mid-tone surface in a
  * transcript otherwise built from faint tints over [TimelineBandBase], so it read as a banner
  * pasted over the timeline and outshouted the running-state accents. The tint stays inside the
  * band vocabulary and sits at the top of its alpha range, because a user turn is a hard

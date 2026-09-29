@@ -43,7 +43,7 @@ function resolveGatewayBinary(
 }
 
 function run(binaryPath, args = process.argv.slice(2), spawnChild = spawn) {
-  const child = spawnChild(binaryPath, args, { stdio: "inherit" });
+  const child = spawnChild(binaryPath, args, { stdio: "inherit", env: { ...process.env, PINKCOLLAB_NPM_VERSION: require("../package.json").version } });
   const signals = ["SIGINT", "SIGTERM"];
   const handlers = new Map();
 

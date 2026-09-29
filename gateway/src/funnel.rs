@@ -217,6 +217,11 @@ fn apply(dir: &Path, config: &Config, options: Options<'_>, quiet: bool) -> Resu
         Duration::from_secs(30),
     )
     .with_context(|| format!("cannot run `{}`", binary.display()))?;
+    if !output.status.success() && funnel_policy_denied(&String::from_utf8_lossy(&output.stderr)) {
+        anyhow::bail!(
+            "Tailscale is connected, but Funnel is not allowed for this device.\n\nEnable the funnel node attribute for this device in Tailscale, then rerun:\n\n  pinkcollab setup\n\nAlternatively, use a manual HTTPS deployment described in docs/deployment.md"
+        );
+    }
     ensure!(
         output.status.success(),
         "`tailscale funnel` failed: {}{}",
@@ -300,5 +305,34 @@ mod onboarding_tests {
             443,
             8787
         ));
+    }
+}
+
+/// Exact diagnostic from tailscale/ipn/serve.go::NodeCanFunnel:
+/// https://github.com/tailscale/tailscale/blob/main/ipn/serve.go
+/// Local daemon permissions, HTTPS prerequisites and port policy are different errors.
+fn funnel_policy_denied(stderr: &str) -> bool {
+    stderr.lines().any(|line| {
+        let line = line.trim().strip_prefix("error: ").unwrap_or(line.trim());
+        line == "Funnel not available; \"funnel\" node attribute not set. See https://tailscale.com/s/no-funnel."
+    })
+}
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+    #[test]
+    fn only_known_node_policy_diagnostic_is_classified() {
+        let denied = "Funnel not available; \"funnel\" node attribute not set. See https://tailscale.com/s/no-funnel.";
+        assert!(funnel_policy_denied(denied));
+        assert!(funnel_policy_denied(&format!("error: {denied}\n")));
+        for other in [
+            "tailscale funnel: access denied",
+            "tailscale funnel: permission denied opening local socket",
+            "port 443 is not allowed for funnel",
+            "Funnel not available; HTTPS must be enabled. See https://tailscale.com/s/https.",
+            "Funnel not enabled: unknown reason",
+        ] {
+            assert!(!funnel_policy_denied(other), "{other}");
+        }
     }
 }

@@ -14,6 +14,8 @@ mod linux;
 mod macos;
 #[cfg(windows)]
 mod windows;
+#[cfg(any(windows, test))]
+mod windows_ux;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ServiceStatus {
@@ -21,6 +23,46 @@ pub enum ServiceStatus {
     Stopped,
     Running,
     Failed(String),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum InstallOutcome {
+    Installed,
+    Updated,
+    Unchanged,
+}
+impl InstallOutcome {
+    fn progress(self) {
+        match self {
+            Self::Installed => println!("Installing background Gateway..."),
+            Self::Updated => println!("Updating background Gateway..."),
+            Self::Unchanged => {}
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Installed => "✓ Background service installed",
+            Self::Updated => "✓ Background Gateway updated",
+            Self::Unchanged => "✓ Background service ready",
+        }
+    }
+}
+/// Missing is distinct from an unreadable/corrupt installation.
+fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("cannot read {}", path.display())),
+    }
+}
+pub struct BinaryIdentity {
+    pub installed: Option<String>,
+    pub current: String,
+}
+impl BinaryIdentity {
+    fn matches(&self) -> bool {
+        self.installed.as_ref() == Some(&self.current)
+    }
 }
 
 #[derive(clap::Subcommand)]
@@ -38,7 +80,7 @@ pub trait ServiceManager {
         Ok(())
     }
 
-    fn install(&self) -> Result<()>;
+    fn install(&self) -> Result<InstallOutcome>;
     fn uninstall(&self) -> Result<()>;
     fn start(&self) -> Result<()>;
     fn stop(&self) -> Result<()>;
@@ -137,11 +179,14 @@ impl Installation {
     /// The durable pending record survives any failure between staging and activation.
     fn update(&self, definition: &str, running: bool) -> Result<Update<'_>> {
         use sha2::{Digest, Sha256};
+        let current_binary = std::fs::read(std::env::current_exe()?)?;
+        let binary_changed = !self.identity_for(&current_binary)?.matches();
+        let config = std::fs::read(self.dir.join("config.yaml"))?;
         let mut hash = Sha256::new();
         for bytes in [
-            std::fs::read(std::env::current_exe()?)?,
-            std::fs::read(self.dir.join("config.yaml"))?,
-            definition.as_bytes().to_vec(),
+            current_binary.as_slice(),
+            config.as_slice(),
+            definition.as_bytes(),
         ] {
             hash.update((bytes.len() as u64).to_le_bytes());
             hash.update(bytes);
@@ -150,26 +195,42 @@ impl Installation {
         let base = self.binary.parent().unwrap();
         let pending = base.join("update-pending");
         let resume = running || std::fs::read_to_string(&pending).is_ok_and(|v| v == "running");
-        let changed = !self.binary.exists()
+        let changed = binary_changed
             || pending.exists()
             || std::fs::read_to_string(base.join("installed.sha256"))
                 .map_or(true, |old| old != fingerprint);
         Ok(Update {
             installation: self,
             fingerprint,
+            current_binary,
+            binary_changed,
             changed,
             resume,
         })
     }
-    pub fn stage_binary(&self) -> Result<bool> {
-        let source = std::env::current_exe().context("cannot locate installed Gateway")?;
-        let bytes = std::fs::read(&source).context("cannot read installed Gateway")?;
-        if std::fs::read(&self.binary).is_ok_and(|old| old == bytes) {
+    pub fn binary_identity(&self) -> Result<BinaryIdentity> {
+        self.identity_for(&std::fs::read(std::env::current_exe()?)?)
+    }
+    fn identity_for(&self, current: &[u8]) -> Result<BinaryIdentity> {
+        use sha2::{Digest, Sha256};
+        Ok(BinaryIdentity {
+            installed: read_optional(&self.binary)?.map(|bytes| hex::encode(Sha256::digest(bytes))),
+            current: hex::encode(Sha256::digest(current)),
+        })
+    }
+    #[cfg(test)]
+    fn stage_binary(&self) -> Result<bool> {
+        let bytes = std::fs::read(std::env::current_exe()?)?;
+        if self.identity_for(&bytes)?.matches() {
             return Ok(false);
         }
+        self.write_binary(&bytes)?;
+        Ok(true)
+    }
+    fn write_binary(&self, bytes: &[u8]) -> Result<()> {
         storage::private_dir(self.binary.parent().unwrap())?;
         let temporary = self.binary.with_extension("new");
-        storage::replace_private_file(&temporary, &bytes)?;
+        storage::replace_private_file(&temporary, bytes)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -177,7 +238,7 @@ impl Installation {
         }
         std::fs::rename(&temporary, &self.binary)
             .context("cannot update stable Gateway binary; stop the service and retry")?;
-        Ok(true)
+        Ok(())
     }
     #[cfg(any(unix, test))]
     pub fn write_definition(&self, content: &str) -> Result<bool> {
@@ -236,10 +297,18 @@ fn canonical_destination(path: &Path) -> Result<PathBuf> {
 struct Update<'a> {
     installation: &'a Installation,
     fingerprint: String,
+    current_binary: Vec<u8>,
+    binary_changed: bool,
     changed: bool,
     resume: bool,
 }
 impl Update<'_> {
+    fn stage_binary(&self) -> Result<()> {
+        if self.binary_changed {
+            self.installation.write_binary(&self.current_binary)?;
+        }
+        Ok(())
+    }
     fn begin(&self) -> Result<()> {
         let i = self.installation;
         storage::private_dir(i.binary.parent().unwrap())?;
@@ -318,6 +387,20 @@ pub fn execute(dir: &Path, action: Action) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn binary_identity_distinguishes_missing_from_io_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let i = Installation {
+            dir: root.path().join("data"),
+            binary: root.path().join("binary"),
+            definition: root.path().join("definition"),
+            path: String::new(),
+        };
+        assert!(i.binary_identity().unwrap().installed.is_none());
+        std::fs::create_dir(&i.binary).unwrap();
+        assert!(i.binary_identity().is_err());
+        assert!(i.stage_binary().is_err());
+    }
+    #[test]
     fn repeat_install_preserves_identical_files_and_rejects_other_data_dir() {
         let root = tempfile::tempdir().unwrap();
         let i = Installation {
@@ -328,6 +411,9 @@ mod tests {
         };
         assert!(i.stage_binary().unwrap());
         assert!(!i.stage_binary().unwrap());
+        assert!(i.binary_identity().unwrap().matches());
+        std::fs::write(&i.binary, b"old build").unwrap();
+        assert!(!i.binary_identity().unwrap().matches());
         assert!(i.write_definition("definition").unwrap());
         assert!(!i.write_definition("definition").unwrap());
         i.record_owner().unwrap();

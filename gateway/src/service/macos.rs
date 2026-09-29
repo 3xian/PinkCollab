@@ -55,25 +55,34 @@ impl Manager<'_> {
     }
 }
 impl ServiceManager for Manager<'_> {
-    fn install(&self) -> Result<()> {
+    fn install(&self) -> Result<InstallOutcome> {
         let i = self.installation;
+        let fresh = !i.definition.try_exists()?;
         i.check_owner()?;
         storage::private_dir(&i.dir.join("logs"))?;
         let definition = render(i);
         let mut update = i.update(&definition, false)?;
-        if !update.changed {
-            return Ok(());
+        if !update.changed
+            && read_optional(&i.definition)?.as_deref() == Some(definition.as_bytes())
+        {
+            return Ok(InstallOutcome::Unchanged);
         }
         update.resume |= self.loaded()?;
+        let outcome = if fresh {
+            InstallOutcome::Installed
+        } else {
+            InstallOutcome::Updated
+        };
+        outcome.progress();
         update.begin()?;
-        i.stage_binary()?;
+        update.stage_binary()?;
         i.write_definition(&definition)?;
         if update.resume {
             self.stop()?;
             self.start()?;
         }
         update.commit()?;
-        Ok(())
+        Ok(outcome)
     }
     fn uninstall(&self) -> Result<()> {
         self.stop()?;
@@ -191,13 +200,13 @@ mod manager_tests {
             installation: &installation,
             runner: &runner,
         };
-        manager.install().unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Installed);
         assert!(runner.calls.borrow().iter().any(|c| c.contains("bootout")));
         runner.calls.borrow_mut().clear();
-        manager.install().unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Unchanged);
         assert!(runner.calls.borrow().is_empty());
         std::fs::write(installation.dir.join("config.yaml"), "changed config").unwrap();
-        manager.install().unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
         assert!(runner.calls.borrow().iter().any(|c| c.contains("bootout")));
         // Stage a binary update, then fail before the old process stops.
         std::fs::write(
@@ -213,7 +222,7 @@ mod manager_tests {
         runner.fail_stop.set(true);
         assert!(manager.install().is_err());
         runner.calls.borrow_mut().clear();
-        manager.install().unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
         assert!(runner.calls.borrow().iter().any(|c| c.contains("bootout")));
         assert_eq!(manager.status().unwrap(), ServiceStatus::Running);
     }

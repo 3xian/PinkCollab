@@ -8,10 +8,10 @@ OMP must be on `PATH`. From `gateway/`:
 
 ```sh
 cargo run -- init --workspace /absolute/path/to/projects  # once
-cargo run
+cargo run -- serve
 ```
 
-`cargo run` serves in the foreground. Put `--` before Gateway arguments (`cargo run -- pair`). The data directory defaults to `~/.pinkcollab`; pass `--data-dir <path>` after `--` on every command that should use another one. HTTPS and pairing: [Deployment](deployment.md#tailscale-funnel).
+`cargo run -- serve` serves in the foreground. Put `--` before Gateway arguments (`cargo run -- pair`). The data directory defaults to `~/.pinkcollab`; pass `--data-dir <path>` after `--` on every command that should use another one. HTTPS and pairing: [Deployment](deployment.md#tailscale-funnel).
 
 ## Build the Gateway
 

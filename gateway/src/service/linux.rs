@@ -25,17 +25,26 @@ fn render(i: &Installation) -> String {
     )
 }
 impl ServiceManager for Manager<'_> {
-    fn install(&self) -> Result<()> {
+    fn install(&self) -> Result<InstallOutcome> {
         let i = self.installation;
+        let fresh = !i.definition.try_exists()?;
         i.check_owner()?;
         let running = self.status()? == ServiceStatus::Running;
         let definition = render(i);
         let update = i.update(&definition, running)?;
-        if !update.changed {
-            return Ok(());
+        if !update.changed
+            && read_optional(&i.definition)?.as_deref() == Some(definition.as_bytes())
+        {
+            return Ok(InstallOutcome::Unchanged);
         }
+        let outcome = if fresh {
+            InstallOutcome::Installed
+        } else {
+            InstallOutcome::Updated
+        };
+        outcome.progress();
         update.begin()?;
-        i.stage_binary()?;
+        update.stage_binary()?;
         i.write_definition(&definition)?;
         checked(self.runner, "systemctl", &["--user", "daemon-reload"])?;
         checked(
@@ -47,7 +56,7 @@ impl ServiceManager for Manager<'_> {
             self.restart()?;
         }
         update.commit()?;
-        Ok(())
+        Ok(outcome)
     }
     fn uninstall(&self) -> Result<()> {
         if self.installation.definition.exists() {
@@ -145,9 +154,9 @@ mod manager_tests {
             installation: &installation,
             runner: &runner,
         };
-        manager.install().unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Installed);
         runner.calls.borrow_mut().clear();
-        manager.install().unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Unchanged);
         assert!(
             runner
                 .calls
@@ -155,6 +164,10 @@ mod manager_tests {
                 .iter()
                 .all(|c| !c.contains("stop") && !c.contains("start"))
         );
+        std::fs::write(installation.dir.join("config.yaml"), "updated config").unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
+        std::fs::write(&installation.definition, "changed definition").unwrap();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
         assert_eq!(manager.status().unwrap(), ServiceStatus::Running);
     }
 }

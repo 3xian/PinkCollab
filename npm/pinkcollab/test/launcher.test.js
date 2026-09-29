@@ -70,7 +70,7 @@ test("forwards arguments and child exit status", async () => {
   assert.deepEqual(invocation, {
     binary: "/virtual/pinkcollab-gateway",
     args: ["status", "--data-dir", "/tmp/data"],
-    options: { stdio: "inherit" },
+    options: { stdio: "inherit", env: { ...process.env, PINKCOLLAB_NPM_VERSION: require("../package.json").version } },
   });
   assert.equal(process.exitCode, 23);
   process.exitCode = originalExitCode;

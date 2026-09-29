@@ -16,12 +16,18 @@ mod health;
 mod remote;
 mod service;
 mod setup;
+mod setup_connect;
+mod setup_control;
 
 #[cfg(windows)]
 mod windows;
 
 #[derive(Parser)]
-#[command(version, about = "Remote control plane for Oh My Pi")]
+#[command(
+    name = "pinkcollab",
+    version,
+    about = "Remote control plane for Oh My Pi"
+)]
 struct Cli {
     #[arg(long,global=true,default_value_os_t=config::data_dir())]
     data_dir: PathBuf,
@@ -30,7 +36,7 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Commands {
-    /// Set up PinkCollab on this computer.
+    /// Set up or update PinkCollab.
     #[command(display_order = 0)]
     Setup {
         #[arg(long)]
@@ -114,7 +120,10 @@ async fn main() -> Result<()> {
     if matches!(cli.command, Some(Commands::ServiceRun)) {
         return windows::dispatch(cli.data_dir);
     }
-    match cli.command.unwrap_or(Commands::Serve) {
+    let Some(command) = cli.command else {
+        return admin::default_entry(&cli.data_dir).await;
+    };
+    match command {
         Commands::Setup {
             workspace,
             non_interactive,
@@ -122,7 +131,7 @@ async fn main() -> Result<()> {
         } => match setup::run(&cli.data_dir, &workspace, non_interactive, &transport).await {
             Ok(()) => Ok(()),
             Err(error) => {
-                eprintln!("{error}\n\nFor details, run pinkcollab doctor.");
+                eprintln!("{error:#}\n\nFor details, run pinkcollab doctor.");
                 std::process::exit(1);
             }
         },

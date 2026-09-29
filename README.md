@@ -31,7 +31,17 @@ pinkcollab setup
 
 Scan the QR code with the PinkCollab Android app. PinkCollab keeps the Gateway running in the background; you can close this terminal after pairing.
 
-Setup guides Tailscale sign-in when needed. Your Tailscale account must permit Funnel. Windows service installation needs an administrator terminal **as the same user**, that user's service login credentials, and the Windows *Log on as a service* right. macOS starts the service when you log in; Linux user services start with your user session (see [logout behavior](docs/deployment.md#run-as-a-background-service)).
+Setup guides Tailscale sign-in when needed. Your Tailscale account must permit Funnel. macOS starts the service when you log in; Linux user services start with your user session (see [logout behavior](docs/deployment.md#run-as-a-background-service)).
+
+Running `pinkcollab` later shows host status. Rerun `pinkcollab setup` after upgrading the CLI or adding workspaces. Already paired phones are preserved; pairing another phone is optional.
+
+<details>
+<summary>Windows background service</summary>
+
+Run setup in an Administrator terminal **as the same Windows user**. Windows requires that account's password (not a PIN) and the *Log on as a service* right. Setup explains the credentials prompt before opening it. If login fails, correct the account in Windows Services and rerun setup; keep your existing configuration. See [troubleshooting](docs/deployment.md#troubleshooting-guided-setup).
+
+</details>
+
 
 ## Use
 
