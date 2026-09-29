@@ -27,13 +27,7 @@ tailscale status
 
 Complete Tailscale sign-in in your browser. If you already use Tailscale.app, you can keep using it.
 
-Make sure OMP works:
-
-```sh
-omp --version
-```
-
-Then, from the directory containing your projects:
+From the directory containing your projects:
 
 ```sh
 cd ~/projects
