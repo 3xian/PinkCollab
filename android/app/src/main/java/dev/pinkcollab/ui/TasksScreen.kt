@@ -72,10 +72,17 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
     val onSessionSelected = actions.selectSession
     val openResources = actions.openResources
     val connectHost = actions.connectHost
-    // updatedAt changes continuously while an agent works; createdAt keeps the pager stable.
+    // Active sessions come first, by createdAt DESC to keep working sessions stable.
+    // Inactive sessions follow by updatedAt DESC.
     val sessions = app.hosts.values
         .flatMap { it.sessions }
-        .sortedWith { a, b -> compareTimestamps(b.createdAt, a.createdAt) }
+        .sortedWith { a, b ->
+            when {
+                a.isActive != b.isActive -> if (a.isActive) -1 else 1
+                a.isActive -> compareTimestamps(b.createdAt, a.createdAt)
+                else -> compareTimestamps(b.updatedAt, a.updatedAt)
+            }
+        }
     val initialPage = sessions.indexOfFirst { SessionKey(it.hostId, it.id) == selectedSession }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
     val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }

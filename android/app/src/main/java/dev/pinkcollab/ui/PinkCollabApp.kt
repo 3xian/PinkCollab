@@ -56,7 +56,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
         var hasStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
-                if (hasStarted) vm.reconnectUnavailableHosts()
+                if (hasStarted) vm.reconnectHosts()
                 hasStarted = true
             }
         }

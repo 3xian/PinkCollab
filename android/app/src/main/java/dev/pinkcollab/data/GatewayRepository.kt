@@ -156,8 +156,13 @@ internal class GatewayRepository(
         state.value.hosts[id]?.paired?.let(::connect)
     }
 
-    fun reconnectUnavailableHosts() {
-        state.value.hosts.values.filter { it.connection == ConnectionState.Reconnecting || it.connection is ConnectionState.Offline }.forEach { connect(it.paired) }
+    fun reconnectHosts() {
+        // Background suspension and network changes can leave any socket stale,
+        // including one still marked online or waiting for its first snapshot.
+        state.value.hosts.values.forEach { host ->
+            if (host.connection != ConnectionState.AuthenticationRequired &&
+                host.connection != ConnectionState.UpgradeRequired) connect(host.paired)
+        }
     }
 
     fun networkUnavailable() {

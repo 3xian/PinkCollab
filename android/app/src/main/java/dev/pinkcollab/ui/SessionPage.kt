@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.PlatformTextStyle
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
-import io.noties.markwon.Markwon
 
 @Composable
 internal fun SessionPage(
@@ -74,7 +73,7 @@ internal fun SessionPage(
         savedHistory = SavedHistory.Loading,
     )
     val context = LocalContext.current
-    val markwon = remember(context) { Markwon.create(context) }
+    val markwon = remember(context) { createSessionMarkwon(context) }
     val session = detail.session
     val prompt = draft.text
     val selectedFiles = draft.files
@@ -270,13 +269,13 @@ internal fun SessionPage(
                 .align(Alignment.BottomCenter)
                 .then(keyboardOffset)
                 .fillMaxWidth()
-                .height(composerClearance + 104.dp)
+                .height(composerClearance + 32.dp)
                 .background(
                     Brush.verticalGradient(
                         0.00f to Color.Transparent,
-                        0.42f to Color.Black.copy(alpha = 0.08f),
-                        0.72f to Color.Black.copy(alpha = 0.54f),
-                        1.00f to Color.Black.copy(alpha = 0.86f),
+                        // Reach the work-status strip already dimmed, then fade to black below it.
+                        (32.dp / (composerClearance + 32.dp)) to Color.Black.copy(alpha = 0.60f),
+                        1.00f to Color.Black,
                     ),
                 ),
         )

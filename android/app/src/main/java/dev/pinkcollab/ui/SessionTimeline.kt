@@ -1,7 +1,9 @@
 package dev.pinkcollab.ui
 
+import android.content.Context
 import android.graphics.Typeface
 import android.text.method.LinkMovementMethod
+import android.text.style.ForegroundColorSpan
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
 import androidx.compose.foundation.background
@@ -25,6 +27,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -34,7 +38,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
+import io.noties.markwon.AbstractMarkwonPlugin
 import io.noties.markwon.Markwon
+import io.noties.markwon.MarkwonSpansFactory
+import io.noties.markwon.MarkwonVisitor
+import io.noties.markwon.core.MarkwonTheme
+import org.commonmark.node.Code
+import org.commonmark.node.StrongEmphasis
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -154,7 +164,7 @@ private fun SpeakerTitle(text: String, color: Color, modifier: Modifier = Modifi
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.Bold,
         fontStyle = FontStyle.Italic,
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = FontFamily.Default,
         color = color,
     )
 }
@@ -185,7 +195,7 @@ internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, mo
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = FontFamily.Default,
                     color = Purple200,
                 )
             }
@@ -218,10 +228,45 @@ private fun MessageTime(label: String, modifier: Modifier = Modifier) {
         modifier = modifier,
         maxLines = 1,
         style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.SansSerif,
+        fontFamily = FontFamily.Default,
         color = TextMid,
     )
 }
+
+internal fun createSessionMarkwon(context: Context): Markwon =
+    Markwon.builder(context)
+        .usePlugin(object : AbstractMarkwonPlugin() {
+            override fun configureTheme(builder: MarkwonTheme.Builder) {
+                val maple = ResourcesCompat.getFont(context, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
+                builder.codeTypeface(maple).codeBlockTypeface(maple)
+            }
+
+            override fun configureVisitor(builder: MarkwonVisitor.Builder) {
+                builder.on(Code::class.java) { visitor, code ->
+                    var color = Purple200
+                    var ancestor = code.parent
+                    while (ancestor != null) {
+                        if (ancestor is StrongEmphasis) {
+                            color = BrandPink
+                            break
+                        }
+                        ancestor = ancestor.parent
+                    }
+                    // Replace CodeSpan with foreground only: inherit font and size,
+                    // and resolve emphasis from syntax rather than shared paint state.
+                    val start = visitor.length()
+                    visitor.builder().append(code.literal)
+                    visitor.setSpans(start, ForegroundColorSpan(color.toArgb()))
+                }
+            }
+
+            override fun configureSpansFactory(builder: MarkwonSpansFactory.Builder) {
+                builder.appendFactory(StrongEmphasis::class.java) { _, _ ->
+                    ForegroundColorSpan(BrandPink.toArgb())
+                }
+            }
+        })
+        .build()
 
 @Composable
 private fun MarkdownBody(markdown: String, color: Color, markwon: Markwon) {
@@ -232,7 +277,7 @@ private fun MarkdownBody(markdown: String, color: Color, markwon: Markwon) {
         factory = {
             TextView(it).apply {
                 includeFontPadding = false
-                typeface = ResourcesCompat.getFont(it, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.MONOSPACE
+                typeface = ResourcesCompat.getFont(it, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
                 setTextIsSelectable(true)
                 movementMethod = LinkMovementMethod.getInstance()
                 setLineSpacing(0f, 1.18f)
@@ -261,12 +306,12 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ActivityStatusIcon(group.status, liveActivity)
+            ActivityStatusIcon(group.status, liveActivity, group.operationCount)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
                     group.action,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = FontFamily.Default,
                     fontWeight = FontWeight.Medium,
                     color = TextHigh,
                     maxLines = 2,
@@ -281,10 +326,10 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
             Text(
                 buildString {
                     append(activityStatusLabel(group.status, liveActivity))
-                    append("  ${group.operationCount} ${if (group.operationCount == 1) "operation" else "operations"}")
                     if (group.failureCount > 0 && group.status == ActivityStatus.Running) append("  ${group.failureCount} failed")
                 },
                 style = MaterialTheme.typography.labelSmall,
+                fontFamily = FontFamily.Default,
                 color = activityTint,
                 modifier = Modifier.weight(1f),
             )
@@ -305,7 +350,7 @@ private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpa
         Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.025f), RoundedCornerShape(8.dp)).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("${operation.name}  ${activityStatusLabel(operation.status, liveActivity)}", style = MaterialTheme.typography.labelSmall, color = activityColor(operation.status))
+        Text("${operation.name}  ${activityStatusLabel(operation.status, liveActivity)}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Default, color = activityColor(operation.status))
         Text(operation.action, style = MaterialTheme.typography.bodySmall, color = TextHigh)
         if (operation.target.isNotBlank()) {
             Text(operation.target, style = MaterialTheme.typography.bodySmall, color = TextMid, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -327,20 +372,35 @@ private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpa
 }
 
 @Composable
-private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean) {
+private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, operationCount: Int) {
+    val description = "${activityStatusLabel(status, liveActivity)}, $operationCount ${if (operationCount == 1) "operation" else "operations"}"
     if (status == ActivityStatus.Running && liveActivity) {
-        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = activityColor(status), strokeWidth = 2.dp)
-    } else {
-        Icon(
-            when (status) {
-                ActivityStatus.Failed -> Icons.Outlined.ErrorOutline
-                ActivityStatus.Succeeded -> Icons.Outlined.Check
-                ActivityStatus.Running -> Icons.Outlined.HourglassEmpty
-            },
-            contentDescription = activityStatusLabel(status, liveActivity),
-            modifier = Modifier.size(18.dp),
-            tint = activityColor(status),
+        CircularProgressIndicator(
+            modifier = Modifier.size(18.dp).semantics { contentDescription = description },
+            color = activityColor(status),
+            strokeWidth = 2.dp,
         )
+    } else {
+        val iconCount = if (status == ActivityStatus.Running) 1 else operationCount.coerceIn(1, 5)
+        val icon = when (status) {
+            ActivityStatus.Failed -> Icons.Outlined.ErrorOutline
+            ActivityStatus.Succeeded -> Icons.Outlined.Check
+            ActivityStatus.Running -> Icons.Outlined.HourglassEmpty
+        }
+        Box(
+            Modifier
+                .size(width = 18.dp, height = (18 + (iconCount - 1) * 9).dp)
+                .semantics { contentDescription = description },
+        ) {
+            repeat(iconCount) { index ->
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.offset(y = (index * 9).dp).size(18.dp),
+                    tint = activityColor(status).copy(alpha = 1f - index * 0.2f),
+                )
+            }
+        }
     }
 }
 
@@ -383,7 +443,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Error", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = Red400)
+        Text("Error", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = Red400)
         Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (item.details.isNotBlank() && item.details != item.text) {
             DetailToggle("Error details", expanded, onClick = { expanded = !expanded }, tint = Red400)
@@ -438,7 +498,7 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic,
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = FontFamily.Default,
                     color = if (item.kind == "error") Red400 else TextMid,
                 )
             }

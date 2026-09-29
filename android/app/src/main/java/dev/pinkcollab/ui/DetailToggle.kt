@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.ui.theme.Purple200
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
@@ -41,6 +42,7 @@ internal fun DetailToggle(
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
+            fontFamily = FontFamily.Default,
             color = tint,
             modifier = Modifier.weight(1f, fill = false),
         )

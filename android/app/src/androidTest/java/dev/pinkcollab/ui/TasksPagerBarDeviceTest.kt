@@ -39,9 +39,44 @@ class TasksPagerBarDeviceTest {
     @get:Rule val compose = createComposeRule()
 
     private val sessions = (0..5).map { index ->
+        val timestamp = "2026-09-${(28 - index).toString().padStart(2, '0')}T00:00:00Z"
         Session("s$index", "host", "/work/project-$index/", "Session $index",
             if (index == 2) SessionStatus.NeedsInput else SessionStatus.Idle, "", false,
-            null, "2026-09-${(28 - index).toString().padStart(2, '0')}T00:00:00Z", "", false)
+            null, timestamp, timestamp, false)
+    }
+
+    @Test fun active_sessions_precede_inactive_with_group_specific_timestamp_order() {
+        val activeOlder = sessions[0].copy(
+            id = "active-older", runtimeAttached = true,
+            createdAt = "2026-09-20T00:00:00Z", updatedAt = "2026-09-29T00:00:00Z")
+        val activeNewer = sessions[1].copy(
+            id = "active-newer", runtimeAttached = true,
+            createdAt = "2026-09-21T00:00:00Z", updatedAt = "2026-09-22T00:00:00Z")
+        val inactiveUpdated = sessions[2].copy(
+            id = "inactive-updated",
+            createdAt = "2026-09-23T00:00:00Z", updatedAt = "2026-09-28T00:00:00Z")
+        val inactiveCreated = sessions[3].copy(
+            id = "inactive-created",
+            createdAt = "2026-09-24T00:00:00Z", updatedAt = "2026-09-25T00:00:00Z")
+        val host = HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            sessions = listOf(inactiveCreated, activeOlder, inactiveUpdated, activeNewer))
+        var selected by mutableStateOf<SessionKey?>(null)
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(AppState(hosts = mapOf("host" to host)), emptyMap(), emptyMap(),
+                    emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+            )
+        }
+        compose.waitForIdle()
+        assertEquals(SessionKey("host", "active-newer"), selected)
+        for (id in listOf("active-older", "inactive-updated", "inactive-created")) {
+            compose.onNodeWithTag("sessionTimelinePager").performTouchInput { swipeLeft() }
+            compose.waitForIdle()
+            assertEquals(SessionKey("host", id), selected)
+            compose.onNodeWithTag("sessionCard:$id").assertIsDisplayed()
+        }
     }
 
     @Test fun cached_messages_remain_visible_during_detail_and_history_refresh() {

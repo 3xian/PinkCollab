@@ -23,7 +23,7 @@ internal interface HostActions {
     suspend fun pair(url: String, token: String)
     suspend fun refreshHost(hostId: String)
     fun reconnect(hostId: String)
-    fun reconnectUnavailableHosts()
+    fun reconnectHosts()
     suspend fun forget(hostId: String)
     suspend fun listing(hostId: String, path: String, forceRefresh: Boolean): Listing
     fun prefetchListings(hostId: String, paths: List<String>)
@@ -34,7 +34,7 @@ internal class RepositoryHostActions(private val repository: GatewayRepository) 
     override suspend fun pair(url: String, token: String) = repository.pair(url, token)
     override suspend fun refreshHost(hostId: String) = repository.refreshHost(hostId)
     override fun reconnect(hostId: String) = repository.requestReconnect(hostId)
-    override fun reconnectUnavailableHosts() = repository.reconnectUnavailableHosts()
+    override fun reconnectHosts() = repository.reconnectHosts()
     override suspend fun forget(hostId: String) = repository.forget(hostId)
     override suspend fun listing(hostId: String, path: String, forceRefresh: Boolean) =
         repository.listing(hostId, path, forceRefresh)
@@ -70,7 +70,7 @@ internal class HostOperations(
         else actions.reconnect(hostId)
     }
 
-    fun reconnectUnavailableHosts() = actions.reconnectUnavailableHosts()
+    fun reconnectHosts() = actions.reconnectHosts()
 
     fun forget(hostId: String) = run(OperationKey.Host(hostId)) {
         onHostForgetting(hostId)

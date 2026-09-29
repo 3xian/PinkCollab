@@ -40,9 +40,11 @@ Gateway internal state is richer than the public protocol. Public DTOs intention
 
 The ordered WebSocket has no client-visible resource cursors. Typed protocol events define their session and host-list scope. Server-local sequence fences track those scopes and exclude events superseded by snapshots, with capture/publication ordered under controller locks. Broadcast lag, oversized events or failed capture close the connection. Android reconnects to a new host snapshot and resubscribes to the visible session. History remains a separate REST read with source-bound cursors. Local view tokens invalidate asynchronous history responses on unfocus, disconnect, or a fresh snapshot; they are never exchanged over the wire.
 
+When Android returns to the foreground or its default network becomes available, it replaces host connections and obtains fresh snapshots, including connections still marked online, connecting, or synchronizing. Those states do not prove a socket survived background suspension or a network change. Authentication-required and upgrade-required hosts remain blocked until explicit user action. Recovery uses the existing subscription supervisor to cancel old connections and resubscribe to the visible session.
+
 ## Android navigation
 
-Android's Tasks screen orders sessions by creation time. Its Timeline pager owns the selected page; the independently scrollable card strip above it follows that page and centers the selected card when space permits. The first card stays at the left edge instead of adding blank leading space. Tapping a card selects its Timeline page; dragging only the strip does not change the selection.
+Android's Tasks screen places active sessions first, ordered by `createdAt DESC`, followed by inactive sessions ordered by `updatedAt DESC`. Its Timeline pager owns the selected page; the independently scrollable card strip above it follows that page and centers the selected card when space permits. The first card stays at the left edge instead of adding blank leading space. Tapping a card selects its Timeline page; dragging only the strip does not change the selection.
 
 Each compact session card displays the session title on its first line and the final component of its workspace path alongside the current status on its second line. Host names and position counters are not shown in the cards.
 

@@ -31,7 +31,7 @@ class HostOperationsTest {
         }
         override suspend fun refreshHost(hostId: String) { calls += "refresh:$hostId" }
         override fun reconnect(hostId: String) { calls += "reconnect:$hostId" }
-        override fun reconnectUnavailableHosts() { calls += "reconnect-unavailable" }
+        override fun reconnectHosts() { calls += "reconnect-hosts" }
         override suspend fun forget(hostId: String) { calls += "forget:$hostId" }
         override suspend fun listing(hostId: String, path: String, forceRefresh: Boolean): Listing {
             calls += "listing:$hostId:$path:$forceRefresh"

@@ -19,6 +19,8 @@ This document defines how Android presents a session: conversation content, tool
 
 The [protocol](protocol.md) owns wire formats and synchronization. The [architecture](architecture.md) owns data authority and lifecycle boundaries. This document owns their user-visible interpretation.
 
+The Android Tasks list places active sessions (`session.isActive`) first, ordered by `createdAt DESC` so live updates do not reorder them. Inactive sessions follow in `updatedAt DESC` order. This is display-only ordering; Gateway ordering and protocol fields are unchanged.
+
 | Term | Meaning | Not equivalent to |
 | --- | --- | --- |
 | Session presentation | The complete session detail surface | A single scrolling component |
@@ -133,7 +135,7 @@ A structured `ToolTrace` contains `callId`, `name`, `arguments`, `result`, `isEr
 | Display type | Default content | Expandable content | Interpretation |
 | --- | --- | --- | --- |
 | `Message` | Speaker, local time, text; assistant text uses Markdown | No activity expander | User/assistant content, not a runtime status |
-| `ActivityGroup` | Focus operation's action and target, status icon, operation count, applicable failure count | Individual operation records | A compact group of tools, not a plan step |
+| `ActivityGroup` | Focus operation's action and target, status icon stack, applicable running-group failure count | Individual operation records | A compact group of tools, not a plan step |
 | `Error` | Error heading and concise text | Nonblank detail that differs from the summary | A supplied error; not automatically the whole session's outcome |
 | `Raw` | Generic kind label and supplied text; assistant text uses Markdown | Tool/subagent details when available | Fallback without inferred structured semantics |
 
@@ -177,6 +179,8 @@ Stages control grouping and specialized change details. They do not prove what a
 | Group | All operations succeeded | Completed |
 
 A running structured activity animates only when it belongs to the live section, the host is connected, and runtime execution is active. Otherwise it uses an hourglass and `Last seen running`. This changes presentation, not the stored tool result.
+
+Group status labels omit the numeric `operation(s)` suffix. Completed and Failed groups represent the total operation count with vertically stacked checks or error icons, capped at five. Each icon is 18 dp tall with a 9 dp vertical step (half overlap); top-to-bottom opacity is 100%, 80%, 60%, 40%, and 20%. The stack reserves its full height. Running groups retain one spinner or hourglass, and mixed running groups retain their failed-operation count. Accessibility announces the exact total count once, even above the visual cap; expansion still shows every operation.
 
 **Current limitation:** that timeline qualification is section-wide. Unlike the work-status strip, it does not filter individual groups to the newest user turn. Do not interpret every retained unfinished live tool as independent proof of current execution.
 
@@ -317,9 +321,12 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 | Backgrounds | Static fills/tints; no animated noise or moving background effects |
 
 - Color is supplementary; state remains distinguishable through text and icons.
+- The Android app uses only the platform default font and the bundled Maple Mono face. UI labels, speaker titles, model chips, timestamps, tool status labels, and detail toggles use the default font. Session body text and Markdown code blocks use Maple; native Markdown font fallback uses the platform default, never a separate system monospace face.
+- Agent Markdown bold text uses the theme's `BrandPink` foreground while keeping the surrounding font and size. Inline code inherits the surrounding font and size and uses light violet unless nested inside Markdown strong emphasis, where it uses pink, including through a link. Heading weight alone does not imply strong emphasis. The timeline renderer resolves this color from Markdown ancestry, not mutable paint state, without adding spaces around inline code; surrounding source whitespace is preserved. Neither has an inline background; adjacent or wrapped lines must not form joined highlight bands. Fenced code blocks keep their separate block styling.
 - The work-status title is a polite accessibility live region. Streaming tokens and tool output are not individually announced through it.
 - The timeline follows new content while at the end. Scrolling backward suspends following; reaching the end or returning to the session re-enables it.
 - Bottom clearance includes the work strip and composer so the final content can be scrolled above them.
+- The floating composer uses a static black scrim: a short fade-in above the work-status strip already dims content behind “Thinking”, then the scrim darkens continuously to opaque black at the bottom.
 - Status is not action permission. `sessionControls` independently gates sending, attachment, model selection, interrupt, and runtime exit. For example, Ready does not override an input-busy operation.
 - Stop interrupts the turn; Exit is a separate runtime action with confirmation. A status-label change must not change those meanings.
 
