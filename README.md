@@ -52,6 +52,8 @@ Run setup in an Administrator terminal **as the same Windows user**. Windows req
 
 In the app, open **Workspaces**, choose a directory, create a session, and send a prompt. Use **Stop** to interrupt a turn and **Exit** to end its runtime.
 
+To continue an existing OMP conversation, open an entry labeled **History** in Tasks and send a message. Close the external OMP instance first. See [host history](docs/omp-discovery.md) for supported storage and refresh behavior.
+
 - Pair another phone: `pinkcollab pair`.
 - Check the host: `pinkcollab status`; diagnose problems: `pinkcollab doctor`.
 - Add project roots: `pinkcollab setup --workspace /path/to/code --workspace /path/to/work`.
@@ -93,10 +95,6 @@ flowchart TD
 - [Releases](docs/npm-release.md): maintainer guide to signing and publishing Android, Gateway, and npm releases
 - [External OMP conversations](docs/omp-discovery.md): discovering and continuing host OMP history
 - [Windows background options](docs/windows-background-options.md): why the Gateway runs as a Windows service
-
-## Continue an existing OMP conversation
-
-Conversations already saved by OMP in an allowed workspace also appear in Tasks with a **History** label. Open one to read it, then send a message to continue; PinkCollab adopts it automatically without copying its transcript. Close the external OMP instance first. See [supported storage and refresh behavior](docs/omp-discovery.md).
 
 ## License
 
