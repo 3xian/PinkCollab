@@ -48,6 +48,7 @@ Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smok
 
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
+CI uses an API 35 AOSP (`default`) emulator image so background Google launcher/services failures cannot obscure installer confirmation checks.
 
 CI also runs the inline-code rendering regression through the optimized `releaseTest` variant:
 

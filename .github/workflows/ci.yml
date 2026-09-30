@@ -182,14 +182,15 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ runner.os }}-${{ runner.arch }}-35-google_apis-x86_64-2048M-v1
+          key: avd-${{ runner.os }}-${{ runner.arch }}-35-default-x86_64-2048M-v1
       # Save a clean snapshot before installing the app or running device tests.
+      # AOSP avoids unrelated Google launcher/services ANRs obscuring system UI assertions.
       - name: Create clean emulator snapshot
         if: matrix.suite == 'device-tests' && steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          target: google_apis
+          target: default
           arch: x86_64
           ram-size: 2048M
           force-avd-creation: false
@@ -201,7 +202,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          target: google_apis
+          target: default
           arch: x86_64
           ram-size: 2048M
           force-avd-creation: false
