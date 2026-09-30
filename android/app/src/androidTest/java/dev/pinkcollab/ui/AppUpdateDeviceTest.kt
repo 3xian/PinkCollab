@@ -115,11 +115,23 @@ class AppUpdateDeviceTest {
                     UpdateDownloadState.Ready(file), onDismiss = {}, onDownload = {})
             }
             // A real APK exercises the content URI grant and Android's package parser.
-            compose.waitUntil(timeoutMillis = 10_000) {
-                val root = instrumentation.uiAutomation.rootInActiveWindow
-                root?.packageName?.toString()?.contains("packageinstaller") == true &&
-                    root.findAccessibilityNodeInfosByText(context.applicationInfo.loadLabel(context.packageManager).toString()).isNotEmpty() &&
-                    root.findAccessibilityNodeInfosByViewId("android:id/button1").any { it.isEnabled }
+            try {
+                compose.waitUntil(timeoutMillis = 10_000) {
+                    val root = instrumentation.uiAutomation.rootInActiveWindow
+                    root?.packageName?.toString()?.contains("packageinstaller") == true &&
+                        root.findAccessibilityNodeInfosByText(context.applicationInfo.loadLabel(context.packageManager).toString()).isNotEmpty() &&
+                        root.findAccessibilityNodeInfosByViewId("android:id/button1").any { it.isEnabled }
+                }
+            } catch (failure: Exception) {
+                val hierarchy = buildString {
+                    fun visit(node: android.view.accessibility.AccessibilityNodeInfo?) {
+                        if (node == null) return
+                        appendLine("package=${node.packageName} id=${node.viewIdResourceName} text=${node.text} enabled=${node.isEnabled}")
+                        for (index in 0 until node.childCount) visit(node.getChild(index))
+                    }
+                    visit(instrumentation.uiAutomation.rootInActiveWindow)
+                }
+                throw AssertionError("Installer confirmation was not actionable:\n$hierarchy", failure)
             }
         } finally {
             instrumentation.uiAutomation.serviceInfo = instrumentation.uiAutomation.serviceInfo.apply {
