@@ -122,7 +122,7 @@ class AppUpdateDeviceTest {
                         root.findAccessibilityNodeInfosByText(context.applicationInfo.loadLabel(context.packageManager).toString()).isNotEmpty() &&
                         root.findAccessibilityNodeInfosByViewId("android:id/button1").any { it.isEnabled }
                 }
-            } catch (failure: Exception) {
+            } catch (failure: AssertionError) {
                 val hierarchy = buildString {
                     fun visit(node: android.view.accessibility.AccessibilityNodeInfo?) {
                         if (node == null) return
