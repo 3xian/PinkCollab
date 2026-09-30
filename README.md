@@ -97,7 +97,7 @@ flowchart TD
 
 ## FAQ
 
-- [macOS: Gateway stops working after closing the lid](docs/faq-macos-lid-close.md): why sleep interrupts phone access and how to keep the Mac available
+- [macOS: Gateway stops working after closing the lid](docs/faq-macos-lid-close.md)
 
 ## License
 
