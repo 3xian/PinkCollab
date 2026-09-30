@@ -179,6 +179,8 @@ jobs:
         if: matrix.suite == 'device-tests'
         uses: reactivecircus/android-emulator-runner@v2
         with:
+          # 36.1.9: 37.1.11 can crash the Linux GLES host (bdero/flutter_scene#314).
+          emulator-build: 13823996
           api-level: 35
           target: default
           arch: x86_64
