@@ -2,6 +2,14 @@ use super::*;
 use anyhow::Context;
 
 impl SessionDirectory {
+    pub fn omp_executable(&self) -> &str {
+        &self.executable
+    }
+
+    pub fn omp_args(&self) -> &[String] {
+        &self.args
+    }
+
     pub fn new(
         store: Arc<Store>,
         browser: Arc<Browser>,

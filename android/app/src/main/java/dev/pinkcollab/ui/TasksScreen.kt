@@ -48,6 +48,7 @@ internal data class TasksScreenState(
     val drafts: Map<SessionKey, SessionDraft>,
     val fileSelections: Map<SessionKey, Int>,
     val selectedSession: SessionKey?,
+    val usageLoads: Map<String, LoadState<UsageSnapshot>> = emptyMap(),
 )
 
 internal data class TasksScreenActions(
@@ -61,7 +62,11 @@ internal data class TasksScreenActions(
 )
 
 @Composable
-internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
+internal fun TasksScreen(
+    state: TasksScreenState,
+    actions: TasksScreenActions,
+    retainedDisplay: androidx.compose.runtime.snapshots.SnapshotStateMap<SessionKey, SessionDisplay>? = null,
+) {
     val hosts = state.sessions.hosts
     val detailLoads = state.detailLoads
     val modelLoads = state.modelLoads
@@ -89,7 +94,8 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
     val sessionKeys = remember(sessions) { sessions.map { SessionKey(it.hostId, it.id) } }
     val pagerKeys = remember(sessionKeys) { sessionKeys.map { it.pagerKey() } }
-    val displayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
+    val localDisplayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
+    val displayCache = retainedDisplay ?: localDisplayCache
     SideEffect {
         displayCache.keys.toList().filter { it !in sessionKeys }.forEach(displayCache::remove)
         state.details.forEach { (key, detail) ->
@@ -113,7 +119,8 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
             }
         }.collectLatest { target ->
             if (target == null || target == lastRequested) return@collectLatest
-            delay(200)
+            // The first page is already settled. Debounce subsequent pager changes only.
+            if (lastRequested != null) delay(200)
             val session = latestSessions.firstOrNull {
                 SessionKey(it.hostId, it.id) == target.first
             } ?: return@collectLatest
@@ -200,12 +207,13 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                     state = SessionPageState(
                         detail = detailState,
                         summary = session,
-                        host = hosts[session.hostId].takeIf { detail != null },
+                        host = hosts[session.hostId],
                         draft = drafts[key] ?: SessionDraft(),
                         selectingFiles = fileSelections[key] ?: 0,
                         activity = sessionOperations.activity(key),
                         sendProgress = sendProgress[key],
                         model = modelLoads[key],
+                        usage = state.usageLoads[session.hostId],
                         historyItems = displayed?.historyItems,
                         refreshError = if (detailLoads[key] is LoadState.Failed)
                             "Could not refresh this conversation" else null,
@@ -470,6 +478,7 @@ private fun TasksPagerBar(
                 val cardColor = when (cardStatus) {
                     SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired -> Amber300
                     SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> Violet400
+                    SessionCardStatus.Ready -> Teal300
                     else -> Gray400
                 }
                 val selected = index == currentPage

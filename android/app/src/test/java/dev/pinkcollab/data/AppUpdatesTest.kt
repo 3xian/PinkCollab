@@ -39,6 +39,7 @@ class AppUpdatesTest {
             .put(asset("pinkcollab-android.apk", "http://example.com/pinkcollab.apk")))
         assertEquals("https://github.com/3xian/PinkCollab/releases/tag/v0.3.0",
             parseAppRelease(release.toString())?.updateUrl)
+        assertNull(parseAppRelease(release.toString())?.apkUrl)
         release.put("assets", JSONArray())
         assertEquals("https://github.com/3xian/PinkCollab/releases/tag/v0.3.0",
             parseAppRelease(release.toString())?.updateUrl)

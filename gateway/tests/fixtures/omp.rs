@@ -74,6 +74,16 @@ fn save_title(log: &std::path::Path, title: &str) {
 }
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
+    if args.get(1).map(String::as_str) == Some("usage") {
+        emit(
+            json!({"generatedAt":1000,"reports":[{"provider":"fixture", "fetchedAt":900,
+            "metadata":{"email":"private@example.com","planType":"Pro"},
+            "limits":[{"id":"weekly","label":"Weekly","amount":{"usedFraction":0.62},
+                "window":{"resetsAt":2000},"scope":{"shared":true}}]}],
+            "accountsWithoutUsage":[{"provider":"other","accountId":"private-id"}]}),
+        );
+        return;
+    }
     if args.iter().any(|arg| arg == "--linger-child") {
         std::thread::sleep(std::time::Duration::from_secs(300));
         return;

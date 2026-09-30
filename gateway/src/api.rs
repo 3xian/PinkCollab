@@ -20,10 +20,12 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{any, get, post, put},
 };
+use flate2::{Compression, write::GzEncoder};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::{collections::HashMap, path::Path as FsPath, sync::Arc, time::Duration};
 use tower_http::compression::CompressionLayer;
 
@@ -36,8 +38,14 @@ pub struct App {
     pub sessions: Arc<SessionDirectory>,
 }
 pub fn router(app: App) -> Router {
+    let usage = Arc::new(crate::usage::UsageService::new(
+        app.sessions.omp_executable().to_owned(),
+        app.sessions.omp_args(),
+    ));
     let protected = Router::new()
         .route("/api/v3/host", get(api_host))
+        .route("/api/v3/usage", get(api_usage))
+        .layer(axum::Extension(usage))
         .route("/api/v3/workspaces", get(workspaces))
         .route("/api/v3/fs/list", get(list))
         .route("/api/v3/sessions", get(api_sessions).post(api_create))
@@ -62,6 +70,7 @@ pub fn router(app: App) -> Router {
         .route("/api/v2/{*path}", any(upgrade_required))
         .merge(protected)
         .layer(DefaultBodyLimit::max(512 * 1024))
+        .layer(middleware::from_fn(server_timing))
         .layer(middleware::from_fn(security_headers))
         .layer(CompressionLayer::new())
         .with_state(app)
@@ -393,7 +402,11 @@ async fn api_history(
     Path(id): Path<String>,
     Query(query): Query<ApiHistoryQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let read_id = id.clone();
+    read_history(&app, &id, &query).await.map(Json)
+}
+
+async fn read_history(app: &App, id: &str, query: &ApiHistoryQuery) -> Result<Value, ApiError> {
+    let read_id = id.to_owned();
     let session = app
         .sessions
         .history_view(&read_id)
@@ -413,14 +426,14 @@ async fn api_history(
             )
         })?;
     let Some(reference) = session.session.engine_session_ref else {
-        return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
+        return Ok(json!({"items":[],"source":null,"nextCursor":null}));
     };
     if tokio::fs::metadata(&reference)
         .await
         .err()
         .is_some_and(|err| err.kind() == std::io::ErrorKind::NotFound)
     {
-        let prompt_session = id.clone();
+        let prompt_session = id.to_owned();
         let missing_reference = reference.clone();
         let unwritten = app
             .store
@@ -434,12 +447,12 @@ async fn api_history(
                 )
             })?;
         if unwritten {
-            return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
+            return Ok(json!({"items":[],"source":null,"nextCursor":null}));
         }
     }
     let page = crate::history::history_page(
         FsPath::new(&reference),
-        &id,
+        id,
         query.cursor.as_deref(),
         query.limit.unwrap_or(50),
     )
@@ -466,7 +479,7 @@ async fn api_history(
             )
         }
     })?;
-    Ok(Json(page))
+    Ok(page)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -640,34 +653,65 @@ async fn list(
         })?;
     Ok(Json(json!(listing)))
 }
+const GZIP_SOCKET_PROTOCOL: &str = "pinkcollab.v3.gzip";
+
+fn socket_message(encoded: String, gzip: bool) -> std::io::Result<Message> {
+    if encoded.len() > 8 * 1024 * 1024 {
+        return Err(std::io::Error::other("socket frame exceeds budget"));
+    }
+    if gzip && encoded.len() >= 1024 {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(encoded.as_bytes())?;
+        return Ok(Message::Binary(encoder.finish()?.into()));
+    }
+    Ok(Message::Text(encoded.into()))
+}
+
+async fn server_timing(request: axum::extract::Request, next: Next) -> Response {
+    let started = std::time::Instant::now();
+    let mut response = next.run(request).await;
+    if let Ok(value) = format!(
+        "gateway;dur={:.3}",
+        started.elapsed().as_secs_f64() * 1000.0
+    )
+    .parse()
+    {
+        response.headers_mut().insert("server-timing", value);
+    }
+    response
+}
+
 async fn api_stream(
     State(app): State<App>,
     headers: HeaderMap,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let token = credential(&headers).unwrap_or_default().to_owned();
+    let upgrade = upgrade.protocols([GZIP_SOCKET_PROTOCOL]);
+    let gzip = upgrade.selected_protocol().is_some();
     upgrade
         .max_message_size(4096)
-        .on_upgrade(move |socket| events(socket, app, token))
+        .on_upgrade(move |socket| events(socket, app, token, gzip))
 }
 async fn send_value(
     tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     value: &impl Serialize,
+    gzip: bool,
 ) -> bool {
     let Ok(encoded) = serde_json::to_string(value) else {
         return false;
     };
+    let Ok(message) = socket_message(encoded, gzip) else {
+        return false;
+    };
     matches!(
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            tx.send(Message::Text(encoded.into()))
-        )
-        .await,
+        tokio::time::timeout(Duration::from_secs(10), tx.send(message)).await,
         Ok(Ok(()))
     )
 }
 // The fence is server-local. A snapshot supersedes queued events up to this sequence.
 async fn snapshot(app: &App, session_id: Option<&str>) -> Option<(u64, ServerEvent)> {
+    let started = std::time::Instant::now();
     for _ in 0..5 {
         let before = app.bus.sequence(session_id);
         let payload = if let Some(id) = session_id {
@@ -684,19 +728,30 @@ async fn snapshot(app: &App, session_id: Option<&str>) -> Option<(u64, ServerEve
             }
         };
         if before == app.bus.sequence(session_id) {
+            if std::env::var_os("PINKCOLLAB_STARTUP_TIMING").is_some() {
+                eprintln!(
+                    "snapshot scope={} capture_ms={:.3}",
+                    if session_id.is_some() {
+                        "session"
+                    } else {
+                        "host"
+                    },
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            }
             return Some((before, payload));
         }
     }
     None
 }
-async fn events(socket: WebSocket, app: App, token: String) {
+async fn events(socket: WebSocket, app: App, token: String, gzip: bool) {
     let mut receiver = app.bus.subscribe();
     let (mut tx, mut rx) = socket.split();
     let mut sessions = HashMap::<String, u64>::new();
     let Some((host_fence, initial)) = snapshot(&app, None).await else {
         return;
     };
-    if !send_value(&mut tx, &initial).await {
+    if !send_value(&mut tx, &initial, gzip).await {
         return;
     }
     let mut ticker = tokio::time::interval(Duration::from_secs(25));
@@ -708,7 +763,7 @@ async fn events(socket: WebSocket, app: App, token: String) {
                 let Some(id) = event.session_id() else {continue};
                 let fence = if event.updates_host() { Some(host_fence) } else { sessions.get(id).copied() };
                 if fence.is_none_or(|f| sequence <= f) || sessions.get(id).is_some_and(|f| sequence <= *f) {continue}
-                if !send_value(&mut tx,event.as_ref()).await {break}
+                if !send_value(&mut tx,event.as_ref(),gzip).await {break}
             }
             _=ticker.tick()=>{
                 let check_token = token.clone();
@@ -727,9 +782,22 @@ async fn events(socket: WebSocket, app: App, token: String) {
                         let id=command["sessionId"].as_str().unwrap_or_default();
                         if id.is_empty() || id.len()>128 {break}
                         if command["type"]=="subscribe" {
-                            let Some((fence, value))=snapshot(&app,Some(id)).await else {break};
+                            let Some((fence, mut value))=snapshot(&app,Some(id)).await else {break};
+                            // Bound optional history work; errors/slow transcripts fall back to REST.
+                            if let Some(limit) = command["historyLimit"].as_u64().filter(|n| (1..=100).contains(n))
+                                && let ServerEvent::SessionSnapshot { snapshot, .. } = &mut value
+                                && snapshot.has_history
+                            {
+                                let query = ApiHistoryQuery { cursor: None, limit: Some(limit as usize) };
+                                if let Ok(Ok(page)) = tokio::time::timeout(Duration::from_secs(1), read_history(&app, id, &query)).await {
+                                    // Large tool output remains paged over REST.
+                                    if serde_json::to_vec(&page).is_ok_and(|bytes| bytes.len() <= 256 * 1024) {
+                                        snapshot.history = Some(page);
+                                    }
+                                }
+                            }
                             sessions.insert(id.into(),fence);
-                            if !send_value(&mut tx,&value).await {break}
+                            if !send_value(&mut tx,&value,gzip).await {break}
                         } else if command["type"]=="unsubscribe" {
                             sessions.remove(id);
                         } else {break}
@@ -743,6 +811,19 @@ async fn events(socket: WebSocket, app: App, token: String) {
     let _ = tokio::time::timeout(Duration::from_secs(2), tx.send(Message::Close(None))).await;
 }
 
+async fn api_usage(
+    axum::Extension(usage): axum::Extension<Arc<crate::usage::UsageService>>,
+) -> Result<Json<crate::usage::UsageSnapshot>, ApiError> {
+    usage.read().await.map(Json).map_err(|error| {
+        eprintln!("Usage read failed: {error}");
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "usage_unavailable",
+            "Unable to load provider usage. Check that OMP supports usage --json and try again."
+                .into(),
+        )
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;

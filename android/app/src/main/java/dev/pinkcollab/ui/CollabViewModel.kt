@@ -12,6 +12,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import dev.pinkcollab.BuildConfig
 import dev.pinkcollab.data.AppRelease
+import dev.pinkcollab.data.AppUpdateDownloader
 import dev.pinkcollab.data.AppUpdateChecker
 import dev.pinkcollab.data.CredentialStore
 import dev.pinkcollab.data.GatewayRepository
@@ -49,6 +50,9 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), emptyMap())
     private val updateChecker = AppUpdateChecker(application)
+    private val updateDownload = AppUpdateDownload(viewModelScope, AppUpdateDownloader(application)::download)
+    internal val updateDownloadState = updateDownload.state
+    internal fun downloadUpdate() { mutableAvailableUpdate.value?.let(updateDownload::start) }
     private var updateCheckJob: Job? = null
     private val mutableAvailableUpdate = MutableStateFlow<AppRelease?>(null)
     internal val availableUpdate = mutableAvailableUpdate.asStateFlow()
@@ -79,6 +83,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         { hostId ->
             removeHostDrafts(hostId)
             resourceLoader.removeHost(hostId)
+            usageLoader.removeHost(hostId)
             mutableFileSelections.update { it.filterKeys { key -> key.hostId != hostId } }
         },
         { session ->
@@ -107,6 +112,8 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     }, ::showError)
     internal val detailLoads = resourceLoader.detailLoads
     internal val modelLoads = resourceLoader.modelLoads
+    private val usageLoader = HostUsageLoader(viewModelScope, repository::usage)
+    internal val usageLoads = usageLoader.state
 
     init {
         savedStateHandle.remove<String>("sessionDrafts")
@@ -137,7 +144,10 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             try {
                 val latest = if (manual) updateChecker.fetchLatest() else updateChecker.checkAutomatically()
                 if (latest != null && isNewerRelease(latest, BuildConfig.VERSION_CODE)) {
-                    if (manual || !BuildConfig.DEBUG) mutableAvailableUpdate.value = latest
+                    if (manual || !BuildConfig.DEBUG) {
+                        if (mutableAvailableUpdate.value != latest) updateDownload.reset()
+                        mutableAvailableUpdate.value = latest
+                    }
                 } else if (manual) {
                     showError("PinkCollab is up to date")
                 }
@@ -151,6 +161,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
 
     internal fun dismissUpdate() {
         updateCheckJob?.cancel()
+        updateDownload.reset()
         mutableAvailableUpdate.value = null
     }
 
@@ -172,6 +183,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             is SessionAction.Command -> sessionCommand(session, action.command)
             is SessionAction.Respond -> respond(session, action.response)
             is SessionAction.LoadModels -> loadModels(session, action.force)
+            SessionAction.LoadUsage -> usageLoader.load(session.hostId)
             SessionAction.LoadEarlierHistory -> loadEarlierHistory(session)
         }
     }

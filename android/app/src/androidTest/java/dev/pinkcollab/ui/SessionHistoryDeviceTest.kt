@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.background
+import dev.pinkcollab.ui.theme.PinkCollabTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsActions
@@ -54,6 +57,39 @@ class SessionHistoryDeviceTest {
     private val saved = TimelineItem("saved", "user", "Earlier question", "", "2026-09-20T00:00:00Z")
     private val live = TimelineItem("live", "user", "Current question", "", "2026-09-20T00:00:01Z")
 
+    @Test fun slow_initial_load_keeps_draft_without_a_retry_button() {
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            PinkCollabTheme {
+                Box(Modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+                    SessionPage(SessionPageState(LoadState.Loading, host, SessionDraft(text = "Keep draft"), 0,
+                        SessionActivity(), null, null, summary = session),
+                        onAction = {}, onApplyModelSettings = { true })
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(100)
+        compose.onNodeWithText("Opening conversation…").assertIsDisplayed()
+        compose.onNodeWithTag("sessionSyncRetry").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(8_100)
+        compose.onNodeWithText("Taking longer than usual. You can switch sessions while this loads.").assertIsDisplayed()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
+        compose.onNodeWithTag("sessionInput").assertTextEquals("Keep draft").assertIsNotEnabled()
+    }
+
+    @Test fun retained_messages_remain_readable_while_subscription_refreshes() {
+        val detail = SessionDetail(session, snapshotToken = null, savedHistory = SavedHistory.Loading)
+        compose.setContent {
+            SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
+                SessionActivity(), null, null, historyItems = listOf(saved)),
+                onAction = {}, onApplyModelSettings = { true })
+        }
+        compose.onNodeWithText("Earlier question").assertIsDisplayed()
+        compose.onNodeWithTag("historyLoading").assertDoesNotExist()
+        compose.onNodeWithTag("sessionSyncProgress").assertIsDisplayed()
+        compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
+    }
+
     @Test fun composer_and_draft_survive_detail_loading_failure_and_retry() {
         val load = mutableStateOf<LoadState<SessionDetail>>(LoadState.Loading)
         compose.setContent {
@@ -67,9 +103,10 @@ class SessionHistoryDeviceTest {
         compose.runOnIdle { load.value = LoadState.Failed("Unavailable") }
         input.assertIsDisplayed().assertIsNotEnabled().assertTextEquals("Unsent draft")
         compose.onNodeWithText("Could not load this session").assertIsDisplayed()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
         compose.runOnIdle { load.value = LoadState.Loading }
         input.assertIsDisplayed().assertIsNotEnabled()
-        compose.runOnIdle { load.value = LoadState.Ready(SessionDetail(session, liveItems = listOf(live))) }
+        compose.runOnIdle { load.value = LoadState.Ready(SessionDetail(session, snapshotToken = "sub", liveItems = listOf(live))) }
         input.assertIsDisplayed().assertIsEnabled().assertTextEquals("Unsent draft")
         compose.onNodeWithText("Current question").assertIsDisplayed()
     }
@@ -87,7 +124,7 @@ class SessionHistoryDeviceTest {
         compose.setContent {
             view = LocalView.current
             Box(Modifier.fillMaxSize().navigationBarsPadding()) {
-                SessionPage(SessionPageState(LoadState.Ready(SessionDetail(session, liveItems = listOf(live))),
+                SessionPage(SessionPageState(LoadState.Ready(SessionDetail(session, snapshotToken = "sub", liveItems = listOf(live))),
                     host, SessionDraft(), 0, SessionActivity(), null, null),
                     onAction = {}, onApplyModelSettings = { true })
             }
@@ -117,7 +154,7 @@ class SessionHistoryDeviceTest {
     @Test fun returning_to_preloaded_session_scrolls_to_latest_message() {
         val active = mutableStateOf(true)
         val messages = (0..40).map { live.copy(id = "message-$it", text = "Question $it") }
-        val detail = SessionDetail(session, liveItems = messages)
+        val detail = SessionDetail(session, snapshotToken = "sub", liveItems = messages)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true },
@@ -133,7 +170,7 @@ class SessionHistoryDeviceTest {
     }
 
     @Test fun saved_messages_and_live_updates_share_one_scrollable_timeline() {
-        val detail = SessionDetail(session, savedHistory = SavedHistory.Ready(null, listOf(saved), "older"),
+        val detail = SessionDetail(session, snapshotToken = "sub", savedHistory = SavedHistory.Ready(null, listOf(saved), "older"),
             liveItems = listOf(live))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
@@ -151,7 +188,7 @@ class SessionHistoryDeviceTest {
 
     @Test fun pulling_down_loads_earlier_history_once_and_preserves_reading_position() {
         val messages = (0..30).map { saved.copy(id = "saved-$it", text = "Saved question $it") }
-        val detail = mutableStateOf(SessionDetail(session,
+        val detail = mutableStateOf(SessionDetail(session, snapshotToken = "sub",
             savedHistory = SavedHistory.Ready(null, messages, "older")))
         val activity = mutableStateOf(SessionActivity())
         var requests = 0
@@ -187,7 +224,7 @@ class SessionHistoryDeviceTest {
 
     @Test fun accessible_history_action_preserves_position_and_tracks_availability() {
         val messages = (0..30).map { saved.copy(id = "saved-$it", text = "Saved question $it") }
-        val detail = mutableStateOf(SessionDetail(session,
+        val detail = mutableStateOf(SessionDetail(session, snapshotToken = "sub",
             savedHistory = SavedHistory.Ready(null, messages, "older")))
         val activity = mutableStateOf(SessionActivity())
         val connection = mutableStateOf<ConnectionState>(ConnectionState.Online(1L))
@@ -234,7 +271,7 @@ class SessionHistoryDeviceTest {
     }
 
     @Test fun history_pull_is_disabled_without_more_messages_or_a_connected_active_session() {
-        val detail = mutableStateOf(SessionDetail(session,
+        val detail = mutableStateOf(SessionDetail(session, snapshotToken = "sub",
             savedHistory = SavedHistory.Ready(null, listOf(saved), null)))
         val connection = mutableStateOf<ConnectionState>(ConnectionState.Online(1L))
         val active = mutableStateOf(true)
@@ -284,7 +321,7 @@ class SessionHistoryDeviceTest {
 
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
         compose.onNodeWithText("Could not load message history").assertIsDisplayed()
-        compose.onNodeWithText("Retry").assertIsDisplayed()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
     }
 
     @Test fun reconnecting_history_shows_loading_and_recovers_without_a_retry_error() {
@@ -316,7 +353,7 @@ class SessionHistoryDeviceTest {
     }
 
     @Test fun history_loading_stays_visible_until_transcript_arrives() {
-        val detail = mutableStateOf(SessionDetail(session, savedHistory = SavedHistory.Loading))
+        val detail = mutableStateOf(SessionDetail(session, snapshotToken = "sub", savedHistory = SavedHistory.Loading))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })

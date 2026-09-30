@@ -18,9 +18,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -159,4 +161,14 @@ fun PrimaryButton(
         ),
         content = content,
     )
+}
+
+/** Material 3 Expressive small button. compose-bom 2025.05.01 has no size tokens. */
+internal val SmallButtonHeight = 40.dp
+internal val SmallButtonPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+
+/** Drops the 48dp touch-target floor so a 40dp button stays 40dp. */
+@Composable
+internal fun SmallButtons(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp, content = content)
 }

@@ -87,6 +87,8 @@ Android consumes the flat protocol 3 events through `ProtocolReducer`; OMP frame
 
 The top session cards derive status from the host connection and session runtime summary. Connection states take precedence over retained execution evidence. Online cards show Starting or Stopping during lifecycle transitions, Inactive when no runtime is attached, Needs you for pending input, `Working` for `running`, `Ready` for attached `idle`, and `Starting` for `starting` (including execution not yet confirmed by the Gateway). Ready does not claim task completion; Inactive does not imply the session has never run. Cards do not infer status from transcript text or tool results.
 
+The switcher uses the existing theme palette for status dots and labels: Ready is teal (`Teal300`), Working/Starting/Stopping are violet (`Violet400`), Needs you/Sign in/Update required are amber (`Amber300`), and remaining states are gray (`Gray400`). Ready does not add glow or animation, and status does not recolor the card background.
+
 ### 2.1 Ordering and source boundaries
 
 - The page renders saved history first, then attached-runtime live items. When both sections are present, a divider warns that saved messages may repeat in live updates.
@@ -298,13 +300,15 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 
 | Condition | Presentation rule |
 | --- | --- |
-| Session detail loading | Loading surface; preserve composer/draft; do not mount work status or enable actions from summary data |
-| Session detail failed | Failure surface with Retry; preserve draft |
-| Initial history loading with no visible content | History-loading surface, not “no saved messages” |
+| Session detail loading | Conversation skeleton with connection-stage text; preserve composer/draft; do not mount work status or enable actions from summary data |
+| Session detail failed | Failure surface without a Retry button; preserve draft |
+| Initial history loading with no visible content | Conversation skeleton labeled “Loading message history”; never claim “no saved messages” |
 | Earlier history available | Pull down at the top, or invoke the timeline's “Load earlier messages” accessibility action; both preserve reading position and are unavailable while loading, disconnected, or inactive |
-| History failed or refresh error present | Retry notice; retained messages remain available |
+| History failed or refresh error present | Error notice without a Retry button; retained messages remain available |
 | Detached session with known-empty history | No saved messages yet |
 | Attached idle session with no messages or pending content | Invitation to start the conversation |
+
+Loading shows a longer-wait hint after eight seconds without a stage change. Timeline loading and failure surfaces contain no Retry buttons. Host reconnection is available from Workspaces; selecting a session or receiving a fresh host snapshot reloads session detail through the existing recovery flow. The first history request, including a wait for a running first prompt's transcript, has a fifteen-second network/wait budget; a timeout produces a recoverable history error. Existing messages remain visible with an inline sync notice during refresh. Display cache survives navigation away from Tasks within the current app composition; it is in memory only and does not survive process death. Cached detail without a fresh subscription never enables runtime actions.
 
 ## 8. Visual and interaction rules
 

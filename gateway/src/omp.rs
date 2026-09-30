@@ -21,6 +21,21 @@ use tokio::sync::{mpsc, oneshot, watch};
 /// an OMP frame that exceeds it ends the session instead of being buffered without limit.
 pub const MAX_LINE: usize = 1024 * 1024;
 
+/// Last explicit profile selection, shared with storage discovery. Environment
+/// selection is left to OMP when no command-line override was configured.
+pub(crate) fn configured_profile(args: &[String]) -> Option<String> {
+    args.iter()
+        .enumerate()
+        .filter_map(|(i, arg)| {
+            if arg == "--profile" {
+                args.get(i + 1).cloned()
+            } else {
+                arg.strip_prefix("--profile=").map(str::to_owned)
+            }
+        })
+        .next_back()
+}
+
 /// Upper bound for one blocking stdin write. Pipe buffers are small (64 KiB on Windows) while a
 /// prompt may be 256 KiB, so a wedged OMP must fail the transport instead of stalling it.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -62,6 +77,31 @@ struct Process {
 }
 
 impl Process {
+    fn spawn(command: &mut Command) -> Result<Self> {
+        #[cfg(windows)]
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
+        #[cfg(unix)]
+        command.process_group(0);
+        let child = command.spawn().context("cannot start OMP")?;
+        #[cfg(windows)]
+        let mut child = child;
+        #[cfg(windows)]
+        let job = match crate::windows_job::Job::attach_and_resume(&child) {
+            Ok(job) => job,
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+        };
+        Ok(Self {
+            #[cfg(unix)]
+            group_id: child.id() as i32,
+            child: Mutex::new(child),
+            #[cfg(windows)]
+            job,
+        })
+    }
     /// Concurrent callers serialize on the child handle and observe the same reaped exit status.
     /// A failed kill or wait is an error, never evidence that the process has exited.
     fn terminate(&self, grace: Duration) -> Result<ExitStatus> {
@@ -114,6 +154,56 @@ impl Process {
             Ok(status)
         }
     }
+}
+
+/// Runs a bounded finite command under the same containment used by RPC runtimes.
+/// The blocking owner always joins its reader after terminating the entire tree.
+pub(crate) fn finite_output(
+    command: &mut Command,
+    timeout: Duration,
+    limit: u64,
+) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let process = Process::spawn(command)?;
+    let stdout = process.child.lock().stdout.take();
+    let stdout = match stdout {
+        Some(stdout) => stdout,
+        None => {
+            process.terminate(Duration::ZERO)?;
+            bail!("OMP stdout unavailable");
+        }
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut output = Vec::new();
+        let result = stdout
+            .take(limit + 1)
+            .read_to_end(&mut output)
+            .map(|_| output);
+        let _ = tx.send(result);
+    });
+    let started = Instant::now();
+    let output = rx
+        .recv_timeout(timeout)
+        .context("OMP usage timed out")
+        .and_then(|result| result.context("cannot read OMP usage"));
+    let output = output.and_then(|output| {
+        ensure!(output.len() as u64 <= limit, "OMP usage output too large");
+        loop {
+            if let Some(status) = process.child.lock().try_wait()? {
+                ensure!(status.success(), "OMP usage command failed");
+                return Ok(output);
+            }
+            ensure!(started.elapsed() < timeout, "OMP usage timed out");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    });
+    let cleanup = process.terminate(Duration::ZERO);
+    reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("OMP usage reader panicked"))?;
+    cleanup?;
+    output
 }
 
 #[cfg(unix)]
@@ -301,22 +391,11 @@ impl Runtime {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        #[cfg(windows)]
-        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
-        #[cfg(unix)]
-        command.process_group(0);
-        let mut child = command
-            .spawn()
-            .with_context(|| format!("cannot start OMP at {executable} in {}", cwd.display()))?;
-        #[cfg(windows)]
-        let job = match crate::windows_job::Job::attach_and_resume(&child) {
-            Ok(job) => job,
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(err);
-            }
-        };
+        let process =
+            Arc::new(Process::spawn(&mut command).with_context(|| {
+                format!("cannot start OMP at {executable} in {}", cwd.display())
+            })?);
+        let mut child = process.child.lock();
         let stdin = child.stdin.take().context("OMP stdin unavailable")?;
         let stdout = child.stdout.take().context("OMP stdout unavailable")?;
         let (input, mut commands) = mpsc::channel::<(Value, oneshot::Sender<Result<()>>)>(32);
@@ -326,13 +405,7 @@ impl Runtime {
         let (exit_tx, exited) = watch::channel(false);
         let (stop, mut stopping) = watch::channel(false);
         let pending = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
-        let process = Arc::new(Process {
-            #[cfg(unix)]
-            group_id: child.id() as i32,
-            child: Mutex::new(child),
-            #[cfg(windows)]
-            job,
-        });
+        drop(child);
         let shutdown = Arc::new(Shutdown {
             process: process.clone(),
             pending: pending.clone(),

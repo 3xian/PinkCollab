@@ -31,6 +31,8 @@ The host list receives creation and authoritative state updates without subscrib
 {"type":"session_snapshot","sessionId":"...","session":{},"runtime":null,"timeline":[],"operations":[],"hasHistory":false}
 ```
 
+A subscribe may include `historyLimit` (1–100). Gateway then attempts to include an optional `history` first page using the same `{items,source,nextCursor}` shape and cursors as the history REST endpoint. History is read separately from the snapshot; it is not part of its event fence. If the read fails, takes over one second, or the serialized page exceeds 256 KiB, Gateway omits `history` and the client loads it through REST. Android requests the latest 25 items and loads earlier pages on demand. Clients that omit `historyLimit`, and older Gateways, retain the REST flow.
+
 `operations` contains up to 20 recent receipts. Use receipt lookup for older pending commands. `hasHistory` indicates a server-side history mapping, not a guarantee that the transcript is already available.
 
 | Event | Fields besides `type` | Apply |
@@ -41,6 +43,8 @@ The host list receives creation and authoritative state updates without subscrib
 | `operation` | `sessionId`, `operation` | Replace receipt by its ID |
 
 A null runtime clears all runtime facts. There is no separate exit event. Runtime start/exit resets the live tail; history is unaffected. Metadata updates also contain the complete runtime. Unknown frame types are protocol errors.
+
+Clients may offer the optional `pinkcollab.v3.gzip` WebSocket subprotocol. When accepted, Gateway sends JSON frames of at least 1 KiB as gzip-compressed binary messages; smaller frames remain text. Clients decode a binary message only after negotiation and bound decoded messages to 8 MiB. Without negotiation, all frames remain text. Client commands remain text in both cases.
 
 The ordered socket is the event stream. Clients maintain no wire subscription IDs or revision cursors. Gateway registers its receiver before capturing a snapshot and uses private sequence fences to discard superseded queued events. Snapshot validation tracks only mutations represented by that snapshot: timeline/operation changes do not invalidate the host list, and one session cannot invalidate another session’s snapshot. If it cannot capture a stable snapshot, loses broadcast events, encounters an oversized event, or cannot deliver promptly, it closes the connection. Reconnect takes a fresh host snapshot and resubscribes to the visible session; there is no durable event replay. In-flight history responses from a previous local view must be discarded. Host and session snapshots are separate reads, not a global transaction.
 
@@ -96,3 +100,9 @@ Existing host OMP sessions share `/sessions` pagination, host snapshots, session
 A generation-less `prompt` or `start_runtime` lazily adopts it and publishes the normal flattened `session_upsert` followed by normal runtime/session events. Its ID does not change; `origin` becomes `managed`, replacing the existing card. Uploading an attachment or reading a snapshot/history does not adopt. Command IDs, outbox scope, receipt lookup and cursor binding are unchanged.
 
 Admission can return HTTP 409 `external_session_busy` (close external OMP and retry), HTTP 503 `history_unavailable`, or HTTP 404 `session_not_found`. No receipt exists if admission fails before command persistence. Startup after adoption can fail its durable operation with `external_session_busy` or `history_unavailable`; the managed mapping is retained. See [refresh bounds and external-writer limitations](omp-discovery.md).
+
+## Provider usage
+
+`GET /usage` reads host-wide provider account quotas through the configured OMP executable's `usage --json`, independent of session runtimes. It honors explicit `--profile` selection from Gateway configuration and requires pairing authentication. Concurrent requests are serialized; successful results are cached for 30 seconds. The subprocess has a 30-second timeout and a 1 MiB stdout bound. Its process tree is terminated and reaped before the fetch slot is released, including after request cancellation. Failure returns HTTP 503 `usage_unavailable`, never an empty success.
+
+The response is `{generatedAt,accounts:[{id,provider,accountLabel,plan,fetchedAt,status,limits}]}`. Account IDs are opaque; labels are masked. Account `status` is `available`, `unavailable` (including OMP accounts without usage), or `disabled`. Each limit contains `{id,label,modelId,tier,windowLabel,resetsAt,usedFraction,used,limit,remaining,unit,status}`. Optional facts are null; timestamps are epoch milliseconds and fractions are ratios (0.62 means 62%). Limit status is OMP's `ok`, `warning`, `exhausted`, or `unknown`. `generatedAt` describes snapshot generation; `fetchedAt` describes the provider report's freshness. Missing quotas never mean zero usage.

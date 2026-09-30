@@ -30,7 +30,7 @@ impl Layout {
                 return Some(PathBuf::from(path));
             }
             let home = home?;
-            let selected = option(args, "--profile")
+            let selected = crate::omp::configured_profile(args)
                 .or_else(|| env.get("OMP_PROFILE").cloned())
                 .or_else(|| env.get("PI_PROFILE").cloned());
             let profile = profile_name(selected.as_deref()).ok()?;

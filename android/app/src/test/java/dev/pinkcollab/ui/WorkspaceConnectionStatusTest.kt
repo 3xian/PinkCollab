@@ -34,4 +34,13 @@ class WorkspaceConnectionStatusTest {
         assertNotEquals(navigationState(before), navigationState(after))
         assertTrue(sessionListState(before).samePresentation(sessionListState(after)))
     }
+
+    @Test fun offline_host_reports_periodic_checks_without_an_attempt_counter() {
+        val offline = navigation(ConnectionState.Offline("Host rejected the connection (HTTP 502)"),
+            ConnectionProgress(17, "Host rejected the connection (HTTP 502)"))
+        assertEquals("Host rejected the connection (HTTP 502). Checking periodically; refresh to retry now",
+            workspaceConnectionMessage(offline))
+        assertEquals("Network unavailable",
+            workspaceConnectionMessage(navigation(ConnectionState.Offline("Network unavailable"))))
+    }
 }

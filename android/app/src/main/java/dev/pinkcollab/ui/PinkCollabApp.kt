@@ -1,8 +1,5 @@
 package dev.pinkcollab.ui
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -20,7 +17,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.ui.platform.LocalContext
 import dev.pinkcollab.BuildConfig
 import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.PinkCollabTheme
@@ -41,8 +37,8 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     var pairAttemptSequence by rememberSaveable { mutableLongStateOf(0L) }
     var selectedSession by rememberSaveable(saver = SelectedSessionSaver) { mutableStateOf<SessionKey?>(null) }
     var startupReady by remember { mutableStateOf(false) }
+    val sessionDisplayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
     val snackbar = remember { SnackbarHostState() }
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -96,7 +92,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     PinkCollabTheme {
         Crossfade(
             targetState = startupReady,
-            animationSpec = tween(420),
+            animationSpec = tween(150),
             label = "startupContent",
         ) { ready ->
             if (!ready) {
@@ -139,6 +135,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                 ) {
                     when (val current = route) {
                         AppRoute.Tasks -> TasksRoute(
+                            retainedDisplay = sessionDisplayCache,
                             vm = vm,
                             selectedSession = selectedSession,
                             actions = TasksScreenActions(
@@ -190,37 +187,38 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
             }
         }
         availableUpdate?.let { release ->
-            AppUpdateDialog(
+            val download by vm.updateDownloadState.collectAsStateWithLifecycle()
+            AppUpdateFlow(
                 release = release,
-                currentVersion = "v${BuildConfig.VERSION_NAME}",
+                download = download,
                 onDismiss = vm::dismissUpdate,
-                onUpdate = {
-                    try {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.updateUrl)))
-                        vm.dismissUpdate()
-                    } catch (_: ActivityNotFoundException) {
-                        scope.launch { snackbar.showSnackbar("No browser available to open the update") }
-                    }
-                },
+                onDownload = vm::downloadUpdate,
             )
         }
     }
 }
 
 @Composable
-private fun TasksRoute(vm: CollabViewModel, selectedSession: SessionKey?, actions: TasksScreenActions) {
+private fun TasksRoute(
+    vm: CollabViewModel,
+    selectedSession: SessionKey?,
+    actions: TasksScreenActions,
+    retainedDisplay: androidx.compose.runtime.snapshots.SnapshotStateMap<SessionKey, SessionDisplay>,
+) {
     val sessions by vm.sessionListState.collectAsStateWithLifecycle()
     val details by vm.sessionDetails.collectAsStateWithLifecycle()
     val sessionOperations by vm.sessionOperations.collectAsStateWithLifecycle()
     val sendProgress by vm.sendProgress.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
     val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
+    val usageLoads by vm.usageLoads.collectAsStateWithLifecycle()
     val drafts by vm.drafts.collectAsStateWithLifecycle()
     val fileSelections by vm.fileSelections.collectAsStateWithLifecycle()
     TasksScreen(
         state = TasksScreenState(sessions, details, detailLoads, modelLoads, sessionOperations,
-            sendProgress, drafts, fileSelections, selectedSession),
+            sendProgress, drafts, fileSelections, selectedSession, usageLoads),
         actions = actions,
+        retainedDisplay = retainedDisplay,
     )
 }
 

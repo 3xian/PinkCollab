@@ -26,20 +26,9 @@ class StartupLoadingTest {
     )
 
     @Test
-    fun `ready state keeps startup visible for three seconds`() = runTest {
-        val states = MutableStateFlow(AppState())
+    fun `ready state releases startup immediately`() = runTest {
         var ready = false
-        launch {
-            awaitStartupReadiness(states, maximumDurationMillis = 8_000)
-            ready = true
-        }
-
-        runCurrent()
-        assertFalse(ready)
-        advanceTimeBy(2_999)
-        runCurrent()
-        assertFalse(ready)
-        advanceTimeBy(1)
+        launch { awaitStartupReadiness(MutableStateFlow(AppState())); ready = true }
         runCurrent()
         assertTrue(ready)
     }
@@ -62,10 +51,6 @@ class StartupLoadingTest {
             initialSync = InitialSyncState.Ready,
         )
         runCurrent()
-        assertFalse(ready)
-        advanceTimeBy(3_000)
-        runCurrent()
-
         assertTrue(ready)
     }
 
@@ -120,9 +105,6 @@ class StartupLoadingTest {
             ready = true
         }
 
-        runCurrent()
-        assertFalse(ready)
-        advanceTimeBy(3_000)
         runCurrent()
         assertTrue(ready)
 

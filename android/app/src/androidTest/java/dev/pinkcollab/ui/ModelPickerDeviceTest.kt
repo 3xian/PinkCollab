@@ -50,7 +50,7 @@ class ModelPickerDeviceTest {
                 apply = { applied = it },
             )
         }
-        compose.onNodeWithText("Not set").assertIsDisplayed()
+        compose.onNodeWithText("Thinking Not set").assertIsDisplayed()
         compose.onNodeWithTag("thinkingSingleLevel").performClick()
         compose.onNodeWithText("Apply").performClick()
         assertEquals(ModelSettingsChanges(null, "high"), applied)
@@ -67,7 +67,7 @@ class ModelPickerDeviceTest {
                 apply = { applied = it },
             )
         }
-        compose.onNodeWithText("Not set").assertIsDisplayed()
+        compose.onNodeWithText("Thinking Not set").assertIsDisplayed()
         compose.onNodeWithText("Apply").assertIsNotEnabled()
         compose.onNodeWithTag("thinkingLevel:off")
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
@@ -89,7 +89,7 @@ class ModelPickerDeviceTest {
         }
         compose.onNodeWithTag("thinkingSlider").assertValueEquals("low")
         compose.onNodeWithContentDescription("Model 1, provider0").performClick()
-        compose.onNodeWithText("Not set").assertIsDisplayed()
+        compose.onNodeWithText("Thinking Not set").assertIsDisplayed()
         compose.onNodeWithTag("thinkingLevel:off")
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("thinkingSlider").assertValueEquals("off")
@@ -149,7 +149,7 @@ class ModelPickerDeviceTest {
 
         compose.onNodeWithTag("modelList").performTouchInput { swipeUp() }
         compose.onNodeWithText("Models").assertIsDisplayed()
-        compose.onNodeWithText("Thinking").assertIsDisplayed()
+        compose.onNodeWithText("Thinking ", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Apply").assertIsDisplayed()
         assertEquals(0, dismissed)
 
@@ -166,9 +166,9 @@ class ModelPickerDeviceTest {
         compose.onNodeWithContentDescription("Model 119, provider3").performClick()
         assertNull(applied)
 
-        compose.onNodeWithContentDescription("Refresh models").performClick()
+        compose.onNodeWithText("Reload").performClick()
         assertEquals(1, refreshes)
-        compose.onNodeWithText("Thinking").assertIsDisplayed()
+        compose.onNodeWithText("Thinking ", substring = true).assertIsDisplayed()
         compose.onNodeWithTag("modelList").assertExists()
         compose.runOnIdle { load = LoadState.Ready(catalog) }
 
@@ -197,7 +197,7 @@ class ModelPickerDeviceTest {
                 apply = { applied = it },
             )
         }
-        compose.onNodeWithText("Thinking").assertIsDisplayed()
+        compose.onNodeWithText("Thinking ", substring = true).assertIsDisplayed()
         compose.onNodeWithText("No models are available from OMP.").assertExists()
         compose.onNodeWithTag("thinkingSlider").performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
         compose.onNodeWithText("Apply").performClick()

@@ -16,6 +16,7 @@ internal data class AppRelease(
     val versionCode: Int,
     val notes: String,
     val updateUrl: String,
+    val apkUrl: String? = updateUrl,
 )
 
 private val releaseTag = Regex("^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
@@ -53,6 +54,7 @@ internal fun parseAppRelease(json: String): AppRelease? = runCatching {
         versionCode = code,
         notes = if (release.isNull("body")) "" else release.optString("body"),
         updateUrl = apkUrl ?: releaseUrl ?: return null,
+        apkUrl = apkUrl,
     )
 }.getOrNull()
 

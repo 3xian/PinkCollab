@@ -1,4 +1,8 @@
+#[path = "protocol/startup_transport.rs"]
+mod startup_transport;
 mod support;
+#[path = "protocol/usage.rs"]
+mod usage;
 
 use futures_util::{SinkExt, StreamExt};
 use pinkcollab_gateway::protocol::ServerEvent;

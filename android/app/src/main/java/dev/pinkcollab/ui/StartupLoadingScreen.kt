@@ -49,29 +49,23 @@ import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.BrandPink
 import dev.pinkcollab.ui.theme.BrandPurple
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.roundToInt
 
-private const val MinimumStartupDurationMillis = 3_000L
-
 internal suspend fun awaitStartupReadiness(
     appStates: StateFlow<AppState>,
     maximumDurationMillis: Long = InitialSyncTimeoutMillis,
 ) = coroutineScope {
-    val minimumDuration = launch { delay(MinimumStartupDurationMillis) }
     if (appStates.value.taskListLoadState == TaskListLoadState.Loading) {
         withTimeoutOrNull(maximumDurationMillis) {
             appStates.first { it.taskListLoadState != TaskListLoadState.Loading }
         }
     }
-    minimumDuration.join()
 }
 
 @Composable

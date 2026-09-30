@@ -58,12 +58,11 @@ internal fun SessionPage(
     isActive: Boolean = true,
 ) {
     val load = state.detail
-    val host = state.host.takeIf { load is LoadState.Ready }
+    val host = state.host.takeIf { load is LoadState.Ready && load.value.snapshotToken != null }
     val draft = state.draft
     val selectingFiles = state.selectingFiles
     val activity = state.activity
     val modelState = state.model
-    val onRetry: () -> Unit = { onAction(SessionAction.Retry) }
     val onPrompt: () -> Unit = { onAction(SessionAction.Send) }
     val onDraftTextChange: (String) -> Unit = { onAction(SessionAction.DraftChanged(it)) }
     val onFileSelected: (Uri) -> Unit = { onAction(SessionAction.FileSelected(it)) }
@@ -115,7 +114,9 @@ internal fun SessionPage(
         remember(detail.liveItems) { projectSessionTimeline(detail.liveItems) }
     } else emptyList()
     val hasSavedMessages = historyTimeline.isNotEmpty() || savedHistory.nextCursor != null
-    val historyError = sessionHistoryError(detail, host, state.refreshError)
+    val historyError = sessionHistoryError(detail, state.host, state.refreshError)
+    val syncing = load == LoadState.Loading || detail.snapshotToken == null || savedHistory == SavedHistory.Loading
+    val syncMessage = sessionSyncMessage(state.host, detail.snapshotToken != null)
     val awaitingHistory = historyError == null &&
         (savedHistory == SavedHistory.Loading || savedHistory == SavedHistory.Failed) && historyTimeline.isEmpty() &&
         liveTimeline.isEmpty() && detail.streaming.isBlank() && session.attention == null
@@ -272,11 +273,13 @@ internal fun SessionPage(
                         }
                     }
                     session.attention?.let { attention -> item(key = "attention") { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
+                    if (syncing && !awaitingHistory) item(key = "session-sync") {
+                        SessionSyncProgress(syncMessage, Modifier.testTag("sessionSyncProgress"))
+                    }
                     if (historyError != null) item(key = "history-failed") {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
                             Text(historyError, color = TextMid,
                                 style = MaterialTheme.typography.bodySmall)
-                            TextButton(onClick = onRetry) { Text("Retry") }
                         }
                     }
                     // A separate end anchor reaches the bottom even when the final message is taller than the viewport.
@@ -293,10 +296,10 @@ internal fun SessionPage(
             }
         }
         if (load is LoadState.Failed) {
-            EmptyState("Could not load this session", load.message, "Retry", onRetry,
+            EmptyState("Could not load this session", load.message,
                 modifier = Modifier.padding(bottom = composerClearance))
         } else if (load == LoadState.Loading || awaitingHistory) {
-            TimelineLoadingState(Modifier.padding(bottom = composerClearance)
+            TimelineLoadingState(syncMessage, Modifier.padding(bottom = composerClearance)
                 .testTag(if (load == LoadState.Loading) "sessionLoading" else "historyLoading"))
         }
         Box(
@@ -461,6 +464,8 @@ internal fun SessionPage(
     if (showModels) {
         ModelPickerSheet(
             state = modelState,
+            usageState = state.usage,
+            loadUsage = { onAction(SessionAction.LoadUsage) },
             current = detail.model,
             enabled = attached && !activity.inputBusy,
             runtimeAttached = attached,

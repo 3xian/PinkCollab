@@ -1,6 +1,6 @@
 {
   "name": "pinkcollab",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "description": "Install and run the PinkCollab Gateway without a Rust toolchain",
   "license": "MIT",
   "repository": {
@@ -28,10 +28,10 @@
     "provenance": true
   },
   "optionalDependencies": {
-    "@pinkcollab/gateway-darwin-arm64": "2.0.3",
-    "@pinkcollab/gateway-darwin-x64": "2.0.3",
-    "@pinkcollab/gateway-linux-arm64": "2.0.3",
-    "@pinkcollab/gateway-linux-x64": "2.0.3",
-    "@pinkcollab/gateway-win32-x64": "2.0.3"
+    "@pinkcollab/gateway-darwin-arm64": "2.1.0",
+    "@pinkcollab/gateway-darwin-x64": "2.1.0",
+    "@pinkcollab/gateway-linux-arm64": "2.1.0",
+    "@pinkcollab/gateway-linux-x64": "2.1.0",
+    "@pinkcollab/gateway-win32-x64": "2.1.0"
   }
 }

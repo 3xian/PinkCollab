@@ -93,6 +93,26 @@ class SessionGatewayTest {
         assertTrue(state.value.details.getValue(key).savedHistory is SavedHistory.Ready)
     }
 
+    @Test fun unavailable_running_history_times_out_without_losing_live_messages() = runTest {
+        val key = SessionKey("host", "session")
+        val initial = loadingDetail()
+        val live = TimelineItem("live", "assistant", "Working", "", "")
+        val running = initial.copy(session = initial.session.copy(status = SessionStatus.Running,
+            runtimeAttached = true), liveItems = listOf(live))
+        val state = MutableStateFlow(AppState(details = mapOf(key to running)))
+        val gateway = gatewayWith(state, HistoryTransport {
+            throw GatewayHttpException(503, "history_unavailable", "Unavailable")
+        })
+        try {
+            gateway.loadHistory("host", "session", "sub")
+            error("Expected timeout")
+        } catch (_: IOException) { }
+        assertEquals(SavedHistory.Failed, state.value.details.getValue(key).savedHistory)
+        assertEquals(listOf(live), state.value.details.getValue(key).liveItems)
+        gatewayWith(state, HistoryTransport { historyPage }).loadHistory("host", "session", "sub")
+        assertTrue(state.value.details.getValue(key).savedHistory is SavedHistory.Ready)
+    }
+
     @Test fun unavailable_active_history_finishes_when_focus_moves_to_another_host() = runTest {
         val key = SessionKey("host", "session")
         val state = MutableStateFlow(AppState())

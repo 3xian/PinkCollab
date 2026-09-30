@@ -10,10 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -29,8 +27,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextAlign
 import dev.pinkcollab.ui.theme.TextMid
-import dev.pinkcollab.ui.theme.Teal300
 import dev.pinkcollab.ui.theme.BrandPurple
 import dev.pinkcollab.ui.theme.BrandPink
 import kotlin.math.roundToInt
@@ -47,14 +48,19 @@ internal fun ThinkingLevelSlider(
     val selectedIndex = levels.indexOf(selected)
     val selectedLabel = levels.getOrNull(selectedIndex) ?: "Not set"
     val sliderEnabled = enabled && levels.size > 1
-    val accent = Teal300
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Thinking", style = MaterialTheme.typography.labelLarge, color = TextMid)
-            Text(selectedLabel, style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary)
-        }
+        Text(
+            text = buildAnnotatedString {
+                withStyle(SpanStyle(color = TextMid)) { append("Thinking ") }
+                withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                    append(selectedLabel.replaceFirstChar { it.titlecase() })
+                }
+            },
+            style = MaterialTheme.typography.labelLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().offset(y = 4.dp),
+        )
         if (selectedIndex < 0 || levels.size == 1) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -121,12 +127,7 @@ internal fun ThinkingLevelSlider(
                 }
             },
             thumb = {
-                Icon(
-                    imageVector = Icons.Filled.Bolt,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = if (sliderEnabled) accent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                )
+                ThinkingGlowThumb(enabled = sliderEnabled, modifier = Modifier.size(28.dp))
             },
             valueRange = 0f..levels.lastIndex.coerceAtLeast(1).toFloat(),
             steps = (levels.size - 2).coerceAtLeast(0),

@@ -128,6 +128,9 @@ pub struct SessionSnapshot {
     pub timeline: Vec<TimelineItem>,
     pub operations: Vec<OperationDto>,
     pub has_history: bool,
+    /// Optional first page requested by subscribe; older clients keep using REST.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<serde_json::Value>,
 }
 impl SessionView {
     pub fn dto(&self) -> SessionSnapshot {
@@ -146,6 +149,7 @@ impl SessionView {
                 .map(OperationDto::from)
                 .collect(),
             has_history: self.history_ref.is_some(),
+            history: None,
         }
     }
 }

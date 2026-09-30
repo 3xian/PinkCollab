@@ -1,5 +1,8 @@
 package dev.pinkcollab.ui
 
+import android.view.KeyEvent
+import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
@@ -12,6 +15,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -73,6 +77,88 @@ class AppUpdateDeviceTest {
             assertEquals(1, shownVersion)
             assertEquals(1, checkedUpdates)
         }
+    }
+
+
+
+    @Test fun update_flow_starts_download_on_update_click() {
+        var requested = false
+        compose.setContent {
+            AppUpdateFlow(AppRelease("v3.0.0", 3_000_000, "", "https://github.com/apk"),
+                UpdateDownloadState.Idle, onDismiss = {}, onDownload = { requested = true })
+        }
+        compose.onNodeWithText("Update").performClick()
+        compose.runOnIdle { assertEquals(true, requested) }
+    }
+
+    @Test fun completed_download_opens_android_installer_with_readable_apk() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val file = File(context.cacheDir, "updates/installer-test.apk")
+        file.parentFile!!.mkdirs()
+        File(context.applicationInfo.sourceDir).copyTo(file, overwrite = true)
+        fun appOp(value: String) {
+            instrumentation.uiAutomation.executeShellCommand(
+                "appops set ${context.packageName} REQUEST_INSTALL_PACKAGES $value").use {
+                java.io.FileInputStream(it.fileDescriptor).readBytes()
+            }
+        }
+        appOp("allow")
+        try {
+            compose.setContent {
+                AppUpdateFlow(AppRelease("v3.0.0", 3_000_000, "", "https://github.com/apk"),
+                    UpdateDownloadState.Ready(file), onDismiss = {}, onDownload = {})
+            }
+            // A real APK exercises the content URI grant and Android's package parser.
+            compose.waitUntil(timeoutMillis = 10_000) {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                root?.packageName?.toString()?.contains("packageinstaller") == true &&
+                    root.findAccessibilityNodeInfosByText("PinkCollab").isNotEmpty() &&
+                    (root.findAccessibilityNodeInfosByText("Install").isNotEmpty() ||
+                        root.findAccessibilityNodeInfosByText("Update").isNotEmpty())
+            }
+        } finally {
+            for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                instrumentation.uiAutomation.injectInputEvent(KeyEvent(action, KeyEvent.KEYCODE_BACK), true)
+            }
+            // Revoking REQUEST_INSTALL_PACKAGES kills the instrumented process on Android 16.
+            // The test runner removes this test installation after the suite.
+            file.delete()
+        }
+    }
+
+    @Test fun download_progress_disables_duplicate_download_and_allows_cancel() {
+        var cancelled = false
+        compose.setContent {
+            AppUpdateDialog(AppRelease("v3.0.0", 3_000_000, "", "https://github.com/apk"), "v2.0.3",
+                onDismiss = { cancelled = true }, onUpdate = {},
+                download = UpdateDownloadState.Downloading(50, 100))
+        }
+        compose.onNodeWithText("Downloading: 50%").assertIsDisplayed()
+        compose.onNodeWithText("Update").assertIsNotEnabled()
+        compose.onNodeWithText("Cancel download").performClick()
+        compose.runOnIdle { assertEquals(true, cancelled) }
+    }
+
+    @Test fun failed_download_offers_retry_and_explains_error() {
+        var retried = false
+        compose.setContent {
+            AppUpdateDialog(AppRelease("v3.0.0", 3_000_000, "", "https://github.com/apk"), "v2.0.3",
+                onDismiss = {}, onUpdate = { retried = true },
+                download = UpdateDownloadState.Failed("Download failed (HTTP 503)"))
+        }
+        compose.onNodeWithText("Download failed (HTTP 503)").assertIsDisplayed()
+        compose.onNodeWithText("Retry").performClick()
+        compose.runOnIdle { assertEquals(true, retried) }
+    }
+
+    @Test fun release_without_apk_cannot_start_download() {
+        compose.setContent {
+            AppUpdateDialog(AppRelease("v3.0.0", 3_000_000, "", "https://github.com/release", apkUrl = null),
+                "v2.0.3", onDismiss = {}, onUpdate = {})
+        }
+        compose.onNodeWithText("No APK is available for this release.").assertIsDisplayed()
+        compose.onNodeWithText("Update").assertIsNotEnabled()
     }
 
     @Test fun update_dialog_shows_versions_notes_and_actions() {

@@ -73,3 +73,13 @@ API changes must match the [protocol](protocol.md).
 `cargo test --all-features --locked` includes the external-OMP discovery/adoption fixtures. `cargo test --all-features --locked --test discovery` isolates the REST, history, race and restart cases. If Windows has the normal debug executable running, pass `--target-dir target-discovery` to Cargo instead of stopping that service. Run Android unit tests and `:app:assembleDebugAndroidTest` to compile the device suites; run `:app:connectedDebugAndroidTest` only with an attached test device.
 
 With OMP installed, run `cargo test --all-features --locked --test discovery real_omp_resumes -- --ignored` for a real resume without a provider request. Set `OMP_EXECUTABLE` when it is not on PATH.
+
+## Android app updates
+
+The update dialog downloads the release's `pinkcollab-android.apk` directly into private cache storage and displays progress. Downloads can be cancelled or retried; APKs must match the app package, advertised version, and installed signing certificate before installation. A release without an HTTPS APK asset displays an unavailable message instead of opening a browser. Debug installations cannot upgrade to production APKs because their signing certificates differ.
+
+After downloading, PinkCollab opens Android's installation confirmation through a narrowly scoped FileProvider URI. If needed, it first opens the per-app “Install unknown apps” setting and continues after permission is granted. Cancelling the installer leaves an Install button to retry without downloading again. Downloads survive activity recreation through the ViewModel; after process termination they must be started again.
+
+Download state belongs to the ViewModel's dispatcher. Worker progress is dispatched to that owner and accepted only for the current downloading attempt; queued callbacks cannot revive a cancelled download or overwrite a completed result.
+
+Startup timing: HTTP responses include `Server-Timing: gateway;dur=...` for handler time (excluding body transfer/compression). For local profiling, run `PINKCOLLAB_STARTUP_TIMING=1 ... serve` to log host/session snapshot capture durations without credentials or transcript text. Compare cold launch through the first visible history frame; Android requests 25 initial messages via the optional gzip WebSocket transport.

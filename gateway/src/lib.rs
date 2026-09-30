@@ -15,3 +15,5 @@ pub mod uploads;
 #[cfg(windows)]
 mod windows_job;
 pub mod workspace;
+
+pub mod usage;

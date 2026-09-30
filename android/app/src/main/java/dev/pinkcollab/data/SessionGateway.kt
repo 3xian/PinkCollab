@@ -3,6 +3,7 @@ package dev.pinkcollab.data
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -58,7 +59,12 @@ internal class SessionGateway(
         val request = HistoryRequest(snapshotToken, before.historyEpoch)
         val p = paired(hostId)
         val page = try {
-            firstHistoryPage(key, request, p) ?: return
+            val raw = withTimeoutOrNull(15_000) { firstHistoryPage(key, request, p) }
+            if (raw == null) {
+                if (!request.matches(state.value.details[key])) return
+                throw IOException("Message history took too long to load; try again")
+            }
+            parseHistoryPage(raw)
         } catch (failure: Exception) {
             if (failure is CancellationException) throw failure
             // A visible page stays visible. An in-flight first page must not become "no messages".
@@ -69,20 +75,20 @@ internal class SessionGateway(
         }
         updateMatched(key, request) { current ->
             current.copy(
-                savedHistory = SavedHistory.Ready(page.source, page.items, page.nextCursor),
+                savedHistory = SavedHistory.Ready(page.sourceId, page.items, page.nextCursor),
                 liveItems = if (current.session.runtimeAttached) current.liveItems else emptyList(),
             )
         }
     }
 
-    private suspend fun firstHistoryPage(key: SessionKey, request: HistoryRequest, p: PairedHost): HistoryPage? {
+    private suspend fun firstHistoryPage(key: SessionKey, request: HistoryRequest, p: PairedHost): String? {
         var retries = 0
         while (true) {
             val current = state.value.details[key] ?: return null
             if (!request.matches(current)) return null
             try {
-                return parseHistoryPage(api.request(p.url, p.credential,
-                    "/api/v3/sessions/${key.sessionId}/history", query = "limit" to "100"))
+                return api.request(p.url, p.credential,
+                    "/api/v3/sessions/${key.sessionId}/history", query = "limit" to InitialHistoryPageSize.toString())
             } catch (failure: GatewayHttpException) {
                 if (failure.errorCode !in setOf("history_unavailable", "stale_cursor")) throw failure
                 val latest = state.value.details[key] ?: return null
@@ -130,12 +136,18 @@ internal class SessionGateway(
         }
         updateMatched(key, request) { current ->
             val currentReady = current.savedHistory as? SavedHistory.Ready
-            if (currentReady == null || currentReady.sourceId != page.source) current
+            if (currentReady == null || currentReady.sourceId != page.sourceId) current
             else current.copy(savedHistory = currentReady.copy(
                 items = page.items + currentReady.items,
                 nextCursor = page.nextCursor,
             ))
         }
+    }
+
+    suspend fun usage(hostId: String): UsageSnapshot {
+        val p = paired(hostId)
+        val response = api.request(p.url, p.credential, "/api/v3/usage")
+        return withContext(Dispatchers.Default) { parseUsage(JSONObject(response)) }
     }
 
     suspend fun models(hostId: String, id: String): ModelCatalog {
@@ -150,17 +162,17 @@ internal class SessionGateway(
 
 internal fun historyCursor(page: JSONObject): String? = (page.opt("nextCursor") as? String)?.takeIf { it.isNotBlank() }
 
-private data class HistoryPage(val source: String?, val items: List<TimelineItem>, val nextCursor: String?)
-
 internal data class HistoryRequest(val snapshotToken: String, val epoch: Long) {
     fun matches(detail: SessionDetail?): Boolean = detail?.snapshotToken == snapshotToken && detail.historyEpoch == epoch
 }
 
-private suspend fun parseHistoryPage(raw: String): HistoryPage = withContext(Dispatchers.Default) {
-    val page = JSONObject(raw)
-    HistoryPage(
-        source = page.optJSONObject("source")?.getString("id"),
+private suspend fun parseHistoryPage(raw: String): SavedHistory.Ready = withContext(Dispatchers.Default) {
+    historyPageState(JSONObject(raw))
+}
+
+internal fun historyPageState(page: JSONObject): SavedHistory.Ready =
+    SavedHistory.Ready(
+        sourceId = page.optJSONObject("source")?.getString("id"),
         items = page.getJSONArray("items").objects().map { it.item() },
         nextCursor = historyCursor(page),
     )
-}

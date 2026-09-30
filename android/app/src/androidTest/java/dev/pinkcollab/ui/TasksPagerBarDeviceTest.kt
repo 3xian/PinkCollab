@@ -80,6 +80,29 @@ class TasksPagerBarDeviceTest {
         }
     }
 
+    @Test fun retained_messages_survive_leaving_tasks_during_refresh() {
+        val key = SessionKey("host", "s0")
+        val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            connection = ConnectionState.Online(1L), sessions = sessions.take(1))
+        val detail = SessionDetail(sessions.first(), snapshotToken = "subscription",
+            savedHistory = SavedHistory.Ready(null, listOf(TimelineItem("message", "user", "Retained conversation", "", "")), null))
+        var app by mutableStateOf(AppState(hosts = mapOf("host" to host), details = mapOf(key to detail)))
+        var showTasks by mutableStateOf(true)
+        val cache = androidx.compose.runtime.mutableStateMapOf<SessionKey, SessionDisplay>()
+        compose.setContent {
+            if (showTasks) TasksScreen(
+                TasksScreenState(sessionListState(app), app.details, emptyMap(), emptyMap(), emptySet(), emptyMap(),
+                    emptyMap(), emptyMap(), key),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }), retainedDisplay = cache)
+        }
+        compose.onNodeWithText("Retained conversation").assertIsDisplayed()
+        compose.runOnIdle { showTasks = false; app = app.copy(details = emptyMap()) }
+        compose.onNodeWithText("Retained conversation").assertDoesNotExist()
+        compose.runOnIdle { showTasks = true }
+        compose.onNodeWithText("Retained conversation").assertIsDisplayed()
+        compose.onNodeWithTag("historyLoading").assertDoesNotExist()
+    }
+
     @Test fun cached_messages_remain_visible_during_detail_and_history_refresh() {
         val key = SessionKey("host", "s0")
         val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),

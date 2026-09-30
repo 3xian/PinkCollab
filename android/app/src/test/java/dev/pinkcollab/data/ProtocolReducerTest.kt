@@ -24,6 +24,26 @@ class ProtocolReducerTest {
         .put("upsert", JSONArray().also { if (text != null) it.put(item(text)) })
         .put("remove", JSONArray().also { if (remove) it.put("item") })
 
+    @Test fun inline_history_is_ready_without_a_duplicate_rest_request() {
+        val page = JSONObject().put("source", JSONObject().put("id", "source-one"))
+            .put("items", JSONArray().put(JSONObject()
+                .put("id", "saved").put("kind", "user").put("text", "hello")
+                .put("detail", "").put("timestamp", "")))
+            .put("nextCursor", "older-page")
+        val result = reduceProtocol(app(), "host", session(history = true).put("history", page), 1)
+        val history = result.state.details.getValue(key).savedHistory as SavedHistory.Ready
+        assertEquals("source-one", history.sourceId)
+        assertEquals("older-page", history.nextCursor)
+        assertEquals("hello", history.items.single().text)
+        assertTrue(result.effects.isEmpty())
+    }
+
+    @Test fun old_gateway_snapshot_still_requests_history_through_rest() {
+        val result = reduceProtocol(app(), "host", session(history = true), 1)
+        assertEquals(SavedHistory.Loading, result.state.details.getValue(key).savedHistory)
+        assertEquals(listOf(GatewayEffect.LoadHistory(key)), result.effects)
+    }
+
     @Test fun discovery_adoption_replaces_card_without_losing_history() {
         val frame = session(history = true).also { it.getJSONObject("session").put("origin", "discovered") }
         var state = reduce(app(), frame).state

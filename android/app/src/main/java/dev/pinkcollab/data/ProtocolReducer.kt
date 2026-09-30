@@ -41,12 +41,13 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
             require(session.id == id && session.hostId == hostId)
             sessions = sessions.filterNot { it.id == id } + session
             if (type == "session_snapshot") {
-                loadHistory = frame.getBoolean("hasHistory")
+                val firstPage = frame.optJSONObject("history")?.let(::historyPageState)
+                loadHistory = frame.getBoolean("hasHistory") && firstPage == null
                 detail = SessionDetail(session = session, model = runtime?.optJSONObject("model")?.modelInfo(),
                     snapshotToken = UUID.randomUUID().toString(),
                     operations = frame.getJSONArray("operations").objects().map { it.receipt() },
                     liveItems = frame.getJSONArray("timeline").objects().map { it.item() },
-                    savedHistory = if (loadHistory) SavedHistory.Loading else SavedHistory.None)
+                    savedHistory = firstPage ?: if (loadHistory) SavedHistory.Loading else SavedHistory.None)
             } else if (before != null && before.snapshotToken != null) {
                 val generationChanged = before.session.generation != session.generation
                 loadHistory = frame.optBoolean("hasHistory") &&

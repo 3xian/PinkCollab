@@ -43,6 +43,9 @@ import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import dev.pinkcollab.ui.theme.Base0
+import dev.pinkcollab.ui.theme.SmallButtonHeight
+import dev.pinkcollab.ui.theme.SmallButtonPadding
+import dev.pinkcollab.ui.theme.SmallButtons
 import dev.pinkcollab.ui.theme.PrimaryButton
 import dev.pinkcollab.ui.theme.Purple700
 import dev.pinkcollab.ui.theme.TextMid
@@ -197,13 +200,20 @@ private fun PairHostSheet(
                 )
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            PrimaryButton(onClick = pair, enabled = url.isNotBlank() && token.isNotBlank() && !busy) {
-                if (busy) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.size(8.dp))
+        SmallButtons {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                PrimaryButton(
+                    onClick = pair,
+                    enabled = url.isNotBlank() && token.isNotBlank() && !busy,
+                    modifier = Modifier.height(SmallButtonHeight),
+                    contentPadding = SmallButtonPadding,
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.size(8.dp))
+                    }
+                    Text(if (busy) "Pairing…" else "Pair")
                 }
-                Text(if (busy) "Pairing…" else "Pair")
             }
         }
     }

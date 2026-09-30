@@ -2,6 +2,7 @@ package dev.pinkcollab.ui
 
 import android.net.Uri
 import dev.pinkcollab.data.AttentionResponse
+import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.OperationReceipt
@@ -23,6 +24,7 @@ internal data class SessionPageState(
     val refreshError: String? = null,
     val historyItems: List<TimelineItem>? = null,
     val summary: Session? = null,
+    val usage: LoadState<dev.pinkcollab.data.UsageSnapshot>? = null,
 )
 
 /** Connection recovery waits for a fresh snapshot; old request errors no longer describe it. */
@@ -30,6 +32,16 @@ internal fun sessionHistoryError(detail: SessionDetail, host: HostState?, refres
     if (host?.connected != true) return null
     if (detail.snapshotToken == null) return refreshError
     return if (detail.savedHistory == SavedHistory.Failed) "Could not load message history" else null
+}
+
+internal fun sessionSyncMessage(host: HostState?, hasSnapshot: Boolean): String = when (host?.connection) {
+    ConnectionState.Connecting -> "Connecting to ${host.paired.host.name}…"
+    ConnectionState.Reconnecting -> "Reconnecting to ${host.paired.host.name}…"
+    ConnectionState.Synchronizing -> "Syncing sessions…"
+    ConnectionState.AuthenticationRequired -> "Sign-in required. Open hosts to reconnect."
+    ConnectionState.UpgradeRequired -> "Update required. Open hosts for details."
+    is ConnectionState.Offline -> "Host offline. Waiting for a connection…"
+    else -> if (hasSnapshot) "Loading message history…" else "Opening conversation…"
 }
 
 internal sealed interface SessionAction {
@@ -41,6 +53,7 @@ internal sealed interface SessionAction {
     data class Command(val command: SessionUserCommand) : SessionAction
     data class Respond(val response: AttentionResponse) : SessionAction
     data class LoadModels(val force: Boolean) : SessionAction
+    data object LoadUsage : SessionAction
     data object LoadEarlierHistory : SessionAction
 }
 
