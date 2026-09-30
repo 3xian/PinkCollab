@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.PlatformTextStyle
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
+import dev.chrisbanes.haze.HazeState
 
 @Composable
 internal fun SessionPage(
@@ -50,6 +51,7 @@ internal fun SessionPage(
     onAction: (SessionAction) -> Unit,
     onApplyModelSettings: (ModelSettingsChanges) -> Boolean,
     isActive: Boolean = true,
+    isVisible: Boolean = true,
 ) {
     val load = state.detail
     val host = state.host.takeIf { load is LoadState.Ready }
@@ -150,6 +152,7 @@ internal fun SessionPage(
     }
     val density = LocalDensity.current
     val composerClearance = with(density) { composerHeightPx.toDp() } + 12.dp
+    val backdropState = remember(session.id) { HazeState() }
     val imeInsets = WindowInsets.ime
     val navigationInsets = WindowInsets.navigationBars
     // IME insets animate every frame. Moving the composer during placement keeps that
@@ -186,7 +189,8 @@ internal fun SessionPage(
             typography = SessionTypography,
         ) {
         LazyColumn(
-            Modifier.fillMaxSize(),
+            Modifier.fillMaxSize()
+                .composerBackdropSource(backdropState, isVisible),
             state = timelineState,
             contentPadding = PaddingValues(
                 top = 8.dp,
@@ -268,20 +272,13 @@ internal fun SessionPage(
             TimelineLoadingState(Modifier.padding(bottom = composerClearance)
                 .testTag(if (load == LoadState.Loading) "sessionLoading" else "historyLoading"))
         }
-        Box(
-            Modifier
+        ComposerBackdrop(
+            state = backdropState,
+            clearance = composerClearance,
+            isVisible = isVisible,
+            modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .then(keyboardOffset)
-                .fillMaxWidth()
-                .height(composerClearance + 32.dp)
-                .background(
-                    Brush.verticalGradient(
-                        0.00f to Color.Transparent,
-                        // Reach the work-status strip already dimmed, then fade to black below it.
-                        (32.dp / (composerClearance + 32.dp)) to Color.Black.copy(alpha = 0.60f),
-                        1.00f to Color.Black,
-                    ),
-                ),
+                .then(keyboardOffset),
         )
         Column(
             Modifier
