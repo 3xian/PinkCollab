@@ -1,6 +1,6 @@
 # Development
 
-Build the Android app and Gateway from the same checkout. Requirements: Rust 1.89+, JDK 17, Android SDK 36, and Node.js 18+ for npm and website checks. Publishing is in [Releases](npm-release.md).
+Build the Android app and Gateway from the same checkout. Requirements: Rust 1.89+, JDK 17, Android SDK 36, and Node.js 18+ for npm and website checks.
 
 ## Run the Gateway during development
 
@@ -21,7 +21,7 @@ From `gateway/`:
 cargo build --release --locked --bin pinkcollab-gateway
 ```
 
-Binary: `target/release/pinkcollab-gateway` (`.exe` on Windows). Run `./target/release/pinkcollab-gateway setup` for guided setup, or `./target/release/pinkcollab-gateway service install` to update an existing [background service](deployment.md#run-as-a-background-service). The installer copies it to a stable user directory. When registering a service manually, copy it out of `target/` yourself.
+Binary: `target/release/pinkcollab-gateway` (`.exe` on Windows).
 
 ## Build Android
 
@@ -32,7 +32,7 @@ sh ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-On Windows use `gradlew.bat`; set `sdk.dir` in `android/local.properties` or `ANDROID_HOME`. Debug and release APKs use different signing keys, so switching requires uninstalling the app and loses phone-side pairings. Revoke the old host credential separately. Release signing: [Releases](npm-release.md).
+On Windows use `gradlew.bat`; set `sdk.dir` in `android/local.properties` or `ANDROID_HOME`. Debug and release APKs use different signing keys, so switching requires uninstalling the app and loses phone-side pairings. Release signing: [Releases](npm-release.md).
 
 ## Validation
 
@@ -48,7 +48,6 @@ Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smok
 
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
-Android performance findings, optimization decisions, and validation evidence: [Android performance review](android-performance.md).
 
 From the repository root:
 
@@ -63,6 +62,6 @@ API changes must match the [protocol](protocol.md).
 
 ## Discovery regression checks
 
-`cargo test --all-features --locked` includes the external-OMP discovery/adoption fixtures. `cargo test --all-features --locked --test discovery` isolates the REST, history, race and restart cases. If Windows has the normal debug executable running, pass `--target-dir target-discovery` to Cargo instead of stopping that service. Run Android unit tests and `:app:assembleDebugAndroidTest` to compile the device suites; run `:app:connectedDebugAndroidTest` only with an attached test device. Storage-format evidence and supported scope are recorded in [OMP discovery](omp-discovery.md).
+`cargo test --all-features --locked` includes the external-OMP discovery/adoption fixtures. `cargo test --all-features --locked --test discovery` isolates the REST, history, race and restart cases. If Windows has the normal debug executable running, pass `--target-dir target-discovery` to Cargo instead of stopping that service. Run Android unit tests and `:app:assembleDebugAndroidTest` to compile the device suites; run `:app:connectedDebugAndroidTest` only with an attached test device.
 
 With OMP installed, run `cargo test --all-features --locked --test discovery real_omp_resumes -- --ignored` for a real resume without a provider request. Set `OMP_EXECUTABLE` when it is not on PATH.

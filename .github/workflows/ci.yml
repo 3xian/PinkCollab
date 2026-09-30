@@ -24,7 +24,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.value }}
     steps:
       - uses: actions/checkout@v5
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         with:
           fetch-depth: 0
       - name: Check comparison baseline
@@ -64,7 +64,7 @@ jobs:
               - 'docs/protocol.md'
       - name: Export release cache matrix
         id: matrix
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: echo "value=$(node npm/scripts/build-matrix.mjs)" >> "$GITHUB_OUTPUT"
   npm:
     strategy:
@@ -112,15 +112,14 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - run: cargo test --all-features --locked
-      - if: github.event_name == 'pull_request'
-        run: cargo build --locked --bin pinkcollab-gateway
-      - if: github.event_name != 'pull_request'
-        run: cargo build --release --locked --bin pinkcollab-gateway
+      # Release binaries are built for all five supported targets by release-cache
+      # on pushes/manual runs and by Release on tags. Keep native checks in the test profile.
+      - run: cargo build --locked --bin pinkcollab-gateway
   # Tag caches are scoped to that tag. Populate the default-branch caches with
   # the same runners, targets and build flags used by Release.
   release-cache:
     needs: changes
-    if: github.event_name == 'push' && needs.changes.outputs.gateway == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.gateway == 'true'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
@@ -133,6 +132,10 @@ jobs:
   android:
     needs: changes
     if: ${{ needs.changes.outputs.android == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [checks, device-tests]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -156,23 +159,57 @@ jobs:
           "$sdkmanager" 'platforms;android-36' 'build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v5
       - run: chmod +x gradlew
-      - run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain
+      - name: Build Android and run unit tests and lint
+        if: matrix.suite == 'checks'
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --console=plain
+      - uses: actions/upload-artifact@v7
+        if: matrix.suite == 'checks'
+        with:
+          name: pinkcollab-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
       - name: Enable KVM for Android emulator
+        if: matrix.suite == 'device-tests'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Run Android device tests
+      - name: Cache clean emulator snapshot
+        id: avd-cache
+        if: matrix.suite == 'device-tests'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-${{ runner.os }}-${{ runner.arch }}-35-google_apis-x86_64-2048M-v1
+      # Save a clean snapshot before installing the app or running device tests.
+      - name: Create clean emulator snapshot
+        if: matrix.suite == 'device-tests' && steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           target: google_apis
           arch: x86_64
           ram-size: 2048M
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          script: echo "Clean emulator snapshot ready"
+      - name: Run Android device tests
+        if: matrix.suite == 'device-tests'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          ram-size: 2048M
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: android
           script: ./gradlew :app:connectedDebugAndroidTest --console=plain
       - name: Upload device test report
-        if: failure()
+        if: failure() && matrix.suite == 'device-tests'
         uses: actions/upload-artifact@v7
         with:
           name: pinkcollab-android-device-tests
@@ -180,14 +217,10 @@ jobs:
             android/app/build/reports/androidTests/connected/**
             android/app/build/outputs/androidTest-results/connected/**
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v7
-        with:
-          name: pinkcollab-android-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
 
   ci-required:
     name: ci-required
-    needs: [changes, npm, website, gateway, android]
+    needs: [changes, npm, website, gateway, release-cache, android]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
@@ -199,6 +232,8 @@ jobs:
           WEBSITE_RESULT: ${{ needs.website.result }}
           GATEWAY_NEEDED: ${{ needs.changes.outputs.gateway }}
           GATEWAY_RESULT: ${{ needs.gateway.result }}
+          RELEASE_CACHE_NEEDED: ${{ github.event_name != 'pull_request' && needs.changes.outputs.gateway == 'true' }}
+          RELEASE_CACHE_RESULT: ${{ needs.release-cache.result }}
           ANDROID_NEEDED: ${{ needs.changes.outputs.android }}
           ANDROID_RESULT: ${{ needs.android.result }}
         run: |
@@ -211,6 +246,10 @@ jobs:
           case "$GATEWAY_NEEDED:$GATEWAY_RESULT" in
             true:success|false:skipped) ;;
             *) echo "::error::Gateway was required=$GATEWAY_NEEDED but ended with $GATEWAY_RESULT"; exit 1 ;;
+          esac
+          case "$RELEASE_CACHE_NEEDED:$RELEASE_CACHE_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "::error::Gateway release builds were required=$RELEASE_CACHE_NEEDED but ended with $RELEASE_CACHE_RESULT"; exit 1 ;;
           esac
           case "$ANDROID_NEEDED:$ANDROID_RESULT" in
             true:success|false:skipped) ;;
