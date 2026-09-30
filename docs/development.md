@@ -48,7 +48,7 @@ Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smok
 
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
-CI cold-boots a fresh API 35 AOSP (`default`) emulator with SwiftShader GLES and Vulkan disabled. AOSP removes unrelated Google launcher/services failures; disabling snapshots avoids restoring stale renderer state during system UI checks. The emulator is pinned to 36.1.9 (build 13823996) because of the [37.1.11 Linux GLES host crash](https://github.com/bdero/flutter_scene/issues/314); exercise the full device suite before changing this pin.
+CI cold-boots a fresh API 35 AOSP (`default`) emulator with SwANGLE (ANGLE on SwiftShader) and guest Vulkan disabled. AOSP removes unrelated Google launcher/services failures; disabling snapshots avoids restoring stale renderer state during system UI checks. The emulator is pinned to 36.1.9 (build 13823996) because of the [37.1.11 Linux GLES host crash](https://github.com/bdero/flutter_scene/issues/314); exercise the full device suite before changing this pin.
 
 CI also runs the inline-code rendering regression through the optimized `releaseTest` variant:
 

@@ -186,10 +186,10 @@ jobs:
           arch: x86_64
           ram-size: 2048M
           force-avd-creation: true
-          emulator-options: -no-snapshot -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot -no-window -gpu swangle_indirect -feature -Vulkan -noaudio -no-boot-anim -camera-back none
           working-directory: android
           script: |
-            ./gradlew :app:connectedDebugAndroidTest --console=plain
+            ./gradlew :app:connectedDebugAndroidTest --console=plain || { sudo dmesg; exit 1; }
             ./gradlew :app:connectedReleaseTestAndroidTest -PtestBuildType=releaseTest -Pandroid.testInstrumentationRunnerArguments.class=dev.pinkcollab.ui.ReleaseMarkdownDeviceTest --console=plain
       - name: Upload device test report
         if: failure() && matrix.suite == 'device-tests'
