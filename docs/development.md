@@ -49,6 +49,14 @@ Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smok
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
 
+CI also runs the inline-code rendering regression through the optimized `releaseTest` variant:
+
+```sh
+sh ./gradlew :app:connectedReleaseTestAndroidTest -PtestBuildType=releaseTest -Pandroid.testInstrumentationRunnerArguments.class=dev.pinkcollab.ui.ReleaseMarkdownDeviceTest
+```
+
+This variant inherits release R8/resource shrinking, uses debug signing, and installs as `dev.pinkcollab.releaseTest` alongside the production app. Its test-only `Spanned` probe preserves the instrumentation entry point without keeping renderer or Markwon internals alive. Test harness rules preserve shared tracing/Kotlin APIs; production release rules and signing are unchanged. Run this focused test, not the debug UI suite, against the optimized variant. The regression must fail if the `CorePlugin` class-boundary keep rule is removed.
+
 From the repository root:
 
 ```sh

@@ -7,11 +7,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Assume.assumeFalse
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -23,6 +25,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
@@ -136,8 +140,6 @@ class SessionHistoryDeviceTest {
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
-        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Load earlier messages"))
-        compose.onNodeWithText("Load earlier messages").assertExists()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Earlier question"))
         compose.onNodeWithText("Earlier question").assertExists()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Live updates", substring = true))
@@ -145,6 +147,119 @@ class SessionHistoryDeviceTest {
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Current question"))
         compose.onNodeWithText("Current question").assertExists()
         compose.onNodeWithText("Show saved messages").assertDoesNotExist()
+    }
+
+    @Test fun pulling_down_loads_earlier_history_once_and_preserves_reading_position() {
+        val messages = (0..30).map { saved.copy(id = "saved-$it", text = "Saved question $it") }
+        val detail = mutableStateOf(SessionDetail(session,
+            savedHistory = SavedHistory.Ready(null, messages, "older")))
+        val activity = mutableStateOf(SessionActivity())
+        var requests = 0
+        compose.setContent {
+            SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
+                activity.value, null, null), onAction = {
+                if (it == SessionAction.LoadEarlierHistory) {
+                    requests++
+                    activity.value = SessionActivity(history = true)
+                }
+            }, onApplyModelSettings = { true })
+        }
+        val timeline = compose.onNodeWithTag("sessionTimeline")
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle { assertEquals(0, requests) }
+        timeline.performScrollToNode(hasText("Saved question 0"))
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle { assertEquals(1, requests) }
+        compose.onNodeWithTag("historyPullIndicator").assertIsDisplayed()
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle {
+            assertEquals(1, requests)
+            val earlier = (0..20).map { saved.copy(id = "older-$it", text = "Older question $it") }
+            detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, earlier + messages, null))
+            activity.value = SessionActivity()
+        }
+        compose.onNodeWithText("Saved question 0").assertIsDisplayed()
+        compose.onNodeWithTag("historyPullIndicator").assertDoesNotExist()
+        timeline.performScrollToNode(hasText("Older question 0"))
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle { assertEquals(1, requests) }
+    }
+
+    @Test fun accessible_history_action_preserves_position_and_tracks_availability() {
+        val messages = (0..30).map { saved.copy(id = "saved-$it", text = "Saved question $it") }
+        val detail = mutableStateOf(SessionDetail(session,
+            savedHistory = SavedHistory.Ready(null, messages, "older")))
+        val activity = mutableStateOf(SessionActivity())
+        val connection = mutableStateOf<ConnectionState>(ConnectionState.Online(1L))
+        val active = mutableStateOf(true)
+        var requests = 0
+        compose.setContent {
+            SessionPage(SessionPageState(LoadState.Ready(detail.value),
+                host.copy(connection = connection.value), SessionDraft(), 0, activity.value, null, null),
+                onAction = {
+                    if (it == SessionAction.LoadEarlierHistory) {
+                        requests++
+                        activity.value = SessionActivity(history = true)
+                    }
+                }, onApplyModelSettings = { true }, isActive = active.value)
+        }
+        val timeline = compose.onNodeWithTag("sessionTimeline")
+        timeline.performScrollToNode(hasText("Saved question 0"))
+        val loadEarlier = timeline.fetchSemanticsNode().config[SemanticsActions.CustomActions]
+            .single { it.label == "Load earlier messages" }
+        compose.runOnIdle { assertTrue(loadEarlier.action()) }
+        compose.runOnIdle { assertEquals(1, requests) }
+        assertTrue(timeline.fetchSemanticsNode().config
+            .getOrElse(SemanticsActions.CustomActions) { emptyList() }.isEmpty())
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle {
+            assertEquals(1, requests)
+            val earlier = (0..20).map { saved.copy(id = "older-$it", text = "Older question $it") }
+            detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, earlier + messages, "more"))
+            activity.value = SessionActivity()
+        }
+        compose.onNodeWithText("Saved question 0").assertIsDisplayed()
+        for (unavailable in listOf("disconnected", "inactive", "exhausted")) {
+            compose.runOnIdle {
+                connection.value = if (unavailable == "disconnected") ConnectionState.Reconnecting
+                    else ConnectionState.Online(2L)
+                active.value = unavailable != "inactive"
+                if (unavailable == "exhausted") {
+                    detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, messages, null))
+                }
+            }
+            assertTrue(timeline.fetchSemanticsNode().config
+                .getOrElse(SemanticsActions.CustomActions) { emptyList() }.isEmpty())
+        }
+    }
+
+    @Test fun history_pull_is_disabled_without_more_messages_or_a_connected_active_session() {
+        val detail = mutableStateOf(SessionDetail(session,
+            savedHistory = SavedHistory.Ready(null, listOf(saved), null)))
+        val connection = mutableStateOf<ConnectionState>(ConnectionState.Online(1L))
+        val active = mutableStateOf(true)
+        var requests = 0
+        compose.setContent {
+            SessionPage(SessionPageState(LoadState.Ready(detail.value), host.copy(connection = connection.value),
+                SessionDraft(), 0, SessionActivity(), null, null),
+                onAction = { if (it == SessionAction.LoadEarlierHistory) requests++ },
+                onApplyModelSettings = { true }, isActive = active.value)
+        }
+        val timeline = compose.onNodeWithTag("sessionTimeline")
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle {
+            assertEquals(0, requests)
+            detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, listOf(saved), "older"))
+            connection.value = ConnectionState.Reconnecting
+        }
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle {
+            assertEquals(0, requests)
+            connection.value = ConnectionState.Online(2L)
+            active.value = false
+        }
+        timeline.performTouchInput { swipeDown() }
+        compose.runOnIdle { assertEquals(0, requests) }
     }
 
     @Test fun history_in_flight_does_not_claim_there_are_no_saved_messages() {

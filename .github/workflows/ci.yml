@@ -196,7 +196,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
           script: echo "Clean emulator snapshot ready"
-      - name: Run Android device tests
+      - name: Run debug and optimized Android device tests
         if: matrix.suite == 'device-tests'
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -207,7 +207,9 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           working-directory: android
-          script: ./gradlew :app:connectedDebugAndroidTest --console=plain
+          script: |
+            ./gradlew :app:connectedDebugAndroidTest --console=plain
+            ./gradlew :app:connectedReleaseTestAndroidTest -PtestBuildType=releaseTest -Pandroid.testInstrumentationRunnerArguments.class=dev.pinkcollab.ui.ReleaseMarkdownDeviceTest --console=plain
       - name: Upload device test report
         if: failure() && matrix.suite == 'device-tests'
         uses: actions/upload-artifact@v7

@@ -58,9 +58,10 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 2000002
-        versionName = "2.0.2"
+        versionCode = 2000003
+        versionName = "2.0.3"
     }
+    testBuildType = providers.gradleProperty("testBuildType").getOrElse("debug")
     signingConfigs {
         releaseSigning?.let { values ->
             create("release") {
@@ -77,6 +78,14 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
+        create("releaseTest") {
+            initWith(getByName("release"))
+            proguardFile("release-test-rules.pro")
+            signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".releaseTest"
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
         }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -102,6 +111,7 @@ dependencies {
     // The unit tests exercise the wire parsing, and `android.jar` only ships an org.json stub.
     testImplementation("org.json:json:20250517")
     androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestCompileOnly("com.google.errorprone:error_prone_annotations:2.28.0")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2025.05.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

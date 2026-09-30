@@ -18,6 +18,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -35,6 +38,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,6 +50,7 @@ import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 internal fun SessionPage(
     state: SessionPageState,
     onAction: (SessionAction) -> Unit,
@@ -65,7 +71,6 @@ internal fun SessionPage(
     val onCommand: (SessionUserCommand) -> Unit = { onAction(SessionAction.Command(it)) }
     val onRespond: (AttentionResponse) -> Unit = { onAction(SessionAction.Respond(it)) }
     val onLoadModels: (Boolean) -> Unit = { onAction(SessionAction.LoadModels(it)) }
-    val onLoadEarlier: () -> Unit = { onAction(SessionAction.LoadEarlierHistory) }
     // Keep the composer mounted while the selected session's details arrive.
     // The summary supplies identity only; it does not enable runtime actions.
     val detail = (load as? LoadState.Ready)?.value ?: SessionDetail(
@@ -115,7 +120,17 @@ internal fun SessionPage(
         (savedHistory == SavedHistory.Loading || savedHistory == SavedHistory.Failed) && historyTimeline.isEmpty() &&
         liveTimeline.isEmpty() && detail.streaming.isBlank() && session.attention == null
     val timelineState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE)
+    val historyPullState = rememberPullToRefreshState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
+    val canLoadEarlier = isActive && savedHistory.nextCursor != null &&
+        host?.connected == true && !activity.history
+    val onLoadEarlier: () -> Boolean = {
+        if (canLoadEarlier) {
+            followTimeline = false
+            onAction(SessionAction.LoadEarlierHistory)
+            true
+        } else false
+    }
     LaunchedEffect(isActive) {
         if (isActive) followTimeline = true
     }
@@ -187,81 +202,95 @@ internal fun SessionPage(
             colorScheme = MaterialTheme.colorScheme,
             typography = SessionTypography,
         ) {
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            state = timelineState,
-            contentPadding = PaddingValues(
-                top = 8.dp,
-                // Keeps the last timeline item clear of the floating composer card.
-                bottom = composerClearance,
-            ),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            if (savedHistory.nextCursor != null) item(key = "load-earlier") {
-                TextButton(onClick = onLoadEarlier, modifier = Modifier.fillMaxWidth(), enabled = !activity.history) {
-                    Text("Load earlier messages")
+            Box(Modifier.fillMaxSize().pullToRefresh(
+                state = historyPullState,
+                isRefreshing = activity.history,
+                enabled = canLoadEarlier,
+                onRefresh = { onLoadEarlier() },
+            )) {
+                LazyColumn(
+                    Modifier.fillMaxSize().testTag("sessionTimeline").semantics {
+                        if (canLoadEarlier) {
+                            customActions = listOf(CustomAccessibilityAction("Load earlier messages", onLoadEarlier))
+                        }
+                    },
+                    state = timelineState,
+                    contentPadding = PaddingValues(
+                        top = 8.dp,
+                        // Keeps the last timeline item clear of the floating composer card.
+                        bottom = composerClearance,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    items(historyTimeline, key = { "saved:${it.id}" }, contentType = { it::class }) { item ->
+                        DisplayItem(item, renderer)
+                    }
+                    if (session.runtimeAttached && hasSavedMessages) item(key = "live-divider") {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                            HorizontalDivider(color = TextMid.copy(alpha = 0.4f))
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Live updates (saved messages above may repeat)",
+                                style = PinkCollabTypography.labelMedium,
+                                color = TextMid,
+                            )
+                        }
+                    }
+                    if (session.runtimeAttached) {
+                        items(liveTimeline, key = { "live:${it.id}" }, contentType = { it::class }) { item ->
+                            DisplayItem(item, renderer, liveActivity = host?.connected == true &&
+                                session.status == SessionStatus.Running)
+                        }
+                    }
+                    if (session.runtimeAttached && detail.streaming.isNotBlank()) item(key = "streaming") {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .timelineBand(tint = Purple400, tintAlpha = 0.055f)
+                                .padding(horizontal = 20.dp, vertical = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                AgentHeader(detail.model, replying = true)
+                                Spacer(Modifier.height(4.dp))
+                                Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
+                            }
+                        }
+                    }
+                    detail.operations.lastOrNull()?.let { receipt ->
+                        operationStatusText(receipt)?.let { text ->
+                            item(key = "operation-${receipt.commandId}") {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                ) {
+                                    Text(text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                    session.attention?.let { attention -> item(key = "attention") { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
+                    if (historyError != null) item(key = "history-failed") {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                            Text(historyError, color = TextMid,
+                                style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = onRetry) { Text("Retry") }
+                        }
+                    }
+                    // A separate end anchor reaches the bottom even when the final message is taller than the viewport.
+                    item(key = "timeline-end") { Spacer(Modifier.height(1.dp)) }
                 }
-            }
-            items(historyTimeline, key = { "saved:${it.id}" }, contentType = { it::class }) { item ->
-                DisplayItem(item, renderer)
-            }
-            if (session.runtimeAttached && hasSavedMessages) item(key = "live-divider") {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                    HorizontalDivider(color = TextMid.copy(alpha = 0.4f))
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Live updates (saved messages above may repeat)",
-                        style = PinkCollabTypography.labelMedium,
-                        color = TextMid,
+                if (savedHistory.nextCursor != null || activity.history) {
+                    PullToRefreshDefaults.Indicator(
+                        state = historyPullState,
+                        isRefreshing = activity.history,
+                        modifier = Modifier.align(Alignment.TopCenter).testTag("historyPullIndicator"),
+                        color = BrandPink,
                     )
                 }
             }
-            if (session.runtimeAttached) {
-                items(liveTimeline, key = { "live:${it.id}" }, contentType = { it::class }) { item ->
-                    DisplayItem(item, renderer, liveActivity = host?.connected == true &&
-                        session.status == SessionStatus.Running)
-                }
-            }
-            if (session.runtimeAttached && detail.streaming.isNotBlank()) item(key = "streaming") {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .timelineBand(tint = Purple400, tintAlpha = 0.055f)
-                        .padding(horizontal = 20.dp, vertical = 18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        AgentHeader(detail.model, replying = true)
-                        Spacer(Modifier.height(4.dp))
-                        Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
-                    }
-                }
-            }
-            detail.operations.lastOrNull()?.let { receipt ->
-                operationStatusText(receipt)?.let { text ->
-                    item(key = "operation-${receipt.commandId}") {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        ) {
-                            Text(text, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            }
-            session.attention?.let { attention -> item(key = "attention") { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
-            if (historyError != null) item(key = "history-failed") {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
-                    Text(historyError, color = TextMid,
-                        style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = onRetry) { Text("Retry") }
-                }
-            }
-            // A separate end anchor reaches the bottom even when the final message is taller than the viewport.
-            item(key = "timeline-end") { Spacer(Modifier.height(1.dp)) }
-        }
         }
         if (load is LoadState.Failed) {
             EmptyState("Could not load this session", load.message, "Retry", onRetry,

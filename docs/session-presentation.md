@@ -301,7 +301,7 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 | Session detail loading | Loading surface; preserve composer/draft; do not mount work status or enable actions from summary data |
 | Session detail failed | Failure surface with Retry; preserve draft |
 | Initial history loading with no visible content | History-loading surface, not “no saved messages” |
-| Earlier history available | Load earlier messages control; disabled while loading that page |
+| Earlier history available | Pull down at the top, or invoke the timeline's “Load earlier messages” accessibility action; both preserve reading position and are unavailable while loading, disconnected, or inactive |
 | History failed or refresh error present | Retry notice; retained messages remain available |
 | Detached session with known-empty history | No saved messages yet |
 | Attached idle session with no messages or pending content | Invitation to start the conversation |
