@@ -1,6 +1,7 @@
 package dev.pinkcollab.ui
 
 import android.view.KeyEvent
+import android.accessibilityservice.AccessibilityServiceInfo
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import androidx.compose.foundation.layout.Box
@@ -104,6 +105,10 @@ class AppUpdateDeviceTest {
             }
         }
         appOp("allow")
+        val originalAccessibilityFlags = instrumentation.uiAutomation.serviceInfo.flags
+        instrumentation.uiAutomation.serviceInfo = instrumentation.uiAutomation.serviceInfo.apply {
+            flags = flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+        }
         try {
             compose.setContent {
                 AppUpdateFlow(AppRelease("v3.0.0", 3_000_000, "", "https://github.com/apk"),
@@ -113,11 +118,13 @@ class AppUpdateDeviceTest {
             compose.waitUntil(timeoutMillis = 10_000) {
                 val root = instrumentation.uiAutomation.rootInActiveWindow
                 root?.packageName?.toString()?.contains("packageinstaller") == true &&
-                    root.findAccessibilityNodeInfosByText("PinkCollab").isNotEmpty() &&
-                    (root.findAccessibilityNodeInfosByText("Install").isNotEmpty() ||
-                        root.findAccessibilityNodeInfosByText("Update").isNotEmpty())
+                    root.findAccessibilityNodeInfosByText(context.applicationInfo.loadLabel(context.packageManager).toString()).isNotEmpty() &&
+                    root.findAccessibilityNodeInfosByViewId("android:id/button1").any { it.isEnabled }
             }
         } finally {
+            instrumentation.uiAutomation.serviceInfo = instrumentation.uiAutomation.serviceInfo.apply {
+                flags = originalAccessibilityFlags
+            }
             for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
                 instrumentation.uiAutomation.injectInputEvent(KeyEvent(action, KeyEvent.KEYCODE_BACK), true)
             }

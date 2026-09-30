@@ -61,7 +61,8 @@ class ComposerRailDeviceTest {
         val exited = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
             "", "", false, null)
         val selected = ModelInfo("provider", "test-model", "Test model")
-        var page by mutableStateOf(SessionPageState(LoadState.Ready(SessionDetail(exited)), host,
+        val initialDetail = SessionDetail(exited, snapshotToken = "subscription")
+        var page by mutableStateOf(SessionPageState(LoadState.Ready(initialDetail), host,
             SessionDraft(text = "hello again"), 0, SessionActivity(), null, null))
         val actions = mutableListOf<SessionAction>()
         var applied: ModelSettingsChanges? = null
@@ -78,12 +79,12 @@ class ComposerRailDeviceTest {
         compose.onNodeWithText("Start runtime").performClick()
         compose.runOnIdle {
             assertEquals(SessionAction.Command(SessionUserCommand.Start), actions.last())
-            page = page.copy(detail = LoadState.Ready(SessionDetail(exited.copy(status = SessionStatus.Starting))),
+            page = page.copy(detail = LoadState.Ready(initialDetail.copy(session = exited.copy(status = SessionStatus.Starting))),
                 activity = SessionActivity(action = true))
         }
         compose.onNodeWithText("Starting OMP…").assertExists()
         compose.runOnIdle {
-            page = page.copy(detail = LoadState.Ready(SessionDetail(exited.copy(status = SessionStatus.Idle,
+            page = page.copy(detail = LoadState.Ready(initialDetail.copy(session = exited.copy(status = SessionStatus.Idle,
                 runtimeAttached = true, generation = "next"))),
                 activity = SessionActivity())
         }
