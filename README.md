@@ -91,11 +91,9 @@ flowchart TD
 - [Protocol 3](docs/protocol.md): REST and WebSocket API contracts
 - [Session presentation](docs/session-presentation.md): session UI, status display, and interaction behavior
 - [Deployment and networking](docs/deployment.md): HTTPS access, pairing, background services, and Gateway CLI/configuration
-- [FAQ](#faq): common deployment and troubleshooting questions
 - [Development](docs/development.md): contributor setup, builds, and validation
 - [Releases](docs/npm-release.md): maintainer guide to signing and publishing Android, Gateway, and npm releases
 - [External OMP conversations](docs/omp-discovery.md): discovering and continuing host OMP history
-- [Windows background options](docs/windows-background-options.md): why the Gateway runs as a Windows service
 
 ## FAQ
 

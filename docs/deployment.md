@@ -86,6 +86,10 @@ The installer copies the currently executing native binary to a stable user dire
 
 On macOS this is a launchd user agent; it starts at login. Linux uses a systemd user service. Without user lingering it may stop on logout; `doctor` reports this, but PinkCollab never enables lingering automatically. Windows uses SCM with the current user's explicit credentials, never LocalSystem. Run installation in an administrator terminal as that same user and grant *Log on as a service* if Windows requires it. Passwordless accounts may need a Windows-supported service login credential or manual foreground operation. Non-interactive setup requires the Windows service to have been installed interactively already.
 
+### Windows background service
+
+PinkCollab uses a same-user Windows Service so the Gateway can start before login and survive logout. A per-user Task Scheduler logon task could avoid storing an account password and requiring administrator elevation, but would depend on an interactive user session. It is not implemented; adopting it would require lifecycle validation and an explicit change to the host availability contract.
+
 ### Remote-access diagnostics
 
 `setup` and `pinkcollab funnel` record the configured Funnel URL in `<data-dir>/funnel-url`. When it matches `public_url`, `status` and `doctor` check the Tailscale connection, hostname and Funnel mapping. This verifies the host configuration, not end-to-end reachability from a phone.
@@ -251,7 +255,7 @@ A completed session whose process has not exited still occupies a slot. Creating
 | Topic | Behavior |
 | --- | --- |
 | Windows executable lookup | Setup/init honor `PATHEXT` when resolving a bare executable name and persist the matched absolute entry, including its extension. |
-| Windows service | Management commands are cross-platform; the hidden `service-run` entry is Windows-only. PinkCollab uses a same-user SCM service rather than a Task Scheduler logon task; see [Windows background options](windows-background-options.md). |
+| Windows service | Management commands are cross-platform; the hidden `service-run` entry is Windows-only. PinkCollab uses a same-user SCM service; see [Windows background service](#windows-background-service). |
 | Windows paths | Workspace display strips the `\\?\` and `\\?\UNC\` prefixes from canonical paths. |
 | Unix permissions | The data directory is created mode `0700`, and new files mode `0600`, on Unix. Windows uses default ACLs. |
 | Stop signals | Unix `serve` stops on SIGINT or SIGTERM. Elsewhere it stops on Ctrl+C. The Windows service also stops on Service Control stop or shutdown. |
