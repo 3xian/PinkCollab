@@ -39,7 +39,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
 internal data class TasksScreenState(
-    val app: AppState,
+    val sessions: SessionListState,
+    val details: Map<SessionKey, SessionDetail>,
     val detailLoads: Map<SessionKey, LoadState<Unit>>,
     val modelLoads: Map<SessionKey, LoadState<ModelCatalog>>,
     val sessionOperations: Set<SessionOperationKey>,
@@ -61,7 +62,7 @@ internal data class TasksScreenActions(
 
 @Composable
 internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
-    val app = state.app
+    val hosts = state.sessions.hosts
     val detailLoads = state.detailLoads
     val modelLoads = state.modelLoads
     val sessionOperations = state.sessionOperations
@@ -74,23 +75,24 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
     val connectHost = actions.connectHost
     // Active sessions come first, by createdAt DESC to keep working sessions stable.
     // Inactive sessions follow by updatedAt DESC.
-    val sessions = app.hosts.values
-        .flatMap { it.sessions }
-        .sortedWith { a, b ->
+    val hostSessions = remember(hosts) { hosts.values.map { it.sessions } }
+    val sessions = remember(hostSessions) {
+        hostSessions.flatten().sortedWith { a, b ->
             when {
                 a.isActive != b.isActive -> if (a.isActive) -1 else 1
                 a.isActive -> compareTimestamps(b.createdAt, a.createdAt)
                 else -> compareTimestamps(b.updatedAt, a.updatedAt)
             }
         }
+    }
     val initialPage = sessions.indexOfFirst { SessionKey(it.hostId, it.id) == selectedSession }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
-    val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }
+    val sessionKeys = remember(sessions) { sessions.map { SessionKey(it.hostId, it.id) } }
     val pagerKeys = remember(sessionKeys) { sessionKeys.map { it.pagerKey() } }
     val displayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
     SideEffect {
         displayCache.keys.toList().filter { it !in sessionKeys }.forEach(displayCache::remove)
-        app.details.forEach { (key, detail) ->
+        state.details.forEach { (key, detail) ->
             if (key in sessionKeys) {
                 sessionDetailForDisplay(detail, displayCache[key])?.let { displayCache[key] = it }
             }
@@ -99,7 +101,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
 
     val scope = rememberCoroutineScope()
     val latestSessions by rememberUpdatedState(sessions)
-    val latestHosts by rememberUpdatedState(app.hosts)
+    val latestHosts by rememberUpdatedState(hosts)
     val latestActions by rememberUpdatedState(actions)
     LaunchedEffect(pagerState) {
         var lastRequested: Pair<SessionKey, String?>? = null
@@ -120,32 +122,41 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
         }
     }
 
+    // Do not publish the previous page while a navigation target is missing or being applied.
+    var pendingSelection by remember(selectedSession) { mutableStateOf(selectedSession) }
     LaunchedEffect(selectedSession, sessionKeys) {
         val target = sessionKeys.indexOf(selectedSession)
-        if (target >= 0 && target != pagerState.currentPage) pagerState.scrollToPage(target)
+        if (target >= 0) {
+            pendingSelection = selectedSession
+            if (target != pagerState.currentPage) pagerState.scrollToPage(target)
+            pendingSelection = null
+        }
     }
-    LaunchedEffect(pagerState.settledPage, sessionKeys) {
-        sessionKeys.getOrNull(pagerState.settledPage)?.let(onSessionSelected)
+    LaunchedEffect(pagerState, selectedSession, sessionKeys) {
+        snapshotFlow {
+            if (pendingSelection != null || pagerState.isScrollInProgress) null
+            else sessionKeys.getOrNull(pagerState.settledPage)
+        }.collect { key -> key?.let(onSessionSelected) }
     }
 
     Column(Modifier.fillMaxSize()) {
         TasksTopBar(
             activeTaskCount = sessions.count { it.isActive },
             taskCount = sessions.size,
-            showWorkspaces = app.hosts.isNotEmpty(),
+            showWorkspaces = hosts.isNotEmpty(),
             openResources = openResources,
             checkForUpdates = actions.checkForUpdates,
             showVersion = actions.showVersion,
         )
         TasksPagerBar(
-            hosts = app.hosts,
+            hosts = hosts,
             sessions = sessions,
             currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
             selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
         )
         if (sessions.isEmpty()) {
             Box(Modifier.weight(1f)) {
-                when (app.taskListLoadState) {
+                when (state.sessions.loadState) {
                     TaskListLoadState.Loading -> TaskListLoadingState()
                     TaskListLoadState.Unavailable -> EmptyState(
                         title = "Sessions unavailable",
@@ -155,7 +166,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                         modifier = Modifier.offset(y = (-56).dp),
                     )
 
-                    TaskListLoadState.Ready -> if (app.hosts.isEmpty()) {
+                    TaskListLoadState.Ready -> if (hosts.isEmpty()) {
                         BringOmpEmptyState(connectHost = connectHost)
                     } else {
                         EmptyState(
@@ -177,7 +188,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
             ) { pageIndex ->
                 val session = sessions[pageIndex]
                 val key = SessionKey(session.hostId, session.id)
-                val detail = app.details[key]
+                val detail = state.details[key]
                 val displayed = sessionDetailForDisplay(detail, displayCache[key])
                 val detailState = displayed?.let { LoadState.Ready(it.detail) }
                     ?: when (val request = detailLoads[key]) {
@@ -189,7 +200,7 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                     state = SessionPageState(
                         detail = detailState,
                         summary = session,
-                        host = app.hosts[session.hostId].takeIf { detail != null },
+                        host = hosts[session.hostId].takeIf { detail != null },
                         draft = drafts[key] ?: SessionDraft(),
                         selectingFiles = fileSelections[key] ?: 0,
                         activity = sessionOperations.activity(key),

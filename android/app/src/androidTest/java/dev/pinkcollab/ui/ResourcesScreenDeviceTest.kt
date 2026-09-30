@@ -27,10 +27,10 @@ class ResourcesScreenDeviceTest {
         val second = "https://beta.example/longer"
         compose.setContent {
             ResourcesScreen(
-                AppState(hosts = mapOf(
+                navigationState(AppState(hosts = mapOf(
                     "a" to host("a", "Alpha", first),
                     "b" to host("b", "Beta", second),
-                )),
+                ))),
                 hostBusy = { false },
                 browse = { _, _ -> },
                 pair = {},

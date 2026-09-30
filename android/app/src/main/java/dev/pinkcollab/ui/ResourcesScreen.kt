@@ -32,7 +32,7 @@ import dev.pinkcollab.ui.theme.*
 
 @Composable
 internal fun ResourcesScreen(
-    app: AppState,
+    app: NavigationState,
     hostBusy: (String) -> Boolean,
     browse: (String, String) -> Unit,
     pair: () -> Unit,
@@ -71,10 +71,10 @@ internal fun ResourcesScreen(
         contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        items(app.hosts.values.toList(), key = { it.paired.host.id }) { host ->
-            val hostId = host.paired.host.id
+        items(app.hosts.values.toList(), key = { it.host.id }) { host ->
+            val hostId = host.host.id
             val busy = hostBusy(hostId)
-            val activeTasks = host.sessions.count { it.isActive }
+            val activeTasks = host.activeTasks
             val connectionPending = host.connection == ConnectionState.Connecting ||
                 host.connection == ConnectionState.Synchronizing ||
                 host.connection == ConnectionState.Reconnecting
@@ -100,9 +100,9 @@ internal fun ResourcesScreen(
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(host.paired.host.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(host.host.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                             Text(
-                                "${host.paired.host.os} · $activeTasks active",
+                                "${host.host.os} · $activeTasks active",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextMid,
                                 maxLines = 1,
@@ -117,7 +117,7 @@ internal fun ResourcesScreen(
                             Icon(Icons.Outlined.Refresh, "Refresh host")
                         }
                         IconButton(
-                            onClick = rememberHapticOnClick { hostPendingRemoval = host.paired.host },
+                            onClick = rememberHapticOnClick { hostPendingRemoval = host.host },
                             enabled = !busy,
                             colors = IconButtonDefaults.iconButtonColors(contentColor = Gray400),
                         ) {
@@ -125,10 +125,10 @@ internal fun ResourcesScreen(
                         }
                     }
                     Spacer(Modifier.height(2.dp))
-                    HostUrlRow(host.paired.url)
+                    HostUrlRow(host.url)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "OMP ${host.paired.host.ompVersion} · Gateway ${host.paired.host.gatewayVersion}",
+                            "OMP ${host.host.ompVersion} · Gateway ${host.host.gatewayVersion}",
                             Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall,
                             color = Gray400,

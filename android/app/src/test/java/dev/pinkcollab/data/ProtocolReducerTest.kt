@@ -99,6 +99,26 @@ class ProtocolReducerTest {
         }
     }
 
+    @Test fun timeline_batch_preserves_order_and_last_duplicate_upsert_wins() {
+        var state = reduce(app(), session()).state
+        val first = patch().put("upsert", JSONArray()
+            .put(item("first").put("id", "one"))
+            .put(item("second").put("id", "two")))
+        state = reduce(state, first).state
+        val next = patch().put("remove", JSONArray().put("one"))
+            .put("upsert", JSONArray()
+                .put(item("updated second").put("id", "two"))
+                .put(item("third").put("id", "three"))
+                .put(item("last third").put("id", "three"))
+                .put(item("reinserted first").put("id", "one")))
+        state = reduce(state, next).state
+        assertEquals(listOf("two", "three", "one"), state.details.getValue(key).liveItems.map { it.id })
+        assertEquals(listOf("updated second", "last third", "reinserted first"),
+            state.details.getValue(key).liveItems.map { it.text })
+        val reset = reduce(state, next.put("reset", true)).state
+        assertEquals(listOf("two", "three", "one"), reset.details.getValue(key).liveItems.map { it.id })
+    }
+
     @Test fun mapping_and_generation_changes_reload_history_and_cancel_old_requests() {
         val first = reduce(app(), session()).state
         val mapped = reduce(first, session("session_state", runtime("idle"), true))

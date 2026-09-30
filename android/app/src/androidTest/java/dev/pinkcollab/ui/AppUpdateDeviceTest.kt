@@ -54,7 +54,7 @@ class AppUpdateDeviceTest {
             CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
                 Box(Modifier.width(width)) {
                     TasksScreen(
-                        TasksScreenState(AppState(hosts = mapOf("host" to host)), emptyMap(), emptyMap(),
+                        TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                             emptySet(), emptyMap(), emptyMap(), emptyMap(), null),
                         TasksScreenActions({}, { openedWorkspaces++ }, {}, { checkedUpdates++ },
                             { shownVersion++ }, { _, _ -> }, { _, _ -> true }),

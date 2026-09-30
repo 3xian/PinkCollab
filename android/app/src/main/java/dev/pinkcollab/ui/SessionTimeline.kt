@@ -3,6 +3,7 @@ package dev.pinkcollab.ui
 import android.content.Context
 import android.graphics.Typeface
 import android.text.method.LinkMovementMethod
+import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
@@ -113,17 +114,17 @@ private fun Modifier.userMessageBand(
 
 
 @Composable
-internal fun DisplayItem(item: SessionDisplayItem, markwon: Markwon, liveActivity: Boolean = false) {
+internal fun DisplayItem(item: SessionDisplayItem, renderer: SessionMarkdownRenderer, liveActivity: Boolean = false) {
     when (item) {
-        is SessionDisplayItem.Message -> MessageCard(item, markwon)
+        is SessionDisplayItem.Message -> MessageCard(item, renderer)
         is SessionDisplayItem.ActivityGroup -> ActivityGroupCard(item, liveActivity)
         is SessionDisplayItem.Error -> ErrorCard(item)
-        is SessionDisplayItem.Raw -> RawTimelineCard(item.item, markwon)
+        is SessionDisplayItem.Raw -> RawTimelineCard(item.item, renderer)
     }
 }
 
 @Composable
-private fun MessageCard(item: SessionDisplayItem.Message, markwon: Markwon) {
+private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkdownRenderer) {
     val isUser = item.role == "user"
     val colors = MaterialTheme.colorScheme
     val band = if (isUser) {
@@ -146,7 +147,7 @@ private fun MessageCard(item: SessionDisplayItem.Message, markwon: Markwon) {
         if (isUser) {
             Text(item.text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
         } else {
-            MarkdownBody(item.text, color = contentColor, markwon)
+            MarkdownBody(item.id, item.text, color = contentColor, renderer)
         }
     }
 }
@@ -269,8 +270,9 @@ internal fun createSessionMarkwon(context: Context): Markwon =
         .build()
 
 @Composable
-private fun MarkdownBody(markdown: String, color: Color, markwon: Markwon) {
-    val rendered = remember(markwon, markdown) { markwon.toMarkdown(markdown) }
+private fun MarkdownBody(messageId: String, markdown: String, color: Color, renderer: SessionMarkdownRenderer) {
+    var rendered by remember(renderer, messageId) { mutableStateOf<Spanned?>(null) }
+    LaunchedEffect(renderer, messageId, markdown) { rendered = renderer.render(markdown) }
     val textColor = color.toArgb()
     val textSizeSp = MaterialTheme.typography.bodyMedium.fontSize.value
     AndroidView(
@@ -286,9 +288,12 @@ private fun MarkdownBody(markdown: String, color: Color, markwon: Markwon) {
         },
         update = { view ->
             if (view.currentTextColor != textColor) view.setTextColor(textColor)
-            if (view.tag !== rendered) {
-                markwon.setParsedMarkdown(view, rendered)
-                view.tag = rendered
+            val content = rendered ?: markdown
+            if (view.tag !== content) {
+                val parsed = rendered
+                if (parsed == null) view.text = markdown
+                else renderer.markwon.setParsedMarkdown(view, parsed)
+                view.tag = content
             }
         },
     )
@@ -453,7 +458,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
 }
 
 @Composable
-private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
+private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRenderer) {
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
     val isUser = item.kind == "user"
     val colors = MaterialTheme.colorScheme
@@ -506,7 +511,7 @@ private fun RawTimelineCard(item: TimelineItem, markwon: Markwon) {
             SpeakerLine(time) { YouLabel() }
         }
         if (item.kind == "assistant") {
-            MarkdownBody(item.text, color = contentColor, markwon)
+            MarkdownBody(item.id, item.text, color = contentColor, renderer)
         } else {
             Text(
                 item.text,

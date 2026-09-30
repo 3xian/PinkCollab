@@ -48,6 +48,7 @@ Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smok
 
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
+Android performance findings, optimization decisions, and validation evidence: [Android performance review](android-performance.md).
 
 From the repository root:
 

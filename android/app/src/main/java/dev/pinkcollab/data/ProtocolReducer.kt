@@ -60,9 +60,19 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
             val removed = frame.getJSONArray("remove").strings().toSet()
             val live = (if (frame.optBoolean("reset")) emptyList() else before.liveItems)
                 .filterNot { it.id in removed }.toMutableList()
-            frame.getJSONArray("upsert").objects().map { it.item() }.forEach { item ->
-                val index = live.indexOfFirst { it.id == item.id }
-                if (index >= 0) live[index] = item else live.add(item)
+            val upserts = frame.getJSONArray("upsert")
+            // A single streaming replacement needs no index allocation. Large batches avoid
+            // scanning the entire transcript for every upsert, preserving the first-match rule.
+            val indexes = if (upserts.length() > 1) mutableMapOf<String, Int>().apply {
+                live.forEachIndexed { index, item -> putIfAbsent(item.id, index) }
+            } else null
+            upserts.objects().map { it.item() }.forEach { item ->
+                val index = if (indexes != null) indexes[item.id]
+                    else live.indexOfFirst { it.id == item.id }.takeIf { it >= 0 }
+                if (index != null) live[index] = item else {
+                    indexes?.put(item.id, live.size)
+                    live.add(item)
+                }
             }
             detail = before.copy(liveItems = live)
         }

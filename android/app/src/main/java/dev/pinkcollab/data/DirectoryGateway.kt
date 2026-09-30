@@ -1,7 +1,9 @@
 package dev.pinkcollab.data
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /** Owns directory cache and speculative child listing requests. */
@@ -15,7 +17,8 @@ internal class DirectoryGateway(
     suspend fun listing(hostId: String, path: String, forceRefresh: Boolean = false): Listing =
         listings.getOrLoad(DirectoryListingKey(hostId, path), forceRefresh) {
             val host = paired(hostId)
-            JSONObject(api.request(host.url, host.credential, "/api/v3/fs/list", query = "path" to path)).listing()
+            val response = api.request(host.url, host.credential, "/api/v3/fs/list", query = "path" to path)
+            withContext(Dispatchers.Default) { JSONObject(response).listing() }
         }
 
     fun prefetch(hostId: String, paths: List<String>) {

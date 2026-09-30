@@ -24,18 +24,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.pinkcollab.data.AppState
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.InitialSyncState
 import dev.pinkcollab.ui.theme.TextMid
 
 internal data class StartupStep(val key: String, val text: String)
 
-internal fun startupSteps(app: AppState): List<StartupStep> {
+internal fun startupSteps(app: NavigationState): List<StartupStep> {
     if (app.loadingCredentials) return listOf(StartupStep("credentials", "Loading paired hosts"))
     if (app.hosts.isEmpty()) return listOf(StartupStep("hosts", "Ready to connect your first host"))
     return app.hosts.map { (id, host) ->
-        val name = host.paired.host.name
+        val name = host.host.name
         val text = when (host.connection) {
             ConnectionState.Connecting -> "Connecting to $name"
             ConnectionState.Synchronizing -> "Syncing sessions · $name"
@@ -54,7 +53,7 @@ internal fun startupSteps(app: AppState): List<StartupStep> {
 }
 
 @Composable
-internal fun StartupProgress(app: AppState, modifier: Modifier = Modifier) {
+internal fun StartupProgress(app: NavigationState, modifier: Modifier = Modifier) {
     val entries = remember { mutableStateListOf<StartupStep>() }
     val latest = remember { mutableMapOf<String, String>() }
     val steps = startupSteps(app)

@@ -28,11 +28,26 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class CollabViewModel(application: Application, savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
     private val repository = GatewayRepository(viewModelScope, CredentialStore(application), application)
     internal val appState = repository.state
+    internal val navigationState = appState.map(::navigationState)
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, navigationState(appState.value))
+    internal val sessionListState = appState.sessionListPresentation(viewModelScope)
+    internal val sessionDetails = appState.map { it.details }
+        .distinctUntilChanged()
+        .batchLatestPresentation()
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), emptyMap())
     private val updateChecker = AppUpdateChecker(application)
     private var updateCheckJob: Job? = null
     private val mutableAvailableUpdate = MutableStateFlow<AppRelease?>(null)

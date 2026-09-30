@@ -64,7 +64,7 @@ class TasksPagerBarDeviceTest {
         var selected by mutableStateOf<SessionKey?>(null)
         compose.setContent {
             TasksScreen(
-                TasksScreenState(AppState(hosts = mapOf("host" to host)), emptyMap(), emptyMap(),
+                TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
                 TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
             )
@@ -87,7 +87,7 @@ class TasksPagerBarDeviceTest {
             savedHistory = SavedHistory.Ready(null, listOf(message), null))
         var app by mutableStateOf(AppState(hosts = mapOf("host" to host), details = mapOf(key to detail)))
         compose.setContent {
-            TasksScreen(TasksScreenState(app, emptyMap(), emptyMap(), emptySet(), emptyMap(),
+            TasksScreen(TasksScreenState(sessionListState(app), app.details, emptyMap(), emptyMap(), emptySet(), emptyMap(),
                 emptyMap(), emptyMap(), key),
                 TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
         }
@@ -107,7 +107,7 @@ class TasksPagerBarDeviceTest {
         val detail = SessionDetail(sessions.first(), savedHistory = SavedHistory.Ready(null, emptyList(), null))
         var app by mutableStateOf(AppState(hosts = mapOf("host" to host), details = mapOf(key to detail)))
         compose.setContent {
-            TasksScreen(TasksScreenState(app, emptyMap(), emptyMap(), emptySet(), emptyMap(),
+            TasksScreen(TasksScreenState(sessionListState(app), app.details, emptyMap(), emptyMap(), emptySet(), emptyMap(),
                 emptyMap(), emptyMap(), key),
                 TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
         }
@@ -127,7 +127,7 @@ class TasksPagerBarDeviceTest {
             PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""), sessions = sessions))
         val requests = mutableListOf<String>()
         compose.setContent {
-            TasksScreen(TasksScreenState(AppState(hosts = mapOf("host" to host)), emptyMap(), emptyMap(),
+            TasksScreen(TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                 emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
                 TasksScreenActions({ selected = it }, {}, {}, {}, {}, { session, action ->
                     if (action == SessionAction.Retry) requests += session.id
@@ -158,7 +158,7 @@ class TasksPagerBarDeviceTest {
         val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""), sessions = sessions)
         compose.setContent {
             TasksScreen(
-                TasksScreenState(AppState(hosts = mapOf("host" to host)), emptyMap(), emptyMap(),
+                TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
                 TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
             )
@@ -204,6 +204,56 @@ class TasksPagerBarDeviceTest {
         compose.waitForIdle()
         assertEquals(SessionKey("host", "s3"), selected)
         assertCentered("s3")
+    }
+
+    @Test fun pending_created_session_is_not_replaced_by_the_previous_page() {
+        val created = sessions.first().copy(id = "new-session", title = "New session",
+            updatedAt = "2026-09-30T00:00:00Z")
+        val createdKey = SessionKey("host", created.id)
+        var selected by mutableStateOf<SessionKey?>(createdKey)
+        var host by mutableStateOf(HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""), sessions = sessions))
+        val selections = mutableListOf<SessionKey>()
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
+                    emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
+                TasksScreenActions({ selections += it; selected = it }, {}, {}, {}, {},
+                    { _, _ -> }, { _, _ -> true }),
+            )
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(createdKey, selected)
+            assertTrue(selections.isEmpty())
+            host = host.copy(sessions = host.sessions + created)
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(createdKey, selected)
+            assertTrue(selections.all { it == createdKey })
+        }
+        compose.onNodeWithTag("sessionCard:${created.id}").assertIsDisplayed()
+        compose.onNodeWithTag("sessionTimelinePager").performTouchInput { swipeLeft() }
+        compose.waitForIdle()
+        assertEquals(SessionKey("host", "s0"), selected)
+    }
+
+    @Test fun removing_the_selected_session_allows_the_remaining_page_to_be_selected() {
+        var selected by mutableStateOf<SessionKey?>(SessionKey("host", "s0"))
+        var host by mutableStateOf(HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""), sessions = sessions))
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
+                    emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+            )
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { host = host.copy(sessions = host.sessions.drop(1)) }
+        compose.waitForIdle()
+        assertEquals(SessionKey("host", "s1"), selected)
     }
 
     private fun assertCentered(id: String) {

@@ -73,7 +73,9 @@ internal fun SessionPage(
         savedHistory = SavedHistory.Loading,
     )
     val context = LocalContext.current
-    val markwon = remember(context) { createSessionMarkwon(context) }
+    val renderer = remember(context, detail.session.hostId, detail.session.id) {
+        SessionMarkdownRenderer(createSessionMarkwon(context))
+    }
     val session = detail.session
     val prompt = draft.text
     val selectedFiles = draft.files
@@ -198,7 +200,9 @@ internal fun SessionPage(
                     Text("Load earlier messages")
                 }
             }
-            items(historyTimeline, key = { "saved:${it.id}" }) { item -> DisplayItem(item, markwon) }
+            items(historyTimeline, key = { "saved:${it.id}" }, contentType = { it::class }) { item ->
+                DisplayItem(item, renderer)
+            }
             if (session.runtimeAttached && hasSavedMessages) item(key = "live-divider") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
                     HorizontalDivider(color = TextMid.copy(alpha = 0.4f))
@@ -211,12 +215,12 @@ internal fun SessionPage(
                 }
             }
             if (session.runtimeAttached) {
-                items(liveTimeline, key = { "live:${it.id}" }) { item ->
-                    DisplayItem(item, markwon, liveActivity = host?.connected == true &&
+                items(liveTimeline, key = { "live:${it.id}" }, contentType = { it::class }) { item ->
+                    DisplayItem(item, renderer, liveActivity = host?.connected == true &&
                         session.status == SessionStatus.Running)
                 }
             }
-            if (session.runtimeAttached && detail.streaming.isNotBlank()) item {
+            if (session.runtimeAttached && detail.streaming.isNotBlank()) item(key = "streaming") {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -245,7 +249,7 @@ internal fun SessionPage(
                     }
                 }
             }
-            session.attention?.let { attention -> item { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
+            session.attention?.let { attention -> item(key = "attention") { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
             if (savedHistory == SavedHistory.Failed || state.refreshError != null) item(key = "history-failed") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
                     Text(state.refreshError ?: "Could not load message history", color = TextMid,

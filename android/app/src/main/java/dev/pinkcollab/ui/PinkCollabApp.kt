@@ -30,16 +30,10 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
-    val app by vm.appState.collectAsStateWithLifecycle()
+    val app by vm.navigationState.collectAsStateWithLifecycle()
     val operations by vm.operations.collectAsStateWithLifecycle()
     val directory by vm.directory.collectAsStateWithLifecycle()
-    val sessionOperations by vm.sessionOperations.collectAsStateWithLifecycle()
-    val sendProgress by vm.sendProgress.collectAsStateWithLifecycle()
-    val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
-    val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
-    val drafts by vm.drafts.collectAsStateWithLifecycle()
     val availableUpdate by vm.availableUpdate.collectAsStateWithLifecycle()
-    val fileSelections by vm.fileSelections.collectAsStateWithLifecycle()
     var route by rememberSaveable(stateSaver = AppRouteSaver) { mutableStateOf<AppRoute>(AppRoute.Tasks) }
     var pairHost by rememberSaveable(stateSaver = PairHostSheetStateSaver) {
         mutableStateOf(PairHostSheetState())
@@ -144,9 +138,9 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                         .navigationBarsPadding(),
                 ) {
                     when (val current = route) {
-                        AppRoute.Tasks -> TasksScreen(
-                            state = TasksScreenState(app, detailLoads, modelLoads, sessionOperations,
-                                sendProgress, drafts, fileSelections, selectedSession),
+                        AppRoute.Tasks -> TasksRoute(
+                            vm = vm,
+                            selectedSession = selectedSession,
                             actions = TasksScreenActions(
                                 selectSession = { selectedSession = it },
                                 openResources = { route = AppRoute.Resources },
@@ -171,7 +165,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
 
                         is AppRoute.Browser -> BrowserRoute(
                             route = current,
-                            hostName = app.hosts[current.hostId]?.paired?.host?.name.orEmpty(),
+                            hostName = app.hosts[current.hostId]?.host?.name.orEmpty(),
                             creating = OperationKey.CreateTask(current.hostId, current.path) in operations,
                             state = directory?.takeIf { it.key == BrowserKey(current.hostId, current.path) }?.state,
                             load = { forceRefresh -> vm.loadDirectory(BrowserKey(current.hostId, current.path), forceRefresh) },
@@ -211,6 +205,23 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
             )
         }
     }
+}
+
+@Composable
+private fun TasksRoute(vm: CollabViewModel, selectedSession: SessionKey?, actions: TasksScreenActions) {
+    val sessions by vm.sessionListState.collectAsStateWithLifecycle()
+    val details by vm.sessionDetails.collectAsStateWithLifecycle()
+    val sessionOperations by vm.sessionOperations.collectAsStateWithLifecycle()
+    val sendProgress by vm.sendProgress.collectAsStateWithLifecycle()
+    val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
+    val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
+    val drafts by vm.drafts.collectAsStateWithLifecycle()
+    val fileSelections by vm.fileSelections.collectAsStateWithLifecycle()
+    TasksScreen(
+        state = TasksScreenState(sessions, details, detailLoads, modelLoads, sessionOperations,
+            sendProgress, drafts, fileSelections, selectedSession),
+        actions = actions,
+    )
 }
 
 @Composable

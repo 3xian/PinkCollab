@@ -26,21 +26,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import dev.pinkcollab.R
 import dev.pinkcollab.data.AppState
 import dev.pinkcollab.data.InitialSyncTimeoutMillis
@@ -57,6 +57,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
+import kotlin.math.roundToInt
 
 private const val MinimumStartupDurationMillis = 3_000L
 
@@ -74,9 +75,9 @@ internal suspend fun awaitStartupReadiness(
 }
 
 @Composable
-internal fun StartupLoadingScreen(app: AppState) {
+internal fun StartupLoadingScreen(app: NavigationState) {
     val motion = rememberInfiniteTransition(label = "startup")
-    val progress by motion.animateFloat(
+    val progress = motion.animateFloat(
         initialValue = -1f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -85,7 +86,6 @@ internal fun StartupLoadingScreen(app: AppState) {
         ),
         label = "loadingLine",
     )
-    val loadingLineAlpha = ((1f - abs(progress)) / 0.28f).coerceIn(0f, 1f)
 
     Box(
         modifier = Modifier
@@ -116,8 +116,10 @@ internal fun StartupLoadingScreen(app: AppState) {
             ) {
                 Box(
                     Modifier
-                        .offset(x = (progress * 78f).dp)
-                        .alpha(loadingLineAlpha)
+                        .offset { IntOffset((progress.value * 78.dp.toPx()).roundToInt(), 0) }
+                        .graphicsLayer {
+                            alpha = ((1f - abs(progress.value)) / 0.28f).coerceIn(0f, 1f)
+                        }
                         .width(48.dp)
                         .height(2.dp)
                         .background(
@@ -145,20 +147,19 @@ internal fun AnimatedLoadingLogo(logoSize: Dp = 248.dp, animateGlow: Boolean = t
     }
     val frameDuration = movie?.duration()?.takeIf { it > 0 } ?: 1920
     val motion = rememberInfiniteTransition(label = "loadingCharacter")
-    val frameProgress by motion.animateFloat(0f, 1f,
+    val frameProgress = motion.animateFloat(0f, 1f,
         infiniteRepeatable(tween(frameDuration, easing = LinearEasing)), label = "gifFrame")
     val glowProgress = if (animateGlow) {
-        val phase by motion.animateFloat(0f, 1f,
+        motion.animateFloat(0f, 1f,
             infiniteRepeatable(tween(2800, easing = LinearEasing)), label = "glow")
-        phase
-    } else 0.25f
+    } else null
 
     Box(
         modifier = Modifier.size(logoSize),
         contentAlignment = Alignment.Center,
     ) {
         Canvas(Modifier.fillMaxSize()) {
-            val phase = glowProgress
+            val phase = glowProgress?.value ?: 0.25f
             val wave = sin(PI * phase).toFloat()
             val breath = wave * wave
             val center = Offset(size.width * 0.51f, size.height * 0.5f)
@@ -181,7 +182,7 @@ internal fun AnimatedLoadingLogo(logoSize: Dp = 248.dp, animateGlow: Boolean = t
                 val canvas = drawContext.canvas.nativeCanvas
                 val saved = canvas.save()
                 canvas.scale(size.width / movie.width(), size.height / movie.height())
-                movie.setTime((frameProgress * frameDuration).toInt())
+                movie.setTime((frameProgress.value * frameDuration).toInt())
                 movie.draw(canvas, 0f, 0f)
                 canvas.restoreToCount(saved)
             }
