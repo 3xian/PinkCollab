@@ -182,9 +182,10 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ runner.os }}-${{ runner.arch }}-35-default-x86_64-2048M-v1
+          key: avd-${{ runner.os }}-${{ runner.arch }}-35-default-x86_64-2048M-gles-v2
       # Save a clean snapshot before installing the app or running device tests.
       # AOSP avoids unrelated Google launcher/services ANRs obscuring system UI assertions.
+      # Vulkan snapshots are unsupported; use SwiftShader GLES for both snapshot and tests.
       - name: Create clean emulator snapshot
         if: matrix.suite == 'device-tests' && steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
@@ -194,7 +195,7 @@ jobs:
           arch: x86_64
           ram-size: 2048M
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none
           disable-animations: false
           script: echo "Clean emulator snapshot ready"
       - name: Run debug and optimized Android device tests
@@ -206,7 +207,7 @@ jobs:
           arch: x86_64
           ram-size: 2048M
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader -feature -Vulkan -noaudio -no-boot-anim -camera-back none
           working-directory: android
           script: |
             ./gradlew :app:connectedDebugAndroidTest --console=plain
