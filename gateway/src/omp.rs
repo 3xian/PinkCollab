@@ -11,10 +11,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::Path,
     process::{Child, Command, ExitStatus, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::process::Command as TokioCommand;
@@ -245,13 +242,15 @@ struct Shutdown {
     requested: watch::Sender<bool>,
     exited: watch::Sender<bool>,
     output: mpsc::Sender<Output>,
-    finished: AtomicBool,
+    finished: Mutex<bool>,
 }
 
 impl Shutdown {
     /// Idempotent: ends the process, releases every pending request and reports the outcome once.
     fn finish(&self, reason: Option<String>) {
-        if self.finished.load(Ordering::SeqCst) {
+        // Claim the outcome before termination wakes a competing reader with EOF.
+        let mut finished = self.finished.lock();
+        if *finished {
             return;
         }
         let status = match self.process.terminate(TERMINATE_GRACE) {
@@ -261,9 +260,8 @@ impl Shutdown {
                 return;
             }
         };
-        if self.finished.swap(true, Ordering::SeqCst) {
-            return;
-        }
+        *finished = true;
+        drop(finished);
         // A stop we requested is not a crash; `session::exit` already reports it as stopped.
         let reason = reason.or_else(|| {
             (!*self.requested.borrow() && !status.success())
@@ -341,7 +339,7 @@ impl Runtime {
             requested: stop.clone(),
             exited: exit_tx,
             output: output.clone(),
-            finished: AtomicBool::new(false),
+            finished: Mutex::new(false),
         });
         let reader = shutdown.clone();
         let reader_output = output.clone();

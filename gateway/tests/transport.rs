@@ -71,14 +71,14 @@ async fn write_timeout_terminates_runtime_without_an_explicit_stop() {
     )
     .await
     .expect("the blocked write must time out");
-    assert!(failed.is_err());
+    let failure = failed.expect_err("the blocked write must fail");
     let reason = tokio::time::timeout(Duration::from_secs(10), next_exit(&mut output))
         .await
         .expect("a write timeout must clean up OMP without Stop");
     assert!(
         reason
             .as_deref()
-            .is_some_and(|reason| reason.contains("write timed out")),
+            .is_some_and(|reason| reason.contains(&format!("{failure:#}"))),
         "unexpected exit reason: {reason:?}"
     );
     assert!(!runtime.alive());
