@@ -19,6 +19,7 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
         return ProtocolReduction(app.copy(
             hosts = app.hosts + (hostId to host.copy(
                 paired = host.paired.copy(host = identity), connection = ConnectionState.Online(nowEpochMillis),
+                connectionProgress = null,
                 sessions = frame.getJSONArray("sessions").objects().map { it.sessionSummary() },
                 workspaces = frame.getJSONArray("workspaces").objects().map { it.workspace() },
                 snapshotToken = UUID.randomUUID().toString(), revision = host.revision + 1,

@@ -154,6 +154,8 @@ sealed interface ConnectionState {
     data object AuthenticationRequired : ConnectionState
     data object UpgradeRequired : ConnectionState
 }
+data class ConnectionProgress(val attempt: Int, val failure: String? = null)
+
 data class HostState(
     val paired: PairedHost,
     val connection: ConnectionState = ConnectionState.Connecting,
@@ -163,6 +165,7 @@ data class HostState(
     val snapshotToken: String? = null,
     val lastSyncedAtEpochMillis: Long? = null,
     val initialSync: InitialSyncState = InitialSyncState.Pending,
+    val connectionProgress: ConnectionProgress? = null,
 ) {
     val connected: Boolean get() = connection is ConnectionState.Online
 }

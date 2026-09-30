@@ -15,11 +15,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.random.Random
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 internal class HostConnectionSupervisor(
     private val scope: CoroutineScope,
     private val api: GatewayTransport,
-    private val onState: (String, ConnectionState) -> Unit,
+    private val onState: (String, ConnectionState, ConnectionProgress?) -> Unit,
     private val onFrame: (String, JSONObject) -> Unit,
     private val onSubscriptionEnded: (String, String) -> Unit,
 ) {
@@ -105,11 +109,14 @@ internal class HostConnectionSupervisor(
             job?.cancel()
             job = scope.launch {
                 var failedAttempts = 0
+                var lastFailure: String? = null
                 while (isActive && isCurrent(currentGeneration)) {
-                    // Keep the retry status visible until a fresh snapshot arrives.
+                    // Socket opening and host synchronization are separate connection stages.
                     val initialAttempt = failedAttempts == 0
-                    if (initialAttempt) emitState(currentGeneration, ConnectionState.Connecting)
-                    val disconnect = awaitSocket(currentGeneration, initialAttempt)
+                    val progress = ConnectionProgress(failedAttempts + 1, lastFailure)
+                    emitState(currentGeneration,
+                        if (initialAttempt) ConnectionState.Connecting else ConnectionState.Reconnecting, progress)
+                    val disconnect = awaitSocket(currentGeneration, progress)
                     if (!isCurrent(currentGeneration)) return@launch
                     if (disconnect.authenticationRequired) {
                         emitState(currentGeneration, ConnectionState.AuthenticationRequired)
@@ -120,8 +127,10 @@ internal class HostConnectionSupervisor(
                         return@launch
                     }
                     failedAttempts = if (disconnect.hadSnapshot) 1 else failedAttempts + 1
+                    lastFailure = disconnect.reason
                     val retryDelay = retryDelayMillis(failedAttempts)
-                    emitState(currentGeneration, ConnectionState.Reconnecting)
+                    emitState(currentGeneration, ConnectionState.Reconnecting,
+                        ConnectionProgress(failedAttempts + 1, lastFailure))
                     delay(retryDelay)
                 }
             }
@@ -139,7 +148,7 @@ internal class HostConnectionSupervisor(
             stop()
             synchronized(lock) {
                 if (connections[paired.host.id] === this) {
-                    onState(paired.host.id, ConnectionState.Offline("Network unavailable"))
+                    onState(paired.host.id, ConnectionState.Offline("Network unavailable"), null)
                 }
             }
         }
@@ -149,12 +158,12 @@ internal class HostConnectionSupervisor(
                 connectionGeneration.get() == generation && connections[paired.host.id] === this
             }
 
-        private fun emitState(generation: Long, state: ConnectionState) {
+        private fun emitState(generation: Long, state: ConnectionState, progress: ConnectionProgress? = null) {
             synchronized(lock) {
                 if (connectionGeneration.get() == generation && connections[paired.host.id] === this) {
                     if (state == ConnectionState.Reconnecting || state == ConnectionState.AuthenticationRequired ||
                         state == ConnectionState.UpgradeRequired) invalidateSubscriptions(paired.host.id)
-                    onState(paired.host.id, state)
+                    onState(paired.host.id, state, progress)
                 }
             }
         }
@@ -170,7 +179,7 @@ internal class HostConnectionSupervisor(
             }
         }
 
-        private suspend fun awaitSocket(generation: Long, initialAttempt: Boolean): Disconnect =
+        private suspend fun awaitSocket(generation: Long, progress: ConnectionProgress): Disconnect =
             suspendCancellableCoroutine { continuation ->
                 val hadSnapshot = AtomicBoolean()
                 val socket = api.client.newWebSocket(
@@ -184,7 +193,7 @@ internal class HostConnectionSupervisor(
                                 webSocket.cancel()
                                 return
                             }
-                            if (initialAttempt) emitState(generation, ConnectionState.Synchronizing)
+                            emitState(generation, ConnectionState.Synchronizing, progress)
                             synchronized(lock) {
                                 socket = webSocket
                                 desiredSessions[paired.host.id]?.forEach(::subscribe)
@@ -208,6 +217,7 @@ internal class HostConnectionSupervisor(
                                         authenticationRequired = response?.code == 401,
                                         upgradeRequired = response?.code == 426,
                                         hadSnapshot = hadSnapshot.get(),
+                                        reason = connectionFailureReason(error, response?.code),
                                     ),
                                 )
                             }
@@ -223,6 +233,7 @@ internal class HostConnectionSupervisor(
                                 continuation.resume(
                                     Disconnect(
                                         hadSnapshot = hadSnapshot.get(),
+                                        reason = if (code == 1002) "Invalid connection data" else "Host closed the connection",
                                     ),
                                 )
                             }
@@ -237,7 +248,17 @@ internal class HostConnectionSupervisor(
         val authenticationRequired: Boolean = false,
         val upgradeRequired: Boolean = false,
         val hadSnapshot: Boolean = false,
+        val reason: String = "Connection interrupted",
     )
+}
+
+internal fun connectionFailureReason(error: Throwable, httpCode: Int? = null): String = when {
+    httpCode != null -> "Host rejected the connection (HTTP $httpCode)"
+    error is UnknownHostException -> "Cannot resolve host address"
+    error is SocketTimeoutException -> "Connection timed out"
+    error is ConnectException -> "Cannot reach host address or port"
+    error is SSLException -> "Secure connection failed"
+    else -> "Connection interrupted"
 }
 
 internal fun retryDelayMillis(attempt: Int, jitter: Double = Random.nextDouble(0.8, 1.2)): Long {

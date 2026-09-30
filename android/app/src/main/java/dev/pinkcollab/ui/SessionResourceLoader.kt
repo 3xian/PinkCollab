@@ -40,6 +40,11 @@ internal class SessionResourceLoader(
     fun loadDetail(session: Session, force: Boolean = false) {
         val key = SessionKey(session.hostId, session.id)
         val version = synchronized(detailLoadLock) {
+            // The Gateway focuses one session at a time. Drop the previous focus's
+            // request and error before it can time out or reappear on a later visit.
+            detailVersions.keys.retainAll(setOf(key))
+            detailJobs.keys.toList().filter { it != key }.forEach { detailJobs.remove(it)?.cancel() }
+            mutableDetailLoads.value = mutableDetailLoads.value.filterKeys { it == key }
             if (!force && (actions.hasDetail(key) || mutableDetailLoads.value[key] == LoadState.Loading)) {
                 null
             } else {

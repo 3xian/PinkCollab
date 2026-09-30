@@ -7,6 +7,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.test.advanceTimeBy
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,6 +19,56 @@ class SessionResourceLoaderTest {
     private val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "Ready",
         false, null, "", "", false)
     private val key = SessionKey("host", "session")
+
+    @Test fun switching_focus_clears_old_failure_before_returning_to_the_session() = runTest {
+        var calls = 0
+        val actions = object : SessionResourceActions {
+            override fun hasDetail(key: SessionKey) = false
+            override suspend fun detail(session: Session) {
+                if (++calls == 1) throw IllegalStateException("Snapshot timed out")
+                awaitCancellation()
+            }
+            override suspend fun models(session: Session) = ModelCatalog(emptyList(), emptyList())
+        }
+        val loader = SessionResourceLoader(backgroundScope, actions, {})
+        loader.loadDetail(session)
+        runCurrent()
+        assertTrue(loader.detailLoads.value[key] is LoadState.Failed)
+
+        loader.loadDetail(session.copy(id = "another"))
+        assertFalse(key in loader.detailLoads.value)
+        runCurrent()
+        loader.loadDetail(session, force = true)
+        assertEquals(mapOf(key to LoadState.Loading), loader.detailLoads.value)
+    }
+
+    @Test fun switching_focus_cancels_old_timeout_without_reporting_an_error() = runTest {
+        val errors = mutableListOf<String>()
+        var cancelled = false
+        val actions = object : SessionResourceActions {
+            override fun hasDetail(key: SessionKey) = false
+            override suspend fun detail(session: Session) {
+                if (session.id != "session") return
+                try {
+                    kotlinx.coroutines.delay(15_000)
+                    throw IllegalStateException("Snapshot timed out")
+                } finally {
+                    cancelled = true
+                }
+            }
+            override suspend fun models(session: Session) = ModelCatalog(emptyList(), emptyList())
+        }
+        val loader = SessionResourceLoader(backgroundScope, actions, errors::add)
+        loader.loadDetail(session)
+        runCurrent()
+        loader.loadDetail(session.copy(id = "another"))
+        runCurrent()
+        advanceTimeBy(15_000)
+        runCurrent()
+        assertTrue(cancelled)
+        assertTrue(errors.isEmpty())
+        assertFalse(key in loader.detailLoads.value)
+    }
 
     @Test fun newer_detail_request_wins_and_cancels_the_previous_one() = runTest {
         val first = CompletableDeferred<Unit>()

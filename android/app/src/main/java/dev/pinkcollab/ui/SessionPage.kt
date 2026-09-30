@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.PlatformTextStyle
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
-import dev.chrisbanes.haze.HazeState
 
 @Composable
 internal fun SessionPage(
@@ -51,7 +50,6 @@ internal fun SessionPage(
     onAction: (SessionAction) -> Unit,
     onApplyModelSettings: (ModelSettingsChanges) -> Boolean,
     isActive: Boolean = true,
-    isVisible: Boolean = true,
 ) {
     val load = state.detail
     val host = state.host.takeIf { load is LoadState.Ready }
@@ -112,7 +110,9 @@ internal fun SessionPage(
         remember(detail.liveItems) { projectSessionTimeline(detail.liveItems) }
     } else emptyList()
     val hasSavedMessages = historyTimeline.isNotEmpty() || savedHistory.nextCursor != null
-    val awaitingHistory = state.refreshError == null && savedHistory == SavedHistory.Loading && historyTimeline.isEmpty() &&
+    val historyError = sessionHistoryError(detail, host, state.refreshError)
+    val awaitingHistory = historyError == null &&
+        (savedHistory == SavedHistory.Loading || savedHistory == SavedHistory.Failed) && historyTimeline.isEmpty() &&
         liveTimeline.isEmpty() && detail.streaming.isBlank() && session.attention == null
     val timelineState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE)
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
@@ -152,7 +152,6 @@ internal fun SessionPage(
     }
     val density = LocalDensity.current
     val composerClearance = with(density) { composerHeightPx.toDp() } + 12.dp
-    val backdropState = remember(session.id) { HazeState() }
     val imeInsets = WindowInsets.ime
     val navigationInsets = WindowInsets.navigationBars
     // IME insets animate every frame. Moving the composer during placement keeps that
@@ -189,8 +188,7 @@ internal fun SessionPage(
             typography = SessionTypography,
         ) {
         LazyColumn(
-            Modifier.fillMaxSize()
-                .composerBackdropSource(backdropState, isVisible),
+            Modifier.fillMaxSize(),
             state = timelineState,
             contentPadding = PaddingValues(
                 top = 8.dp,
@@ -254,9 +252,9 @@ internal fun SessionPage(
                 }
             }
             session.attention?.let { attention -> item(key = "attention") { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
-            if (savedHistory == SavedHistory.Failed || state.refreshError != null) item(key = "history-failed") {
+            if (historyError != null) item(key = "history-failed") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
-                    Text(state.refreshError ?: "Could not load message history", color = TextMid,
+                    Text(historyError, color = TextMid,
                         style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = onRetry) { Text("Retry") }
                 }
@@ -272,13 +270,20 @@ internal fun SessionPage(
             TimelineLoadingState(Modifier.padding(bottom = composerClearance)
                 .testTag(if (load == LoadState.Loading) "sessionLoading" else "historyLoading"))
         }
-        ComposerBackdrop(
-            state = backdropState,
-            clearance = composerClearance,
-            isVisible = isVisible,
-            modifier = Modifier
+        Box(
+            Modifier
                 .align(Alignment.BottomCenter)
-                .then(keyboardOffset),
+                .then(keyboardOffset)
+                .fillMaxWidth()
+                .height(composerClearance + 32.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0.00f to Color.Transparent,
+                        // Reach the work-status strip already dimmed, then fade to black below it.
+                        (32.dp / (composerClearance + 32.dp)) to Color.Black.copy(alpha = 0.60f),
+                        1.00f to Color.Black,
+                    ),
+                ),
         )
         Column(
             Modifier

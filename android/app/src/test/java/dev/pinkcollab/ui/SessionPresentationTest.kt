@@ -6,12 +6,14 @@ import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.PairedHost
+import dev.pinkcollab.data.SavedHistory
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.TimelineItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,6 +23,26 @@ class SessionPresentationTest {
     private val session = Session("session", "host", "/work", "Work", SessionStatus.Running, "Working",
         false, null, "", "", true, "generation")
     private val draft = SessionDraft(text = "hello")
+
+    @Test fun connection_recovery_does_not_show_history_or_refresh_errors() {
+        val failed = SessionDetail(session, snapshotToken = null, savedHistory = SavedHistory.Failed)
+        for (connection in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing,
+            ConnectionState.Reconnecting, ConnectionState.Offline())) {
+            assertNull(sessionHistoryError(failed, online.copy(connection = connection), "Snapshot timed out"))
+        }
+        assertNull(sessionHistoryError(failed, null, "Snapshot timed out"))
+    }
+
+    @Test fun fresh_snapshot_clears_stale_refresh_error_but_retains_genuine_history_failure() {
+        val detail = SessionDetail(session, snapshotToken = "new", savedHistory = SavedHistory.Loading)
+        assertNull(sessionHistoryError(detail, online, "Snapshot timed out"))
+        assertNull(sessionHistoryError(detail.copy(savedHistory = SavedHistory.Ready(null, emptyList(), null)),
+            online, "Snapshot timed out"))
+        assertEquals("Could not load message history",
+            sessionHistoryError(detail.copy(savedHistory = SavedHistory.Failed), online, "Snapshot timed out"))
+        assertEquals("Snapshot timed out", sessionHistoryError(detail.copy(snapshotToken = null), online,
+            "Snapshot timed out"))
+    }
     private fun controls(
         session: Session = this.session,
         host: HostState? = online,

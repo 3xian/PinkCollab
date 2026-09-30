@@ -79,7 +79,7 @@ internal fun ResourcesScreen(
                 host.connection == ConnectionState.Synchronizing ||
                 host.connection == ConnectionState.Reconnecting
             val (connectionLabel, connectionColor) = when (host.connection) {
-                ConnectionState.Connecting, ConnectionState.Synchronizing, ConnectionState.Reconnecting -> "Connecting" to Amber300
+                ConnectionState.Connecting, ConnectionState.Synchronizing, ConnectionState.Reconnecting -> "Connecting" to BrandPink
                 is ConnectionState.Online -> "Online" to Teal300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
@@ -149,20 +149,15 @@ internal fun ResourcesScreen(
                         }
                     }
                     Spacer(Modifier.height(12.dp))
-                    if (host.workspaces.isEmpty()) {
+                    if (!host.connected || host.workspaces.isEmpty()) {
                         Text(
-                            when (host.connection) {
-                                ConnectionState.Connecting, ConnectionState.Synchronizing -> "Loading allowed directories"
-                                is ConnectionState.Online -> "No allowed directories"
-                                ConnectionState.Reconnecting -> "Waiting for host connection"
-                                is ConnectionState.Offline -> "Reconnect this host to load its directories"
-                                ConnectionState.AuthenticationRequired -> "Pair this host again to load its directories"
-                                ConnectionState.UpgradeRequired -> "Update PinkCollab to load directories"
-                            },
+                            workspaceConnectionMessage(host),
                             style = MaterialTheme.typography.bodySmall,
                             color = Gray400,
                         )
-                    } else {
+                    }
+                    if (host.workspaces.isNotEmpty()) {
+                        if (!host.connected) Spacer(Modifier.height(8.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             host.workspaces.forEach { workspace ->
                                 WorkspaceRow(workspace, host.connected) { browse(hostId, workspace.path) }

@@ -161,7 +161,7 @@ class SessionHistoryDeviceTest {
 
     @Test fun failed_history_does_not_claim_there_are_no_saved_messages() {
         val detail = SessionDetail(session.copy(status = SessionStatus.Idle, runtimeAttached = false,
-            generation = null), savedHistory = SavedHistory.Failed)
+            generation = null), snapshotToken = "subscription", savedHistory = SavedHistory.Failed)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
@@ -170,6 +170,34 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
         compose.onNodeWithText("Could not load message history").assertIsDisplayed()
         compose.onNodeWithText("Retry").assertIsDisplayed()
+    }
+
+    @Test fun reconnecting_history_shows_loading_and_recovers_without_a_retry_error() {
+        val detail = mutableStateOf(SessionDetail(session.copy(status = SessionStatus.Idle,
+            runtimeAttached = false, generation = null), savedHistory = SavedHistory.Failed))
+        val connection = mutableStateOf<ConnectionState>(ConnectionState.Connecting)
+        compose.setContent {
+            SessionPage(SessionPageState(LoadState.Ready(detail.value), host.copy(connection = connection.value),
+                SessionDraft(), 0, SessionActivity(), null, null, refreshError = "Old snapshot timeout"),
+                onAction = {}, onApplyModelSettings = { true })
+        }
+        for (state in listOf(ConnectionState.Connecting, ConnectionState.Reconnecting)) {
+            compose.runOnIdle { connection.value = state }
+            compose.onNodeWithTag("historyLoading").assertIsDisplayed()
+            compose.onNodeWithText("Could not load message history").assertDoesNotExist()
+            compose.onNodeWithText("Old snapshot timeout").assertDoesNotExist()
+            compose.onNodeWithText("Retry").assertDoesNotExist()
+        }
+        compose.runOnIdle {
+            connection.value = ConnectionState.Online(2L)
+            detail.value = detail.value.copy(snapshotToken = "new", savedHistory = SavedHistory.Loading)
+        }
+        compose.onNodeWithTag("historyLoading").assertIsDisplayed()
+        compose.onNodeWithText("Old snapshot timeout").assertDoesNotExist()
+        compose.runOnIdle { detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, listOf(saved), null)) }
+        compose.onNodeWithText("Earlier question").assertIsDisplayed()
+        compose.onNodeWithTag("historyLoading").assertDoesNotExist()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
     }
 
     @Test fun history_loading_stays_visible_until_transcript_arrives() {

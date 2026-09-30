@@ -6,6 +6,7 @@ import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.OperationReceipt
 import dev.pinkcollab.data.OperationStatus
+import dev.pinkcollab.data.SavedHistory
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
@@ -23,6 +24,13 @@ internal data class SessionPageState(
     val historyItems: List<TimelineItem>? = null,
     val summary: Session? = null,
 )
+
+/** Connection recovery waits for a fresh snapshot; old request errors no longer describe it. */
+internal fun sessionHistoryError(detail: SessionDetail, host: HostState?, refreshError: String?): String? {
+    if (host?.connected != true) return null
+    if (detail.snapshotToken == null) return refreshError
+    return if (detail.savedHistory == SavedHistory.Failed) "Could not load message history" else null
+}
 
 internal sealed interface SessionAction {
     data object Retry : SessionAction

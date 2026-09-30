@@ -27,4 +27,13 @@ class ConnectionStateTest {
         assertEquals(15_000, retryDelayMillis(6, jitter = 1.0))
         assertEquals(30_000, retryDelayMillis(20, jitter = 1.2))
     }
+
+    @Test fun connectionFailuresDistinguishNetworkAndHostErrors() {
+        assertEquals("Cannot resolve host address", connectionFailureReason(java.net.UnknownHostException()))
+        assertEquals("Connection timed out", connectionFailureReason(java.net.SocketTimeoutException()))
+        assertEquals("Cannot reach host address or port", connectionFailureReason(java.net.ConnectException()))
+        assertEquals("Secure connection failed", connectionFailureReason(javax.net.ssl.SSLException("TLS")))
+        assertEquals("Host rejected the connection (HTTP 503)",
+            connectionFailureReason(java.io.IOException("handshake failed"), 503))
+    }
 }

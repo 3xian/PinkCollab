@@ -18,6 +18,7 @@ import androidx.compose.ui.test.swipe
 import androidx.compose.ui.geometry.Offset
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.pinkcollab.data.AppState
+import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.PairedHost
@@ -81,9 +82,10 @@ class TasksPagerBarDeviceTest {
 
     @Test fun cached_messages_remain_visible_during_detail_and_history_refresh() {
         val key = SessionKey("host", "s0")
-        val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""), sessions = sessions)
+        val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            connection = ConnectionState.Online(1L), sessions = sessions)
         val message = TimelineItem("message", "user", "Keep this visible", "", "")
-        val detail = SessionDetail(sessions.first(),
+        val detail = SessionDetail(sessions.first(), snapshotToken = "subscription",
             savedHistory = SavedHistory.Ready(null, listOf(message), null))
         var app by mutableStateOf(AppState(hosts = mapOf("host" to host), details = mapOf(key to detail)))
         compose.setContent {
@@ -103,8 +105,10 @@ class TasksPagerBarDeviceTest {
 
     @Test fun empty_cache_shows_loading_then_failure_without_false_empty_message() {
         val key = SessionKey("host", "s0")
-        val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""), sessions = sessions)
-        val detail = SessionDetail(sessions.first(), savedHistory = SavedHistory.Ready(null, emptyList(), null))
+        val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            connection = ConnectionState.Online(1L), sessions = sessions)
+        val detail = SessionDetail(sessions.first(), snapshotToken = "subscription",
+            savedHistory = SavedHistory.Ready(null, emptyList(), null))
         var app by mutableStateOf(AppState(hosts = mapOf("host" to host), details = mapOf(key to detail)))
         compose.setContent {
             TasksScreen(TasksScreenState(sessionListState(app), app.details, emptyMap(), emptyMap(), emptySet(), emptyMap(),

@@ -49,9 +49,14 @@ class ProtocolReducerTest {
         val first = reduce(app(), session(runtime = runtime("idle"), history = true)).state
         val detail = first.details.getValue(key)
         val request = HistoryRequest(detail.snapshotToken!!, detail.historyEpoch)
-        val reconnect = reduce(first, host()).state
+        val retrying = first.copy(hosts = first.hosts.mapValues { (_, host) ->
+            host.copy(connection = ConnectionState.Reconnecting,
+                connectionProgress = ConnectionProgress(3, "Connection timed out"))
+        })
+        val reconnect = reduce(retrying, host()).state
         assertTrue(reconnect.details.isEmpty())
         assertEquals(ConnectionState.Online(123), reconnect.hosts.getValue("host").connection)
+        assertNull(reconnect.hosts.getValue("host").connectionProgress)
         val fresh = reduce(reconnect, session()).state.details.getValue(key)
         assertFalse(request.matches(fresh))
         assertNull(fresh.session.generation)

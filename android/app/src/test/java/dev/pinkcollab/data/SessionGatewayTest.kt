@@ -102,7 +102,7 @@ class SessionGatewayTest {
             throw GatewayHttpException(503, "history_unavailable", "OMP history is unavailable")
         }
         val gateway = gatewayWith(state, transport)
-        val connections = HostConnectionSupervisor(this, transport, { _, _ -> }, { _, _ -> },
+        val connections = HostConnectionSupervisor(this, transport, { _, _, _ -> }, { _, _ -> },
             gateway::invalidateSubscription)
         connections.focus("host", "session")
         val initial = loadingDetail()
@@ -124,7 +124,7 @@ class SessionGatewayTest {
         assertNull(retained.snapshotToken)
         assertEquals(running.session, retained.session)
         assertEquals(running.liveItems, retained.liveItems)
-        assertEquals(SavedHistory.Failed, retained.savedHistory)
+        assertEquals(SavedHistory.Loading, retained.savedHistory)
         assertEquals(1, requests)
         assertFalse(connections.isDesired("host", "session"))
         assertTrue(connections.isDesired("another-host", "session"))
@@ -138,7 +138,7 @@ class SessionGatewayTest {
             val state = MutableStateFlow(AppState())
             val transport = NoNetworkTransport()
             val gateway = gatewayWith(state, transport)
-            val connections = HostConnectionSupervisor(this, transport, { _, _ -> }, { _, _ -> },
+            val connections = HostConnectionSupervisor(this, transport, { _, _, _ -> }, { _, _ -> },
                 gateway::invalidateSubscription)
             connections.focus("host", "session")
             state.value = AppState(details = mapOf(key to ready))
@@ -163,7 +163,7 @@ class SessionGatewayTest {
         val state = MutableStateFlow(AppState())
         val transport = HistoryTransport { response.await() }
         val gateway = gatewayWith(state, transport)
-        val connections = HostConnectionSupervisor(this, transport, { _, _ -> }, { _, _ -> },
+        val connections = HostConnectionSupervisor(this, transport, { _, _, _ -> }, { _, _ -> },
             gateway::invalidateSubscription)
         connections.focus("host", "session")
         state.value = AppState(details = mapOf(key to loadingDetail()))
@@ -228,15 +228,11 @@ class SessionGatewayTest {
         assertEquals(SavedHistory.Loading, state.value.details.getValue(key).savedHistory)
     }
 
-    @Test fun missing_subscription_fails_an_in_flight_page() = runTest {
+    @Test fun missing_subscription_waits_for_reconnection_without_requesting_history() = runTest {
         val key = SessionKey("host", "session")
         val state = MutableStateFlow(AppState(details = mapOf(key to loadingDetail().copy(snapshotToken = null))))
-        val failure = runCatching {
-            gatewayWith(state, HistoryTransport { error("unexpected") }).loadHistory("host", "session", null)
-        }.exceptionOrNull()
-
-        assertTrue(failure is IOException)
-        assertEquals(SavedHistory.Failed, state.value.details.getValue(key).savedHistory)
+        gatewayWith(state, HistoryTransport { error("unexpected") }).loadHistory("host", "session", null)
+        assertEquals(SavedHistory.Loading, state.value.details.getValue(key).savedHistory)
     }
 
     @Test fun focusing_a_session_preserves_same_id_detail_on_another_host() = runTest {

@@ -45,10 +45,8 @@ internal class SessionGateway(
         val key = SessionKey(hostId, id)
         mutable.update { app ->
             val current = app.details[key] ?: return@update app
-            app.copy(details = app.details + (key to current.copy(
-                snapshotToken = null,
-                savedHistory = if (current.savedHistory is SavedHistory.Loading) SavedHistory.Failed else current.savedHistory,
-            )))
+            // A new subscription will resume history loading. Losing the old one is not a history failure.
+            app.copy(details = app.details + (key to current.copy(snapshotToken = null)))
         }
     }
 
@@ -56,10 +54,7 @@ internal class SessionGateway(
         val key = SessionKey(hostId, id)
         val before = state.value.details[key] ?: return
         if (before.snapshotToken != snapshotToken) return
-        if (snapshotToken == null) {
-            failUnstartedHistory(key)
-            throw IOException("History unavailable")
-        }
+        if (snapshotToken == null) return
         val request = HistoryRequest(snapshotToken, before.historyEpoch)
         val p = paired(hostId)
         val page = try {
@@ -106,15 +101,6 @@ internal class SessionGateway(
                 if (retries++ >= 2) throw failure
                 delay(250)
             }
-        }
-    }
-
-    /** The effect was dropped before a request existed. Do not leave the page Loading. */
-    private fun failUnstartedHistory(key: SessionKey) {
-        mutable.update { app ->
-            val current = app.details[key] ?: return@update app
-            if (current.snapshotToken != null || current.savedHistory !is SavedHistory.Loading) return@update app
-            app.copy(details = app.details + (key to current.copy(savedHistory = SavedHistory.Failed)))
         }
     }
 

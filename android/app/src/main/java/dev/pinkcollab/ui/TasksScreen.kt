@@ -186,9 +186,6 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                 pageSpacing = 8.dp,
                 key = { pagerKeys[it] },
             ) { pageIndex ->
-                val isVisible by remember(pagerState, pageIndex) {
-                    derivedStateOf { pagerState.layoutInfo.visiblePagesInfo.any { it.index == pageIndex } }
-                }
                 val session = sessions[pageIndex]
                 val key = SessionKey(session.hostId, session.id)
                 val detail = state.details[key]
@@ -200,7 +197,6 @@ internal fun TasksScreen(state: TasksScreenState, actions: TasksScreenActions) {
                     }
                 SessionPage(
                     isActive = pageIndex == pagerState.settledPage,
-                    isVisible = isVisible,
                     state = SessionPageState(
                         detail = detailState,
                         summary = session,

@@ -108,12 +108,13 @@ internal class GatewayRepository(
         }
     }
 
-    private fun connectionState(hostId: String, connection: ConnectionState) {
+    private fun connectionState(hostId: String, connection: ConnectionState, progress: ConnectionProgress?) {
         mutable.update { app ->
             val host = app.hosts[hostId] ?: return@update app
             val unavailable = connection is ConnectionState.Offline || connection == ConnectionState.AuthenticationRequired || connection == ConnectionState.UpgradeRequired
             val initial = if (unavailable && host.initialSync == InitialSyncState.Pending) InitialSyncState.Unavailable else host.initialSync
-            app.copy(hosts = app.hosts + (hostId to host.copy(connection = connection, initialSync = initial)))
+            app.copy(hosts = app.hosts + (hostId to host.copy(connection = connection,
+                connectionProgress = progress, initialSync = initial)))
         }
         if (connection is ConnectionState.Offline || connection == ConnectionState.AuthenticationRequired || connection == ConnectionState.UpgradeRequired) initialSyncTimeouts.remove(hostId)?.cancel()
     }
