@@ -53,6 +53,10 @@ node_modules/
 # Scratch review dumps
 .tmp-review/
 
+# Generated OMP test session logs in the repository root
+/fixture-session.jsonl
+/fixture-session-[0-9]*.jsonl
+
 AGENTS.md
 .workbuddy/
 
