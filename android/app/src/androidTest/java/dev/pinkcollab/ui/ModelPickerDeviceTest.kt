@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertValueEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -39,6 +42,30 @@ class ModelPickerDeviceTest {
     }
     private val catalog = ModelCatalog(models, listOf("off", "low", "high"))
 
+    @Test fun unchanged_settings_can_close_without_applying_and_current_survives_draft_selection() {
+        var applied: ModelSettingsChanges? = null
+        var dismissed = 0
+        compose.setContent {
+            ModelPickerSheet(
+                state = LoadState.Ready(catalog), current = models.first().copy(thinkingLevel = "high"),
+                enabled = true, runtimeAttached = true, runtimeStarting = false,
+                canStartRuntime = false, startRuntime = {}, dismiss = { dismissed++ }, retry = {}, refresh = {},
+                apply = { applied = it },
+            )
+        }
+        compose.onNodeWithText("Done").assertIsEnabled()
+        compose.onNodeWithText("Current", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Model 1, provider0").performClick().assertIsSelected()
+        compose.onNodeWithContentDescription("Model 0, provider0").assertIsNotSelected()
+        compose.onNodeWithText("Current", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Apply").assertIsEnabled()
+        compose.onNodeWithContentDescription("Model 0, provider0").performClick()
+        compose.onNodeWithText("Apply").assertDoesNotExist()
+        compose.onNodeWithText("Done").performClick()
+        assertEquals(1, dismissed)
+        assertNull(applied)
+    }
+
     @Test fun single_thinking_level_can_be_selected_and_applied_when_unset() {
         var applied: ModelSettingsChanges? = null
         compose.setContent {
@@ -68,7 +95,7 @@ class ModelPickerDeviceTest {
             )
         }
         compose.onNodeWithText("Thinking Not set").assertIsDisplayed()
-        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.onNodeWithText("Done").assertIsEnabled()
         compose.onNodeWithTag("thinkingLevel:off")
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("thinkingSlider").assertValueEquals("off")
@@ -110,14 +137,14 @@ class ModelPickerDeviceTest {
         }
         val slider = compose.onNodeWithTag("thinkingSlider")
         slider.assertValueEquals("low")
-        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.onNodeWithText("Done").assertIsEnabled()
         slider.performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
         slider.assertValueEquals("off")
         slider.performSemanticsAction(SemanticsActions.SetProgress) { it(2f) }
         slider.assertValueEquals("high")
         slider.performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
         slider.assertValueEquals("low")
-        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.onNodeWithText("Done").assertIsEnabled()
         slider.performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
         compose.onNodeWithText("Apply").performClick()
         assertEquals(ModelSettingsChanges(null, "off"), applied)
@@ -150,7 +177,7 @@ class ModelPickerDeviceTest {
         compose.onNodeWithTag("modelList").performTouchInput { swipeUp() }
         compose.onNodeWithText("Models").assertIsDisplayed()
         compose.onNodeWithText("Thinking ", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Apply").assertIsDisplayed()
+        compose.onNodeWithText("Done").assertIsDisplayed()
         assertEquals(0, dismissed)
 
         compose.onNodeWithTag("thinkingSlider").performTouchInput {
@@ -168,6 +195,8 @@ class ModelPickerDeviceTest {
 
         compose.onNodeWithText("Reload").performClick()
         assertEquals(1, refreshes)
+        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.onNodeWithText("Refreshing models…").assertIsDisplayed()
         compose.onNodeWithText("Thinking ", substring = true).assertIsDisplayed()
         compose.onNodeWithTag("modelList").assertExists()
         compose.runOnIdle { load = LoadState.Ready(catalog) }

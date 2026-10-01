@@ -38,6 +38,16 @@ import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.ui.theme.*
 
+private enum class ModelPickerAvailability(val message: String? = null) {
+    Available,
+    RuntimeDetached("Start OMP to edit model settings."),
+    RuntimeStarting("Starting runtime…"),
+    LoadFailed("Models could not be loaded. Retry to continue."),
+    Loading("Loading models…"),
+    Refreshing("Refreshing models…"),
+    Busy("Model settings are temporarily unavailable."),
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ModelPickerSheet(
@@ -63,7 +73,16 @@ internal fun ModelPickerSheet(
     var searchCollapsedProviders by remember(query) { mutableStateOf(emptySet<String>()) }
     val changes = modelSettingsChanges(current, pending)
     val ready = state as? LoadState.Ready
-    val canEdit = enabled && ready != null && !ready.refreshing
+    val availability = when {
+        !runtimeAttached -> if (runtimeStarting) ModelPickerAvailability.RuntimeStarting
+            else ModelPickerAvailability.RuntimeDetached
+        state is LoadState.Failed -> ModelPickerAvailability.LoadFailed
+        ready == null -> ModelPickerAvailability.Loading
+        ready.refreshing -> ModelPickerAvailability.Refreshing
+        !enabled -> ModelPickerAvailability.Busy
+        else -> ModelPickerAvailability.Available
+    }
+    val canEdit = availability == ModelPickerAvailability.Available
     if (!showUsage) Dialog(
         onDismissRequest = dismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
@@ -114,7 +133,8 @@ internal fun ModelPickerSheet(
                                     }
                                     if (expanded) {
                                         items(models, key = { "model:${it.provider}/${it.id}" }) { model ->
-                                            CompactModelRow(model, isSelectedModel(pending.model, model), canEdit) {
+                                            CompactModelRow(model, isSelectedModel(pending.model, model),
+                                                isSelectedModel(current, model), canEdit) {
                                                 pending = selectModelDraft(catalog, current, pending, model)
                                             }
                                         }
@@ -162,7 +182,8 @@ internal fun ModelPickerSheet(
                     ModelPickerActions(
                         dismiss = dismiss,
                         apply = { apply(changes) },
-                        applyEnabled = canEdit && !changes.isEmpty && runtimeAttached,
+                        unchanged = changes.isEmpty,
+                        availability = availability,
                     )
                 }
             }
@@ -248,7 +269,7 @@ private fun ModelProviderHeader(provider: String, count: Int, expanded: Boolean,
 }
 
 @Composable
-private fun CompactModelRow(model: ModelInfo, selected: Boolean, enabled: Boolean, onSelect: () -> Unit) {
+private fun CompactModelRow(model: ModelInfo, selected: Boolean, current: Boolean, enabled: Boolean, onSelect: () -> Unit) {
     SmallButtons {
         TextButton(
             onClick = rememberHapticOnClick(onSelect),
@@ -256,7 +277,11 @@ private fun CompactModelRow(model: ModelInfo, selected: Boolean, enabled: Boolea
             modifier = Modifier.fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 2.dp)
                 .heightIn(min = SmallButtonHeight)
-                .semantics { this.selected = selected; contentDescription = "${model.name}, ${model.provider}" },
+                .semantics {
+                    this.selected = selected
+                    contentDescription = "${model.name}, ${model.provider}"
+                    if (current) stateDescription = "Current model"
+                },
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             colors = ButtonDefaults.textButtonColors(
                 containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
@@ -272,6 +297,10 @@ private fun CompactModelRow(model: ModelInfo, selected: Boolean, enabled: Boolea
             Spacer(Modifier.width(8.dp))
             Text(model.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodySmall)
+            if (current) {
+                Spacer(Modifier.width(8.dp))
+                Text("Current", style = MaterialTheme.typography.labelSmall)
+            }
             if (selected) {
                 Spacer(Modifier.width(8.dp))
                 Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp), tint = markerColor)
@@ -281,25 +310,33 @@ private fun CompactModelRow(model: ModelInfo, selected: Boolean, enabled: Boolea
 }
 
 @Composable
-private fun ModelPickerActions(dismiss: () -> Unit, apply: () -> Unit, applyEnabled: Boolean) {
-    SmallButtons {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = rememberHapticOnClick(dismiss),
-                modifier = Modifier.height(SmallButtonHeight),
-                contentPadding = SmallButtonPadding,
-            ) { Text("Cancel") }
-            Button(
-                onClick = rememberHapticOnClick(apply),
-                enabled = applyEnabled,
-                modifier = Modifier.height(SmallButtonHeight),
-                contentPadding = SmallButtonPadding,
+private fun ModelPickerActions(dismiss: () -> Unit, apply: () -> Unit, unchanged: Boolean, availability: ModelPickerAvailability) {
+    val available = availability == ModelPickerAvailability.Available
+    val done = unchanged && available
+    Column {
+        availability.message?.let { message ->
+            Text(message, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall, color = TextMid)
+        }
+        SmallButtons {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Apply")
+                TextButton(
+                    onClick = rememberHapticOnClick(dismiss),
+                    modifier = Modifier.height(SmallButtonHeight),
+                    contentPadding = SmallButtonPadding,
+                ) { Text("Cancel") }
+                Button(
+                    onClick = rememberHapticOnClick(if (done) dismiss else apply),
+                    enabled = available,
+                    modifier = Modifier.height(SmallButtonHeight),
+                    contentPadding = SmallButtonPadding,
+                ) {
+                    Text(if (done) "Done" else "Apply")
+                }
             }
         }
     }

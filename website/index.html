@@ -213,15 +213,6 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
                   <div class="ownership-note"><span aria-hidden="true">⌁</span><p><strong>Your machines stay yours.</strong> OMP runs on your hosts. Model provider credentials are configured there, not on the phone; OMP may send them to your provider when making model requests. Pair devices with a single-use QR code and revoke access when you need to.</p><a href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md">Deployment guide <span aria-hidden="true">↗</span></a></div>
         </figure>
       </section>
-      <section class="limits section" id="limits" aria-labelledby="limits-title">
-        <div class="section-heading"><p class="eyebrow">BEFORE YOU START</p><h2 id="limits-title">What PinkCollab does not do yet.</h2><p>So the first surprise isn’t a surprise.</p></div>
-        <ul class="limits-list">
-          <li>Running OMP processes are not restored when the gateway restarts. Those sessions show as offline. History can still be read from OMP's session file; the live event stream is not replayed.</li>
-          <li>Notifications are not implemented: a session waiting on your input only shows it while the app is open.</li>
-          <li>No terminal, Git client, code editor, or cloud relay: PinkCollab is a bridge to OMP on your own hosts, not an IDE and not a middleman.</li>
-        </ul>
-
-      </section>
       <section class="powered-by section" id="oh-my-pi" aria-labelledby="omp-title">
         <div class="powered-card">
           <div class="powered-intro">
