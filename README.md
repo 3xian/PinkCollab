@@ -4,19 +4,39 @@
 
 [PinkCollab](https://3xian.github.io/PinkCollab/), **Android client for Oh My Pi (OMP).**
 
-Trigger or continue [OMP](https://omp.sh/) sessions remotely. Swipe to switch between sessions smoothly and quickly.
+Use [OMP](https://omp.sh/) on your own computer from your Android phone.
 
-<p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="480" alt="PinkCollab app showing an OMP session on a phone" /></p>
+- Read and continue existing OMP conversations without manually importing them.
+- Start new sessions in your projects, send prompts, and switch between sessions.
+- Keep OMP running on your host, using its own model-provider configuration.
 
-## Install
+Continuing a saved conversation is **not** a takeover of a running terminal session. Close the corresponding OMP instance on the host before continuing from your phone.
 
-Install the [Android app](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) and PinkCollab CLI from the same release. The guided setup needs Node.js 18+, [OMP](https://omp.sh/), and [Tailscale](https://tailscale.com/download) on the host. Manual deployments can use Tailscale Serve or another HTTPS proxy.
+<p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="720" alt="PinkCollab on Android showing session switching, tool activity, and prompt controls" /></p>
 
-```sh
-npm install -g pinkcollab@latest
-```
+## Before you start
 
-On macOS, we recommend the [Homebrew Tailscale CLI](https://formulae.brew.sh/formula/tailscale):
+| Where | What you need |
+| --- | --- |
+| Android phone | The [PinkCollab APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk). |
+| Computer running OMP | A working [OMP](https://omp.sh/) installation, Node.js 18+, and [Tailscale](https://tailscale.com/download) for guided setup. |
+| Host account | Use the same OS user that owns your OMP configuration and conversations. `omp --version` must work for that user. |
+| Remote connection | Guided setup uses Tailscale Funnel; your tailnet must permit Funnel for the host. |
+
+**The default connection is public HTTPS.** Tailscale Funnel publishes the Gateway to the internet; app access requires pairing credentials. The URL itself is not a secret. Your phone does **not** need Tailscale for this path.
+
+For private, tailnet-only access, use [manual Tailscale Serve setup](docs/deployment.md#other-https-front-ends); both the phone and host must join the tailnet. An existing HTTPS reverse proxy is also supported.
+
+## Quick start
+
+### 1. Prepare your host
+
+Install OMP and Tailscale if needed. Setup guides Tailscale sign-in and Funnel approval, but does not install them.
+
+<details>
+<summary>macOS: Tailscale installation</summary>
+
+We recommend the [Homebrew Tailscale CLI](https://formulae.brew.sh/formula/tailscale):
 
 ```sh
 brew install tailscale
@@ -27,43 +47,90 @@ tailscale status
 
 Complete Tailscale sign-in in your browser. If you already use Tailscale.app, you can keep using it.
 
-From the directory containing your projects:
-
-```sh
-cd ~/projects
-pinkcollab setup
-```
-
-Scan the QR code with the PinkCollab Android app. PinkCollab keeps the Gateway running in the background; you can close this terminal after pairing.
-
-Setup guides Tailscale sign-in when needed. Your Tailscale account must permit Funnel. macOS starts the service when you log in; Linux user services start with your user session (see [logout behavior](docs/deployment.md#run-as-a-background-service)).
-
-Running `pinkcollab` later shows host status. Rerun `pinkcollab setup` after upgrading the CLI or adding workspaces. Already paired phones are preserved; pairing another phone is optional.
+</details>
 
 <details>
-<summary>Windows background service</summary>
+<summary>Linux: background-service requirement</summary>
 
-Run setup in an Administrator terminal **as the same Windows user**. Windows requires that account's password (not a PIN) and the *Log on as a service* right. Setup explains the credentials prompt before opening it. If login fails, correct the account in Windows Services and rerun setup; keep your existing configuration. See [troubleshooting](docs/deployment.md#troubleshooting-setup).
+Guided setup uses a systemd user service. It starts with your user session and may stop when you log out. See [background-service behavior](docs/deployment.md#run-as-a-background-service) if the host must remain available after logout.
 
 </details>
 
+<details>
+<summary>Windows: use an elevated terminal as your OMP user</summary>
 
-## Use
+Run setup in an Administrator terminal **as the same Windows user** who owns your OMP configuration and conversations. The background service requires that account's password (not a PIN) and the *Log on as a service* right. Setup explains the credentials prompt before opening it. For passwordless accounts or login failures, see [service requirements](docs/deployment.md#run-as-a-background-service) and [troubleshooting](docs/deployment.md#troubleshooting-setup).
 
-In the app, open **Workspaces**, choose a directory, create a session, and send a prompt. Use **Stop** to interrupt a turn and **Exit** to end its runtime.
+</details>
 
-To continue an existing OMP conversation, open an entry labeled **History** in Tasks and send a message. Close the external OMP instance first. See [host history](docs/omp-discovery.md) for supported storage and refresh behavior.
+### 2. Install the app and CLI
 
-- Pair another phone: `pinkcollab pair`.
-- Check the host: `pinkcollab status`; diagnose problems: `pinkcollab doctor`.
-- Add project roots: `pinkcollab setup --workspace /path/to/code --workspace /path/to/work`.
-- Update the installed background Gateway after an npm upgrade: `pinkcollab setup` or `pinkcollab service install`.
+Install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) on your phone. On the host:
 
-Setup checks service ownership and listener conflicts before changing configuration or remote access. It can be repeated: it merges workspaces and preserves existing settings and paired devices. If a service update fails, resolve the reported error and rerun the same command; unfinished updates are retried. Applying changed configuration or upgrading the binary may restart the Gateway and stop active OMP runtimes; stored sessions remain.
+```sh
+npm install -g pinkcollab@latest
+npm list -g pinkcollab --depth=0
+```
 
-`status` checks local Gateway health and OMP. It also verifies Funnel when configured by PinkCollab; other remote access is labeled externally managed and is not connectivity-tested.
+Use the APK and CLI from the **same release**. Compare the installed npm version with the tag on the [APK's release page](https://github.com/3xian/PinkCollab/releases/latest). If they differ, install `pinkcollab@X.Y.Z` instead of `pinkcollab@latest`, replacing `X.Y.Z` with that release's version without the leading `v`. This also applies when installing an older release.
 
-For [manual setup](docs/deployment.md#tailscale-funnel), automation, service management, and troubleshooting, see [Deployment and networking](docs/deployment.md).
+### 3. Set up and pair
+
+In your terminal, change to the directory containing the projects you want to access, then run:
+
+```sh
+pinkcollab setup
+```
+
+Setup asks you to confirm the current directory as a workspace root, configures remote access, and starts the Gateway as a background service. Scan its QR code with the PinkCollab Android app. You can close the terminal after pairing.
+
+Choose a root that includes the projects used by your existing OMP conversations. To add multiple roots explicitly, use `pinkcollab setup --workspace /path/to/code --workspace /path/to/work`.
+
+### 4. Send your first prompt
+
+In the app, open an existing **History** entry in **Tasks** after closing its OMP instance on the host. Or open **Workspaces**, choose a directory, and create a new session. Send a prompt and confirm that OMP responds on the phone.
+
+Pairing alone does not verify a working OMP session. If you cannot connect or get a response, run `pinkcollab doctor` and consult [setup troubleshooting](docs/deployment.md#troubleshooting-setup).
+
+## Continue an existing OMP conversation
+
+Supported host conversations appear as **History** in **Tasks**; no manual import is required. Open one to read its saved messages. **Close the corresponding external OMP instance before sending a message from the phone**, and do not reopen it elsewhere while PinkCollab owns its runtime. Concurrent use of the same conversation is unsupported.
+
+If a conversation is missing:
+
+- Ensure its project is inside a configured workspace root.
+- Run the Gateway as the user who owns the conversation.
+- Check the selected OMP profile or custom session directory.
+- Reopen or reconnect the app to request a fresh snapshot.
+
+See [host history](docs/omp-discovery.md) for supported storage layouts, profile configuration, and discovery limits.
+
+## Start and control sessions
+
+Open **Workspaces**, choose a directory, create a session, and send a prompt. Swipe to switch between sessions. Use **Stop** to interrupt a turn and **Exit** to end its runtime.
+
+## Common commands and upgrades
+
+| Task | Command |
+| --- | --- |
+| Check the host | `pinkcollab` or `pinkcollab status` |
+| Diagnose problems | `pinkcollab doctor` |
+| Pair another phone | `pinkcollab pair` |
+| Add project roots | `pinkcollab setup --workspace /path/to/code --workspace /path/to/work` |
+| Update the background Gateway after upgrading the CLI | `pinkcollab setup` or `pinkcollab service install` |
+
+To upgrade, install the APK and npm package from the same release, then update the background Gateway. Repeating setup merges workspace roots and preserves existing settings, sessions, and paired phones; pairing another phone is optional. **Upgrading or applying changed configuration may restart the Gateway and stop active OMP runtimes.** Stored conversations remain.
+
+If a service update fails, correct the reported error and rerun the same command; do not delete your configuration or pairing credentials. See [deployment and service management](docs/deployment.md) for update recovery and diagnostic details.
+
+## Availability and security
+
+- The host must remain awake and reachable. A background service does not keep the computer awake; see [macOS lid-close guidance](docs/faq-macos-lid-close.md).
+- macOS starts the service at login. Linux user services may stop at logout; see [background-service behavior](docs/deployment.md#run-as-a-background-service).
+- OMP runs with the Gateway user's filesystem permissions. Workspace roots limit Gateway browsing and session creation; **they are not an OS sandbox**.
+- To revoke a phone's access, use `pinkcollab clients`, then `pinkcollab revoke --client <clientId>`. Removing a host in the app alone does not revoke its credentials.
+
+See [pairing and access](docs/deployment.md#pairing-and-access) for authentication and access-control details.
 
 ## How it works
 
@@ -85,19 +152,19 @@ flowchart TD
     host -->|provider API| Provider
 ```
 
-## Docs
+## User guides
+
+- [Deployment and troubleshooting](docs/deployment.md): networking, pairing, background services, upgrades, and CLI/configuration
+- [Existing OMP conversations](docs/omp-discovery.md): finding and continuing host history
+- [macOS lid-close FAQ](docs/faq-macos-lid-close.md): keeping the host reachable
+- [Session interface](docs/session-presentation.md): status display and interaction behavior
+
+## Developer docs
 
 - [Architecture](docs/architecture.md): components, lifecycles, and state ownership
 - [Protocol 3](docs/protocol.md): REST and WebSocket API contracts
-- [Session presentation](docs/session-presentation.md): session UI, status display, and interaction behavior
-- [Deployment and networking](docs/deployment.md): HTTPS access, pairing, background services, and Gateway CLI/configuration
 - [Development](docs/development.md): contributor setup, builds, and validation
 - [Releases](docs/npm-release.md): maintainer guide to signing and publishing Android, Gateway, and npm releases
-- [External OMP conversations](docs/omp-discovery.md): discovering and continuing host OMP history
-
-## FAQ
-
-- [macOS: Gateway stops working after closing the lid](docs/faq-macos-lid-close.md)
 
 ## License
 
