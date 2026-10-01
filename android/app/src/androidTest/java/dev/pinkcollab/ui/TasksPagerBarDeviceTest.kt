@@ -3,6 +3,8 @@ package dev.pinkcollab.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasTestTag
@@ -156,9 +158,11 @@ class TasksPagerBarDeviceTest {
         compose.setContent {
             TasksScreen(TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                 emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { session, action ->
-                    if (action == SessionAction.Retry) requests += session.id
-                }, { _, _ -> true }))
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
+            LaunchedEffect(Unit) {
+                snapshotFlow { sessionListState(AppState(hosts = mapOf("host" to host))) }
+                    .followTaskFocus(snapshotFlow { selected }) { requests += it.id }
+            }
         }
         compose.mainClock.advanceTimeBy(400)
         compose.runOnIdle { assertEquals(listOf("s0"), requests) }

@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -106,7 +107,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal val fileSelections = mutableFileSelections.asStateFlow()
 
     private val resourceLoader = SessionResourceLoader(viewModelScope, object : SessionResourceActions {
-        override fun hasDetail(key: SessionKey) = key in repository.state.value.details
+        override fun hasDetail(key: SessionKey) = repository.state.value.details[key]?.snapshotToken != null
         override suspend fun detail(session: Session) = repository.detail(session.hostId, session.id)
         override suspend fun models(session: Session) = repository.models(session.hostId, session.id)
     }, ::showError)
@@ -122,6 +123,10 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         }
         connectivity.registerDefaultNetworkCallback(networkCallback)
         viewModelScope.launch { repository.errors.collect(::showError) }
+    }
+
+    internal suspend fun followTaskFocus(selections: Flow<SessionKey?>) {
+        sessionListState.followTaskFocus(selections) { loadDetail(it) }
     }
 
     override fun onCleared() {
@@ -175,7 +180,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun onSessionAction(session: Session, action: SessionAction) {
         val key = SessionKey(session.hostId, session.id)
         when (action) {
-            SessionAction.Retry -> loadDetail(session, force = true)
             SessionAction.Send -> sendPrompt(session)
             is SessionAction.DraftChanged -> setDraftText(key, action.text)
             is SessionAction.FileSelected -> selectDraftFile(key, action.uri)

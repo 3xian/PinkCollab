@@ -6,6 +6,8 @@ import dev.pinkcollab.data.ConnectionProgress
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.InitialSyncState
+import dev.pinkcollab.data.Session
+import dev.pinkcollab.data.compareTimestamps
 import dev.pinkcollab.data.TaskListLoadState
 import dev.pinkcollab.data.Workspace
 import kotlinx.coroutines.channels.Channel
@@ -17,6 +19,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -28,6 +33,39 @@ internal fun <T> Flow<T>.batchLatestPresentation(intervalMillis: Long = 75): Flo
     return buffer(Channel.CONFLATED).transform { snapshot ->
         emit(snapshot)
         delay(intervalMillis)
+    }
+}
+
+internal fun compareSessionsForPresentation(a: Session, b: Session): Int = when {
+    a.isActive != b.isActive -> if (a.isActive) -1 else 1
+    a.isActive -> compareTimestamps(b.createdAt, a.createdAt)
+    else -> compareTimestamps(b.updatedAt, a.updatedAt)
+}
+
+internal fun sessionForFocus(app: SessionListState, selected: SessionKey?): Session? {
+    if (app.loadState == TaskListLoadState.Loading) return null
+    val sessions = app.hosts.values.asSequence().flatMap { it.sessions.asSequence() }
+    if (selected != null) {
+        app.hosts[selected.hostId]?.sessions?.firstOrNull { it.id == selected.sessionId }?.let { return it }
+    }
+    return sessions.minWithOrNull(::compareSessionsForPresentation)
+}
+
+/** The Tasks route owns this collector, including its startup wait and pending debounce. */
+internal suspend fun Flow<SessionListState>.followTaskFocus(
+    selections: Flow<SessionKey?>,
+    focus: (Session) -> Unit,
+) {
+    var lastRequested: Pair<SessionKey, String?>? = null
+    combine(selections) { app, selected ->
+        sessionForFocus(app, selected)?.let { session ->
+            session to (SessionKey(session.hostId, session.id) to app.hosts[session.hostId]?.snapshotToken)
+        }
+    }.distinctUntilChangedBy { it?.second }.collectLatest { target ->
+        if (target == null || target.second == lastRequested) return@collectLatest
+        if (lastRequested != null) delay(200)
+        focus(target.first)
+        lastRequested = target.second
     }
 }
 

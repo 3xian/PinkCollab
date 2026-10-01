@@ -45,7 +45,6 @@ internal fun sessionSyncMessage(host: HostState?, hasSnapshot: Boolean): String 
 }
 
 internal sealed interface SessionAction {
-    data object Retry : SessionAction
     data object Send : SessionAction
     data class DraftChanged(val text: String) : SessionAction
     data class FileSelected(val uri: Uri) : SessionAction

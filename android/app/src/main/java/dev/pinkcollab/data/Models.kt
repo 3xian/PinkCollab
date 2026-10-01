@@ -168,6 +168,17 @@ data class HostState(
     val connectionProgress: ConnectionProgress? = null,
 ) {
     val connected: Boolean get() = connection is ConnectionState.Online
+
+    internal fun withConnectionState(connection: ConnectionState, progress: ConnectionProgress?): HostState {
+        val initial = when {
+            initialSync == InitialSyncState.Ready -> InitialSyncState.Ready
+            connection is ConnectionState.Offline ||
+                connection == ConnectionState.AuthenticationRequired ||
+                connection == ConnectionState.UpgradeRequired -> InitialSyncState.Unavailable
+            else -> InitialSyncState.Pending
+        }
+        return copy(connection = connection, connectionProgress = progress, initialSync = initial)
+    }
 }
 data class AppState(
     val hosts: Map<String, HostState> = emptyMap(),
@@ -191,8 +202,6 @@ data class AppState(
             }
         }
 }
-
-internal const val InitialSyncTimeoutMillis = 8_000L
 
 enum class InitialSyncState { Pending, Ready, Unavailable }
 enum class TaskListLoadState { Loading, Ready, Unavailable }

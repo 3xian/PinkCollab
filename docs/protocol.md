@@ -31,7 +31,7 @@ The host list receives creation and authoritative state updates without subscrib
 {"type":"session_snapshot","sessionId":"...","session":{},"runtime":null,"timeline":[],"operations":[],"hasHistory":false}
 ```
 
-A subscribe may include `historyLimit` (1–100). Gateway then attempts to include an optional `history` first page using the same `{items,source,nextCursor}` shape and cursors as the history REST endpoint. History is read separately from the snapshot; it is not part of its event fence. If the read fails, takes over one second, or the serialized page exceeds 256 KiB, Gateway omits `history` and the client loads it through REST. Android requests the latest 25 items and loads earlier pages on demand. Clients that omit `historyLimit`, and older Gateways, retain the REST flow.
+A subscribe may include `historyLimit` (1–100). Gateway then attempts to include an optional `history` first page using the same `{items,source,nextCursor}` shape and cursors as the history REST endpoint. History is read separately from the snapshot; it is not part of its event fence. If the read fails, takes over one second, or the serialized page exceeds 256 KiB, Gateway omits `history` and the client loads it through REST. Android requests the latest 10 items to minimize first-content transfer and loads earlier pages on demand. Clients that omit `historyLimit`, and older Gateways, retain the REST flow.
 
 `operations` contains up to 20 recent receipts. Use receipt lookup for older pending commands. `hasHistory` indicates a server-side history mapping, not a guarantee that the transcript is already available.
 

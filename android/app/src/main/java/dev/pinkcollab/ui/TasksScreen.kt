@@ -35,8 +35,6 @@ import androidx.compose.ui.zIndex
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 
 internal data class TasksScreenState(
     val sessions: SessionListState,
@@ -82,13 +80,7 @@ internal fun TasksScreen(
     // Inactive sessions follow by updatedAt DESC.
     val hostSessions = remember(hosts) { hosts.values.map { it.sessions } }
     val sessions = remember(hostSessions) {
-        hostSessions.flatten().sortedWith { a, b ->
-            when {
-                a.isActive != b.isActive -> if (a.isActive) -1 else 1
-                a.isActive -> compareTimestamps(b.createdAt, a.createdAt)
-                else -> compareTimestamps(b.updatedAt, a.updatedAt)
-            }
-        }
+        hostSessions.flatten().sortedWith(::compareSessionsForPresentation)
     }
     val initialPage = sessions.indexOfFirst { SessionKey(it.hostId, it.id) == selectedSession }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
@@ -106,28 +98,6 @@ internal fun TasksScreen(
     }
 
     val scope = rememberCoroutineScope()
-    val latestSessions by rememberUpdatedState(sessions)
-    val latestHosts by rememberUpdatedState(hosts)
-    val latestActions by rememberUpdatedState(actions)
-    LaunchedEffect(pagerState) {
-        var lastRequested: Pair<SessionKey, String?>? = null
-        snapshotFlow {
-            if (pagerState.isScrollInProgress) null else {
-                latestSessions.getOrNull(pagerState.settledPage)?.let {
-                    SessionKey(it.hostId, it.id) to latestHosts[it.hostId]?.snapshotToken
-                }
-            }
-        }.collectLatest { target ->
-            if (target == null || target == lastRequested) return@collectLatest
-            // The first page is already settled. Debounce subsequent pager changes only.
-            if (lastRequested != null) delay(200)
-            val session = latestSessions.firstOrNull {
-                SessionKey(it.hostId, it.id) == target.first
-            } ?: return@collectLatest
-            latestActions.session(session, SessionAction.Retry)
-            lastRequested = target
-        }
-    }
 
     // Do not publish the previous page while a navigation target is missing or being applied.
     var pendingSelection by remember(selectedSession) { mutableStateOf(selectedSession) }

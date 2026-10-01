@@ -4,9 +4,7 @@ import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -16,7 +14,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
 
 internal class GatewayRepository(
     private val scope: CoroutineScope,
@@ -33,7 +30,6 @@ internal class GatewayRepository(
         { hostId, sessionId -> sessions.invalidateSubscription(hostId, sessionId) })
     private val directories = DirectoryGateway(scope, api, ::paired)
     private val attachments = AttachmentUploader(api, ::paired)
-    private val initialSyncTimeouts = ConcurrentHashMap<String, Job>()
     private val sessions = SessionGateway(mutable, api, ::paired, connections::focus)
     private val hostCommandGate = HostCommandGate()
     private val commandDispatcher = CommandDispatcher(state, ::paired, api,
@@ -91,41 +87,24 @@ internal class GatewayRepository(
 
     private fun disconnect(id: String) {
         connections.forget(id)
-        initialSyncTimeouts.remove(id)?.cancel()
         directories.removeHost(id)
     }
 
     private fun connect(paired: PairedHost) {
         connections.connect(paired)
-        val hostId = paired.host.id
-        initialSyncTimeouts.remove(hostId)?.cancel()
-        initialSyncTimeouts[hostId] = scope.launch {
-            delay(InitialSyncTimeoutMillis)
-            mutable.update { app ->
-                val host = app.hosts[hostId] ?: return@update app
-                if (host.initialSync != InitialSyncState.Pending) app else app.copy(hosts = app.hosts + (hostId to host.copy(initialSync = InitialSyncState.Unavailable)))
-            }
-        }
     }
 
     private fun connectionState(hostId: String, connection: ConnectionState, progress: ConnectionProgress?) {
         mutable.update { app ->
             val host = app.hosts[hostId] ?: return@update app
-            val unavailable = connection is ConnectionState.Offline || connection == ConnectionState.AuthenticationRequired || connection == ConnectionState.UpgradeRequired
-            val initial = if (unavailable && host.initialSync == InitialSyncState.Pending) InitialSyncState.Unavailable else host.initialSync
-            app.copy(hosts = app.hosts + (hostId to host.copy(connection = connection,
-                connectionProgress = progress, initialSync = initial)))
+            app.copy(hosts = app.hosts + (hostId to host.withConnectionState(connection, progress)))
         }
-        if (connection is ConnectionState.Offline || connection == ConnectionState.AuthenticationRequired || connection == ConnectionState.UpgradeRequired) initialSyncTimeouts.remove(hostId)?.cancel()
     }
 
     private fun event(hostId: String, frame: JSONObject) {
         val reduction = updateAtomically(mutable) { app ->
             val reduced = reduceProtocol(app, hostId, frame, System.currentTimeMillis())
             reduced.state to reduced
-        }
-        if (frame.optString("type") == "host_snapshot") {
-            initialSyncTimeouts.remove(hostId)?.cancel()
         }
         reduction.effects.forEach { effect ->
             when (effect) {

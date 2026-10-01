@@ -6,7 +6,7 @@ import java.io.IOException
 import java.util.zip.GZIPInputStream
 
 internal const val GzipSocketProtocol = "pinkcollab.v3.gzip"
-internal const val InitialHistoryPageSize = 25
+internal const val InitialHistoryPageSize = 10
 private const val MaxDecodedFrameBytes = 8 * 1024 * 1024
 
 /** Binary frames are permitted only after gzip subprotocol negotiation. */

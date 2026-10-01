@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import dev.pinkcollab.R
 import dev.pinkcollab.data.AppState
-import dev.pinkcollab.data.InitialSyncTimeoutMillis
 import dev.pinkcollab.data.TaskListLoadState
 import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.BrandPink
@@ -57,9 +56,11 @@ import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.roundToInt
 
+private const val StartupLoadingTimeoutMillis = 8_000L
+
 internal suspend fun awaitStartupReadiness(
     appStates: StateFlow<AppState>,
-    maximumDurationMillis: Long = InitialSyncTimeoutMillis,
+    maximumDurationMillis: Long = StartupLoadingTimeoutMillis,
 ) = coroutineScope {
     if (appStates.value.taskListLoadState == TaskListLoadState.Loading) {
         withTimeoutOrNull(maximumDurationMillis) {

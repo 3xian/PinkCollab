@@ -53,14 +53,31 @@ class TaskListLoadStateTest {
     }
 
     @Test
-    fun `timed out reconnect remains unavailable while retries continue`() {
-        assertEquals(
-            TaskListLoadState.Unavailable,
-            appWithHost(
-                connection = ConnectionState.Reconnecting,
-                initialSync = InitialSyncState.Unavailable,
-            ).taskListLoadState,
-        )
+    fun `network recovery clears initial failure until snapshot arrives`() {
+        var host = HostState(paired)
+        host = host.withConnectionState(ConnectionState.Offline("Network unavailable"), null)
+        assertEquals(TaskListLoadState.Unavailable, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
+        for (connection in listOf(ConnectionState.Connecting, ConnectionState.Reconnecting, ConnectionState.Synchronizing)) {
+            host = host.withConnectionState(connection, ConnectionProgress(2))
+            assertEquals(InitialSyncState.Pending, host.initialSync)
+            assertEquals(TaskListLoadState.Loading, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
+        }
+    }
+
+    @Test
+    fun `terminal connection failures remain unavailable before first snapshot`() {
+        for (connection in listOf(ConnectionState.Offline("Unreachable"),
+            ConnectionState.AuthenticationRequired, ConnectionState.UpgradeRequired)) {
+            val host = HostState(paired).withConnectionState(connection, null)
+            assertEquals(TaskListLoadState.Unavailable, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
+        }
+    }
+
+    @Test
+    fun `connection loss preserves a known empty snapshot`() {
+        val host = HostState(paired, initialSync = InitialSyncState.Ready)
+            .withConnectionState(ConnectionState.Offline("Network unavailable"), null)
+        assertEquals(TaskListLoadState.Ready, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
     }
 
     private fun appWithHost(

@@ -16,6 +16,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.pinkcollab.BuildConfig
 import dev.pinkcollab.ui.theme.Base0
@@ -57,6 +58,13 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     LaunchedEffect(vm) {
         awaitStartupReadiness(vm.appState)
         startupReady = true
+    }
+    LaunchedEffect(vm, route, lifecycleOwner) {
+        if (route == AppRoute.Tasks) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                vm.followTaskFocus(snapshotFlow { selectedSession })
+            }
+        }
     }
     LaunchedEffect(startupReady, vm) {
         if (startupReady) vm.checkForUpdates(manual = false)

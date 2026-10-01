@@ -660,7 +660,7 @@ fn socket_message(encoded: String, gzip: bool) -> std::io::Result<Message> {
         return Err(std::io::Error::other("socket frame exceeds budget"));
     }
     if gzip && encoded.len() >= 1024 {
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(encoded.as_bytes())?;
         return Ok(Message::Binary(encoder.finish()?.into()));
     }
