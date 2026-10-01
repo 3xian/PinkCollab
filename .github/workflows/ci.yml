@@ -135,7 +135,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [checks, device-tests]
+        include:
+          - suite: checks
+          - suite: device-tests
+            command: ./gradlew :app:connectedDebugAndroidTest --console=plain || { sudo dmesg; exit 1; }
+          - suite: release-device-tests
+            command: ./gradlew :app:connectedReleaseTestAndroidTest -PtestBuildType=releaseTest -Pandroid.testInstrumentationRunnerArguments.class=dev.pinkcollab.ui.ReleaseMarkdownDeviceTest --console=plain
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -169,14 +174,16 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Enable KVM for Android emulator
-        if: matrix.suite == 'device-tests'
+        if: matrix.suite != 'checks'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # Debug and optimized tests run on separate runners so R8 does not sit
+      # behind the full debug suite. Both remain required by ci-required.
       # AOSP removes unrelated Google services; cold boot avoids stale renderer snapshot state.
-      - name: Run debug and optimized Android device tests
-        if: matrix.suite == 'device-tests'
+      - name: Run Android device tests (${{ matrix.suite }})
+        if: matrix.suite != 'checks'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           # 36.1.9: 37.1.11 can crash the Linux GLES host (bdero/flutter_scene#314).
@@ -188,14 +195,12 @@ jobs:
           force-avd-creation: true
           emulator-options: -no-snapshot -no-window -gpu swangle_indirect -feature -Vulkan -noaudio -no-boot-anim -camera-back none
           working-directory: android
-          script: |
-            ./gradlew :app:connectedDebugAndroidTest --console=plain || { sudo dmesg; exit 1; }
-            ./gradlew :app:connectedReleaseTestAndroidTest -PtestBuildType=releaseTest -Pandroid.testInstrumentationRunnerArguments.class=dev.pinkcollab.ui.ReleaseMarkdownDeviceTest --console=plain
+          script: ${{ matrix.command }}
       - name: Upload device test report
-        if: failure() && matrix.suite == 'device-tests'
+        if: failure() && matrix.suite != 'checks'
         uses: actions/upload-artifact@v7
         with:
-          name: pinkcollab-android-device-tests
+          name: pinkcollab-android-${{ matrix.suite }}
           path: |
             android/app/build/reports/androidTests/connected/**
             android/app/build/outputs/androidTest-results/connected/**
