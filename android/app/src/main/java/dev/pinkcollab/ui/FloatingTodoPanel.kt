@@ -10,13 +10,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +42,6 @@ internal fun FloatingTodoPanel(
 ) {
     val tasks = item.phases.flatMap { it.tasks }
     val closed = tasks.count { it.status == TodoStatus.Completed || it.status == TodoStatus.Abandoned }
-    val completed = tasks.count { it.status == TodoStatus.Completed }
     val settled = tasks.isNotEmpty() && closed == tasks.size
     val focus = tasks.firstOrNull { it.status == TodoStatus.Active }
         ?: tasks.firstOrNull { it.status == TodoStatus.Pending }
@@ -73,7 +70,6 @@ internal fun FloatingTodoPanel(
     val progress by animateFloatAsState(if (tasks.isEmpty()) 0f else closed.toFloat() / tasks.size,
         tween(650, easing = FastOutSlowInEasing), label = "todoProgress")
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(260), label = "todoArrow")
-    var details by rememberSaveable { mutableStateOf(false) }
     val shape = RoundedCornerShape(13.dp)
     Column(modifier.fillMaxWidth().heightIn(max = maxHeight).shadow(10.dp, shape).clip(shape)
         .background(Color(0xFF14111B))
@@ -110,9 +106,6 @@ internal fun FloatingTodoPanel(
             Column(Modifier.fillMaxWidth().heightIn(max = (maxHeight - 60.dp).coerceAtLeast(1.dp))
                 .verticalScroll(rememberScrollState()).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("QUEST LOG · $completed completed" + tasks.count { it.status == TodoStatus.Abandoned }.let {
-                    if (it > 0) " · $it dropped" else ""
-                }, color = accent, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Default)
                 item.phases.forEachIndexed { phaseIndex, phase ->
                     key(phaseIndex, phase.name) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -126,13 +119,6 @@ internal fun FloatingTodoPanel(
                         phase.tasks.forEachIndexed { index, task ->
                             key(index, task.content) { QuestTaskRow(task, live) }
                         }
-                    }
-                }
-                DetailToggle("Details", details, { details = !details })
-                AnimatedVisibility(details) {
-                    SelectionContainer {
-                        Text("Arguments\n${item.trace.arguments.raw}\n\nOutput\n${item.trace.result}",
-                            color = TextMid, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

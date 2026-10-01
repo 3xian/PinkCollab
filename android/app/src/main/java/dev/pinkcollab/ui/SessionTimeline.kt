@@ -7,15 +7,23 @@ import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,10 +31,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -303,16 +313,17 @@ private fun MarkdownBody(messageId: String, markdown: String, color: Color, rend
 private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean) {
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
     val activityTint = activityColor(group.status)
+    val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(260), label = "activityArrow")
     Column(
         Modifier
             .fillMaxWidth()
             .timelineBand(tint = activityTint, tintAlpha = 0.025f)
+            .animateContentSize()
             .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ActivityStatusIcon(group.status, liveActivity, group.operationCount)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     group.action,
                     style = MaterialTheme.typography.bodyMedium,
@@ -325,24 +336,53 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
                 if (group.summary.isNotBlank()) {
                     Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
+                ActivityOperationIcons(group, liveActivity)
             }
-        }
-        Row(Modifier.padding(start = 28.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                buildString {
-                    append(activityStatusLabel(group.status, liveActivity))
-                    if (group.failureCount > 0 && group.status == ActivityStatus.Running) append("  ${group.failureCount} failed")
-                },
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Default,
-                color = activityTint,
-                modifier = Modifier.weight(1f),
-            )
-            DetailToggle("Details", expanded, onClick = { expanded = !expanded })
+            IconButton(onClick = { expanded = !expanded }) {
+                Icon(
+                    Icons.Outlined.ExpandMore,
+                    contentDescription = if (expanded) "Collapse activity" else "Expand activity",
+                    modifier = Modifier.size(22.dp).rotate(arrow),
+                    tint = TextMid,
+                )
+            }
         }
         if (expanded) {
             group.operations.forEach { operation ->
                 key(operation.id) { ActivityOperationDetails(operation, initiallyExpanded = group.operationCount == 1, liveActivity = liveActivity) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityOperationIcons(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean) {
+    val rowState = rememberLazyListState()
+    val seenOperations = remember(group.id) { group.operations.mapTo(HashSet()) { it.id } }
+    var previousCount by remember(group.id) { mutableIntStateOf(group.operations.size) }
+    LaunchedEffect(group.operations.size) {
+        val grew = group.operations.size > previousCount
+        previousCount = group.operations.size
+        if (grew) rowState.animateScrollToItem(group.operations.lastIndex)
+    }
+    LazyRow(
+        state = rowState,
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy((-4).dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(group.operations, key = { it.id }) { operation ->
+            val entrance = remember(operation.id) { Animatable(if (seenOperations.add(operation.id)) 0f else 1f) }
+            LaunchedEffect(entrance) { entrance.animateTo(1f, tween(280)) }
+            Box(
+                Modifier.animateItem(fadeInSpec = null, placementSpec = tween(280))
+                    .graphicsLayer {
+                        alpha = entrance.value
+                        scaleX = 0.6f + entrance.value * 0.4f
+                        scaleY = scaleX
+                    },
+            ) {
+                ActivityStatusIcon(operation.status, liveActivity, operation.action)
             }
         }
     }
@@ -377,8 +417,8 @@ private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpa
 }
 
 @Composable
-private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, operationCount: Int) {
-    val description = "${activityStatusLabel(status, liveActivity)}, $operationCount ${if (operationCount == 1) "operation" else "operations"}"
+private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, action: String) {
+    val description = "$action, ${activityStatusLabel(status, liveActivity)}"
     if (status == ActivityStatus.Running && liveActivity) {
         CircularProgressIndicator(
             modifier = Modifier.size(18.dp).semantics { contentDescription = description },
@@ -386,26 +426,17 @@ private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, op
             strokeWidth = 2.dp,
         )
     } else {
-        val iconCount = if (status == ActivityStatus.Running) 1 else operationCount.coerceIn(1, 5)
         val icon = when (status) {
             ActivityStatus.Failed -> Icons.Outlined.ErrorOutline
             ActivityStatus.Succeeded -> Icons.Outlined.Check
             ActivityStatus.Running -> Icons.Outlined.HourglassEmpty
         }
-        Box(
-            Modifier
-                .size(width = 18.dp, height = (18 + (iconCount - 1) * 9).dp)
-                .semantics { contentDescription = description },
-        ) {
-            repeat(iconCount) { index ->
-                Icon(
-                    icon,
-                    contentDescription = null,
-                    modifier = Modifier.offset(y = (index * 9).dp).size(18.dp),
-                    tint = activityColor(status).copy(alpha = 1f - index * 0.2f),
-                )
-            }
-        }
+        Icon(
+            icon,
+            contentDescription = description,
+            modifier = Modifier.size(18.dp),
+            tint = activityColor(status),
+        )
     }
 }
 

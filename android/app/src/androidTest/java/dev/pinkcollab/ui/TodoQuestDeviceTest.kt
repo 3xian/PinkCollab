@@ -54,10 +54,9 @@ class TodoQuestDeviceTest {
             }) })
         }
         compose.mainClock.advanceTimeBy(750)
-        compose.onNodeWithText("QUEST LOG · 2 completed · 1 dropped").assertIsDisplayed()
-        compose.onNodeWithText("Details").performClick()
-        compose.mainClock.advanceTimeBy(500)
-        compose.onNodeWithText("Arguments\n\n\nOutput\nTodo snapshot").assertExists()
+        compose.onNodeWithTag("todoHeader")
+            .assertContentDescriptionEquals("Task plan, 3 of 5 settled")
+        compose.onNodeWithText("Build & verify").assertIsDisplayed()
     }
 
     @Test fun allTasksSettledAutoCollapsesWithoutReplayingOnHistoryMount() {
@@ -76,10 +75,10 @@ class TodoQuestDeviceTest {
         compose.mainClock.advanceTimeBy(2400)
         compose.onNodeWithTag("todoHeader").assertIsDisplayed()
         compose.onNodeWithText("Plan settled").assertIsDisplayed()
-        compose.onNodeWithText("QUEST LOG · 1 completed").assertDoesNotExist()
+        compose.onNodeWithText("Ship").assertDoesNotExist()
         compose.onNodeWithTag("todoHeader").performClick()
         compose.mainClock.advanceTimeBy(3000)
-        compose.onNodeWithText("QUEST LOG · 1 completed").assertIsDisplayed()
+        compose.onNodeWithText("Ship").assertIsDisplayed()
     }
 
     private fun saveScreenshot(name: String) {

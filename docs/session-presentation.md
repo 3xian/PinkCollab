@@ -177,13 +177,13 @@ Stages control grouping and specialized change details. They do not prove what a
 | Individual tool | `completed == false` | `Running`, even if an error flag is already present |
 | Individual tool | Completed and `isError == true` | `Failed` |
 | Individual tool | Completed without error | `Succeeded` internally; `Completed` in the UI |
-| Group | Any operation running | Running; include the count of already failed operations |
-| Group | No operation running, any failed | Failed |
-| Group | All operations succeeded | Completed |
+| Group | Any operation running | Running tint; individual icons preserve mixed outcomes |
+| Group | No operation running, any failed | Failed tint |
+| Group | All operations succeeded | Completed tint |
 
 A running structured activity animates only when it belongs to the live section, the host is connected, and runtime execution is active. Otherwise it uses an hourglass and `Last seen running`. This changes presentation, not the stored tool result.
 
-Group status labels omit the numeric `operation(s)` suffix. Completed and Failed groups represent the total operation count with vertically stacked checks or error icons, capped at five, fading toward the bottom. The stack reserves its full height. Running groups retain one spinner or hourglass, and mixed running groups retain their failed-operation count. Accessibility announces the exact total count once, even above the visual cap; expansion still shows every operation.
+Activity cards use a right-side chevron in a dedicated header row to expand details; there is no Details/status-label row. The chevron stays beside the header when expanded, and operation details below it use the full content width. Below the summary, one horizontal icon per operation shows its actual status, with accessible action/status labels. Adjacent 18dp icons overlap by 4dp. The row scrolls without a count cap; new icons fade/scale in and scroll into view without replaying on return.
 
 **Current limitation:** that timeline qualification is section-wide. Unlike the work-status strip, it does not filter individual groups to the newest user turn. Do not interpret every retained unfinished live tool as independent proof of current execution.
 
@@ -216,6 +216,10 @@ Change-detail precedence is patch/diff, old/new with path, content, then result.
 Generic details show raw argument JSON, falling back to extracted fields. A separate output section is added when nonblank and not identical to the selected change detail. Change-specific details replace the generic argument section.
 
 Groups start collapsed. Opening a single-operation group opens that operation's output; multi-operation groups expose per-operation expanders. Expanded output is selectable and vertically scrollable within a bounded height.
+
+### 5.6 Todo panel
+
+The floating todo card retains its compact focus header, settled-task count, progress bar, and expand/collapse control. Its expanded body shows phase headings, phase counts, and task rows only; it has no QUEST LOG summary row or Details/raw arguments-and-output expander.
 
 ## 6. Current-work contract
 
@@ -316,10 +320,10 @@ Loading shows a longer-wait hint after eight seconds without a stage change. Tim
 | --- | --- |
 | User message | Distinct leading rail and static tint; plain text |
 | Agent message | Quiet static band; Markdown body |
-| Running tool | Violet status accent plus explicit label; small spinner only when live-qualified |
-| Completed tool | Teal check plus Completed label |
-| Failed tool | Red error icon plus Failed label |
-| Unconfirmed unfinished tool | Hourglass plus Last seen running; no spinner |
+| Running tool | Violet status icon in the bottom row; small spinner only when live-qualified; explicit status in accessibility/details |
+| Completed tool | Teal check in the bottom row; Completed status in accessibility/details |
+| Failed tool | Red error icon in the bottom row; Failed status in accessibility/details |
+| Unconfirmed unfinished tool | Hourglass in the bottom row; Last seen running in accessibility/details; no spinner |
 | Work-status strip | One-line action and up to two lines of detail; ellipsis for overflow |
 | Attention | Amber status cue and explicit response controls |
 | Offline / ready strip | Distinct icon and text; no active indicator |
