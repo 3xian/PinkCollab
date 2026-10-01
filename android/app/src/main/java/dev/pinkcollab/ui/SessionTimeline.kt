@@ -12,6 +12,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +41,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.stateDescription
 
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -319,10 +322,23 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
             .fillMaxWidth()
             .timelineBand(tint = activityTint, tintAlpha = 0.025f)
             .animateContentSize()
+            .clickable(
+                role = Role.Button,
+                onClickLabel = if (expanded) "Collapse activity" else "Expand activity",
+                onClick = rememberHapticOnClick { expanded = !expanded },
+            )
+            .semantics {
+                contentDescription = if (expanded) "Collapse activity" else "Expand activity"
+                stateDescription = if (expanded) "Expanded" else "Collapsed"
+            }
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     group.action,
@@ -338,14 +354,12 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
                 }
                 ActivityOperationIcons(group, liveActivity)
             }
-            IconButton(onClick = { expanded = !expanded }) {
-                Icon(
-                    Icons.Outlined.ExpandMore,
-                    contentDescription = if (expanded) "Collapse activity" else "Expand activity",
-                    modifier = Modifier.size(22.dp).rotate(arrow),
-                    tint = TextMid,
-                )
-            }
+            Icon(
+                Icons.Outlined.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp).rotate(arrow),
+                tint = TextMid,
+            )
         }
         if (expanded) {
             group.operations.forEach { operation ->

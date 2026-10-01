@@ -1,6 +1,8 @@
 # Gradle files
 .gradle/
 build/
+# Isolated Android app builds for device testing
+/android/app/build-*/
 
 # Local configuration file (sdk path, etc)
 local.properties

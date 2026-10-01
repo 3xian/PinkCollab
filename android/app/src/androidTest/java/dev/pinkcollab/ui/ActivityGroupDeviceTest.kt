@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.*
@@ -42,18 +43,18 @@ class ActivityGroupDeviceTest {
                 Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer, liveActivity = false) }
             }
         }
-        val check = compose.onNodeWithContentDescription("Command 0, Completed").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val error = compose.onNodeWithContentDescription("Command 1, Failed").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val pending = compose.onNodeWithContentDescription("Command 2, Last seen running").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val check = compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val error = compose.onNodeWithContentDescription("Command 1, Failed", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val pending = compose.onNodeWithContentDescription("Command 2, Last seen running", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertEquals(check.top, error.top, 1f)
         assertEquals(check.top, pending.top, 1f)
         assertTrue(check.left < error.left && error.left < check.right)
         assertTrue(error.left < pending.left && pending.left < error.right)
-        assertTrue(check.top >= compose.onNodeWithText(item.summary).fetchSemanticsNode().boundsInRoot.bottom)
+        assertTrue(check.top >= compose.onNodeWithText(item.summary, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.bottom)
         compose.onNodeWithContentDescription("Expand activity").performClick()
-        compose.onNodeWithText("Command 1").assertIsDisplayed()
+        compose.onNodeWithText("Command 1", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Collapse activity").performClick()
-        compose.onNodeWithText("Command 1").assertDoesNotExist()
+        compose.onNodeWithText("Command 1", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun appended_operations_beyond_old_cap_scroll_into_view_and_remain_expandable() {
@@ -65,15 +66,18 @@ class ActivityGroupDeviceTest {
                 Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item.value, renderer) }
             }
         }
-        compose.onNodeWithContentDescription("Command 0, Completed").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
         compose.runOnIdle {
             item.value = group((0..29).map { operation(it, if (it == 29) ActivityStatus.Failed else ActivityStatus.Succeeded) })
         }
-        compose.onNodeWithContentDescription("Command 29, Failed").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Command 29, Failed", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
+        compose.onNode(hasScrollAction(), useUnmergedTree = true).performTouchInput { swipeRight() }
+        compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
     }
 
-    @Test fun expanding_a_tall_group_keeps_the_collapse_control_at_the_header() {
+    @Test fun expanding_a_tall_group_keeps_the_header_visible_and_tappable() {
         val item = group((0..29).map { operation(it, ActivityStatus.Succeeded) })
         compose.setContent {
             PinkCollabTheme {
@@ -84,10 +88,31 @@ class ActivityGroupDeviceTest {
                 }
             }
         }
-        compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed().performClick()
-        compose.onNodeWithText(item.action).assertIsDisplayed()
-        compose.onNodeWithText("Command 0").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed().performClick()
-        compose.onNodeWithText("Command 0").assertDoesNotExist()
+        compose.onNodeWithText(item.action, useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
+        compose.onNodeWithText(item.action, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(item.action, useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
+        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun card_padding_and_summary_toggle_expansion_without_intercepting_detail_controls() {
+        val item = group(listOf(operation(0, ActivityStatus.Succeeded), operation(1, ActivityStatus.Failed)))
+        compose.setContent {
+            PinkCollabTheme {
+                val context = LocalContext.current
+                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
+                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer) }
+            }
+        }
+        compose.onNodeWithContentDescription("Expand activity").performTouchInput {
+            click(Offset(width - 2f, height - 2f))
+        }
+        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithText("Arguments & output").onFirst().performClick()
+        compose.onNodeWithText("Output 0", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
+        compose.onNodeWithText(item.summary, useUnmergedTree = true).performTouchInput { click() }
+        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Output 0", useUnmergedTree = true).assertDoesNotExist()
     }
 }
