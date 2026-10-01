@@ -27,7 +27,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700&family=DM+Sans:wght@400..700&family=Manrope:wght@400..800&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="styles.css?v=fa3aadb78a9c">
+  <link rel="stylesheet" href="styles.css?v=d3c418d4f3f4">
   <script src="app.js?v=12c187b2aed3" defer></script>
   <title>PinkCollab - Android client for Oh My Pi (OMP)</title>
 </head>
@@ -216,7 +216,6 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
       <section class="limits section" id="limits" aria-labelledby="limits-title">
         <div class="section-heading"><p class="eyebrow">BEFORE YOU START</p><h2 id="limits-title">What PinkCollab does not do yet.</h2><p>So the first surprise isn’t a surprise.</p></div>
         <ul class="limits-list">
-          <li>A terminal session cannot be attached: PinkCollab manages the sessions it spawns itself.</li>
           <li>Running OMP processes are not restored when the gateway restarts. Those sessions show as offline. History can still be read from OMP's session file; the live event stream is not replayed.</li>
           <li>Notifications are not implemented: a session waiting on your input only shows it while the app is open.</li>
           <li>No terminal, Git client, code editor, or cloud relay: PinkCollab is a bridge to OMP on your own hosts, not an IDE and not a middleman.</li>
@@ -238,11 +237,6 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
               <p class="powered-brand-capabilities">READ CODE <span>·</span> MAKE CHANGES <span>·</span> RUN TESTS</p>
             </div>
           </div>
-          <ul class="powered-list">
-            <li><b>From a task to a plan.</b> OMP can explore a codebase, propose an approach in plan mode, and delegate independent work to subagents.</li>
-            <li><b>From code to a checked result.</b> Code intelligence and live debugging help OMP investigate problems. File edits, shell commands, and tests let it implement and check changes.</li>
-            <li><b>Built for ongoing work.</b> OMP supports your choice of model providers, saved sessions you can resume, and project rules, skills, and MCP servers that extend its workflow.</li>
-          </ul>
         </div>
       </section>
       <section class="closing"><img src="assets/logo-144.png" width="72" height="72" loading="lazy" decoding="async" alt=""><p>Work keeps moving.<br><strong>So can you.</strong></p><a href="https://github.com/3xian/PinkCollab">Made in the open. Join us on GitHub <span aria-hidden="true">↗</span></a></section>

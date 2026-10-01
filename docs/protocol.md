@@ -99,7 +99,9 @@ Existing host OMP sessions share `/sessions` pagination, host snapshots, session
 
 A generation-less `prompt` or `start_runtime` lazily adopts it and publishes the normal flattened `session_upsert` followed by normal runtime/session events. Its ID does not change; `origin` becomes `managed`, replacing the existing card. Uploading an attachment or reading a snapshot/history does not adopt. Command IDs, outbox scope, receipt lookup and cursor binding are unchanged.
 
-Admission can return HTTP 409 `external_session_busy` (close external OMP and retry), HTTP 503 `history_unavailable`, or HTTP 404 `session_not_found`. No receipt exists if admission fails before command persistence. Startup after adoption can fail its durable operation with `external_session_busy` or `history_unavailable`; the managed mapping is retained. See [refresh bounds and external-writer limitations](omp-discovery.md).
+Admission can return HTTP 409 `external_session_busy` (close external OMP and retry), HTTP 503 `history_unavailable`, or HTTP 404 `session_not_found`. No receipt exists if admission fails before command persistence. Startup after adoption can fail its durable operation with `external_session_busy` or `history_unavailable`; the managed mapping is retained.
+
+See [refresh and discovery limits](deployment.md#refresh-and-discovery-limits) and [external-writer limitations](deployment.md#external-writers) for the discovery and admission boundaries.
 
 ## Provider usage
 

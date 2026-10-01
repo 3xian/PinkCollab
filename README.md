@@ -100,10 +100,8 @@ If a conversation is missing:
 
 - Ensure its project is inside a configured workspace root.
 - Run the Gateway as the user who owns the conversation.
-- Check the selected OMP profile or custom session directory.
-- Reopen or reconnect the app to request a fresh snapshot.
-
-See [host history](docs/omp-discovery.md) for supported storage layouts, profile configuration, and discovery limits.
+- Check the selected [OMP profile or custom session directory](docs/deployment.md#storage-selection).
+- Reopen or reconnect the app to request a fresh snapshot; see [refresh and discovery limits](docs/deployment.md#refresh-and-discovery-limits).
 
 ## Start and control sessions
 
@@ -155,7 +153,6 @@ flowchart TD
 ## User guides
 
 - [Deployment and troubleshooting](docs/deployment.md): networking, pairing, background services, upgrades, and CLI/configuration
-- [Existing OMP conversations](docs/omp-discovery.md): finding and continuing host history
 - [macOS lid-close FAQ](docs/faq-macos-lid-close.md): keeping the host reachable
 - [Session interface](docs/session-presentation.md): status display and interaction behavior
 

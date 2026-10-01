@@ -79,6 +79,8 @@ With OMP installed, run `cargo test --all-features --locked --test discovery rea
 
 The update dialog downloads the release's `pinkcollab-android.apk` directly into private cache storage and displays progress. Downloads can be cancelled or retried; APKs must match the app package, advertised version, and installed signing certificate before installation. A release without an HTTPS APK asset displays an unavailable message instead of opening a browser. Debug installations cannot upgrade to production APKs because their signing certificates differ.
 
+Only release notes scroll inside the update dialog. Version information, download progress, status, errors, and action buttons remain outside that scroll region so long notes do not hide progress. The device regression `AppUpdateDeviceTest#long_release_notes_keep_progress_visible_while_scrolling` verifies that long notes have a positive scroll range, that a swipe advances their scroll offset, and that progress remains visible before and after the swipe.
+
 After downloading, PinkCollab opens Android's installation confirmation through a narrowly scoped FileProvider URI. If needed, it first opens the per-app “Install unknown apps” setting and continues after permission is granted. Cancelling the installer leaves an Install button to retry without downloading again. Downloads survive activity recreation through the ViewModel; after process termination they must be started again.
 
 Download state belongs to the ViewModel's dispatcher. Worker progress is dispatched to that owner and accepted only for the current downloading attempt; queued callbacks cannot revive a cancelled download or overwrite a completed result.

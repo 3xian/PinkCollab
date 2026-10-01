@@ -29,13 +29,16 @@ internal fun AppUpdateDialog(
         onDismissRequest = onDismiss,
         title = { Text("PinkCollab update available") },
         text = {
-            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = 360.dp)) {
                 Text("Current version: $currentVersion")
                 Text("Latest version: ${release.tag}")
                 Spacer(Modifier.height(16.dp))
                 Text("Release notes", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
-                Text(release.notes.ifBlank { "No release notes provided." })
+                Text(
+                    release.notes.ifBlank { "No release notes provided." },
+                    modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                )
                 Spacer(Modifier.height(16.dp))
                 when (download) {
                     is UpdateDownloadState.Downloading -> {

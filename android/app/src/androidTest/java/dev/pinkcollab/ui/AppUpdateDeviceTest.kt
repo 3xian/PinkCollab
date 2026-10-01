@@ -17,6 +17,10 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -30,6 +34,7 @@ import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.InitialSyncState
 import dev.pinkcollab.data.PairedHost
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -157,6 +162,31 @@ class AppUpdateDeviceTest {
         compose.onNodeWithText("Update").assertIsNotEnabled()
         compose.onNodeWithText("Cancel download").performClick()
         compose.runOnIdle { assertEquals(true, cancelled) }
+    }
+
+    @Test fun long_release_notes_keep_progress_visible_while_scrolling() {
+        compose.setContent {
+            AppUpdateDialog(
+                AppRelease("v3.0.0", 3_000_000,
+                    (1..100).joinToString("\n") { "Release note $it: improvements and fixes." },
+                    "https://github.com/apk"),
+                "v2.0.3", onDismiss = {}, onUpdate = {},
+                download = UpdateDownloadState.Downloading(50, 100),
+            )
+        }
+        val progress = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
+        val notes = compose.onNodeWithText("Release note 1:", substring = true)
+        val initialRange = notes.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        val initialOffset = initialRange.value()
+        assertTrue("Long release notes must be scrollable", initialRange.maxValue() > 0f)
+        compose.onNodeWithText("Downloading: 50%").assertIsDisplayed()
+        progress.assertIsDisplayed()
+        notes.performTouchInput { swipeUp() }
+        val scrolledRange = notes.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        assertTrue("Swiping must advance the release notes", scrolledRange.value() > initialOffset)
+        compose.onNodeWithText("Downloading: 50%").assertIsDisplayed()
+        progress.assertIsDisplayed()
+        compose.onNodeWithText("Cancel download").assertIsDisplayed()
     }
 
     @Test fun failed_download_offers_retry_and_explains_error() {

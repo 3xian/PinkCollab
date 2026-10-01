@@ -60,7 +60,9 @@ Session detail separates retained conversation content from current-work status,
 
 ## Conversations created outside PinkCollab
 
-`discovery::Discovery` adds read-only OMP historical entries to the existing session directory. `origin` explicitly distinguishes discovered and managed entries; discovered entries have no runtime. They are not stored as managed records until the first generation-less prompt/start. A SQLite transaction creates the SessionRecord, existing OMP reference and unique adoption association, retaining the public ID. Normal supervisor/receipt handling then resumes it. OMP remains the sole history authority; SQLite owns mappings and receipts; Android owns only display/cache state. See [discovery scope, evidence and limitations](omp-discovery.md).
+`discovery::Discovery` adds read-only OMP historical entries to the existing session directory. `origin` explicitly distinguishes discovered and managed entries; discovered entries have no runtime. They are not stored as managed records until the first generation-less prompt/start. A SQLite transaction creates the SessionRecord, existing OMP reference and unique adoption association, retaining the public ID. Normal supervisor/receipt handling then resumes it. OMP remains the sole history authority; SQLite owns mappings and receipts; Android owns only display/cache state.
+
+Storage selection, bounded refresh, and external-writer limitations are documented in [Discovering host OMP conversations](deployment.md#discovering-host-omp-conversations).
 
 ## Provider quota display
 

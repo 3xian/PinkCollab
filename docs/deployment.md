@@ -298,4 +298,25 @@ After a five-minute pairing expiry, press Enter to regenerate or Ctrl+C to finis
 
 ## Discovering host OMP conversations
 
-Run Gateway under the account owning the OMP sessions and allowlist their project directories. Existing supported OMP histories appear as History in Tasks. Default storage, profiles, absolute `omp_args: ["--session-dir", "/absolute/session-directory"]`, refresh budgets and service-account caveats are described in [OMP discovery](omp-discovery.md). Close an external OMP session before continuing it on the phone; concurrent writers are unsupported. Discovery does not grant access to projects outside configured workspaces.
+Run Gateway under the account owning the OMP sessions and allowlist their project directories. Existing supported OMP histories appear as History in Tasks. Close an external OMP session before continuing it on the phone; concurrent writers are unsupported. Discovery does not grant access to projects outside configured workspaces.
+
+### Storage selection
+
+Discovery reads version-3 OMP JSONL session files; the adapter was last verified against OMP 18.4.2. It scans only the Gateway service account's selected storage, not every account or profile.
+
+- An absolute `--session-dir` in `omp_args` selects a flat session directory. For custom storage layouts or wrappers, configure `omp_args: ["--session-dir", "/absolute/session-directory"]`.
+- Otherwise, the profile is selected by `--profile` in `omp_args`, then `OMP_PROFILE`, then the legacy `PI_PROFILE` fallback. An explicitly empty `OMP_PROFILE` selects the default profile.
+- Default storage is `~/.omp/agent/sessions`; named profiles use `~/.omp/profiles/<profile>/agent/sessions`. Relative `PI_CONFIG_DIR` overrides the `.omp` directory name. `PI_CODING_AGENT_DIR` can override the default profile's agent directory.
+- On Linux/macOS, an existing `$XDG_DATA_HOME/omp` (or `$XDG_DATA_HOME/omp/profiles/<profile>`) takes precedence when no agent-directory override is present; sessions are read from its `sessions` subdirectory.
+
+Set environment overrides for the Gateway service, not just an interactive terminal. Project paths recorded in the history must be absolute, exist, and pass the canonical workspace allowlist; missing projects, malformed paths, and links escaping that allowlist are excluded.
+
+### Refresh and discovery limits
+
+Each on-demand refresh visits at most 8,192 directory entries, scanning one level below the standard sessions root or only the explicit session directory. Among the visited entries, it considers the newest 1,024 JSONL files and reads at most 16 KiB per file for listing metadata. Older files or entries beyond these budgets may be omitted; duplicate files with the same OMP session ID are ambiguous and omitted.
+
+Metadata is cached for 15 seconds. The next list or host-snapshot request after expiry refreshes it; there is no polling daemon or unsolicited external-change stream. Reopen or reconnect the app after that interval to obtain a fresh snapshot. Discovery does not follow discovered file/directory links, scan project contents, or repair OMP files.
+
+### External writers
+
+Continuing a host conversation rejects a present OMP publish lock or a file changing during a 200 ms quiet check with `external_session_busy`. These checks cannot detect an idle external OMP process or prevent it writing later; they are not a lifetime ownership lock. Close the external instance before continuing on the phone, and do not reopen it elsewhere while PinkCollab owns its runtime. Stale OMP locks are not deleted automatically. Older/future OMP writer behavior and custom non-file storage have not been validated.
