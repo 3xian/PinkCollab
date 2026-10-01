@@ -26,4 +26,30 @@ class TimelineItemParsingTest {
 
         assertEquals(ToolArguments(), item.tool!!.arguments)
     }
+    private fun todoItem(phases: String): TimelineItem = JSONObject(
+        """{"id":"plan","kind":"tool","text":"Finished · todo","timestamp":"",
+            "tool":{"name":"todo","completed":true,"todoPhases":$phases}}"""
+    ).item()
+
+    @Test fun structuredTodoKeepsLiteralSuffixesAndExplicitStatuses() {
+        val item = todoItem("""[{"name":"Ship","tasks":[
+            {"content":"Verify (dropped)","status":"pending"},
+            {"content":"Check (blocked)","status":"in_progress"},
+            {"content":"Review","status":"blocked","blocker":"Waiting (for access)"},
+            {"content":"Done","status":"completed"},
+            {"content":"Old","status":"abandoned"}]}]""")
+        val tasks = item.tool!!.todoPhases!!.single().tasks
+        assertEquals("Verify (dropped)", tasks[0].content)
+        assertEquals(listOf(TodoStatus.Pending, TodoStatus.Active, TodoStatus.Blocked,
+            TodoStatus.Completed, TodoStatus.Abandoned), tasks.map { it.status })
+        assertEquals("Waiting (for access)", tasks[2].blocker)
+    }
+
+    @Test fun malformedOrFutureTodoSnapshotsAreUnavailableAndClearIsExplicit() {
+        assertEquals(null, todoItem("null").tool!!.todoPhases)
+        assertEquals(null, todoItem("""[{"name":"Ship","tasks":[{"content":"Check","status":"future"}]}]""").tool!!.todoPhases)
+        assertEquals(null, todoItem("""[{"name":"Ship","tasks":[{"status":"pending"}]}]""").tool!!.todoPhases)
+        assertEquals(emptyList<TodoPhase>(), todoItem("[]").tool!!.todoPhases)
+    }
+
 }

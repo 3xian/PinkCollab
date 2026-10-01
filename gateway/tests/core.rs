@@ -565,3 +565,74 @@ fn runtime_lease_requires_the_exact_generation_to_clear() {
     assert!(store.release_runtime("session", "run-one").unwrap());
     assert!(store.reserve_runtime("session", "run-two").unwrap());
 }
+
+#[test]
+fn todo_snapshot_is_typed_and_survives_reverse_tool_updates() {
+    let timestamp = "2026-09-20T00:00:00Z".parse().unwrap();
+    let mut item = TimelineItem::tool_completed("todo-1", "todo", "truncated", false, timestamp)
+        .with_todo_details(&json!({"phases":[{"name":"Ship","tasks":[
+            {"content":"Verify (dropped)","status":"pending"},
+            {"content":"Review","status":"blocked","blocker":"Waiting for access"}
+        ]}]}));
+    item.merge_tool_update(TimelineItem::tool_started(
+        "todo-1",
+        "todo",
+        json!({"op":"init"}),
+        timestamp,
+    ));
+    let wire = serde_json::to_value(item).unwrap();
+    assert_eq!(
+        wire["tool"]["todoPhases"][0]["tasks"][0]["content"],
+        "Verify (dropped)"
+    );
+    assert_eq!(
+        wire["tool"]["todoPhases"][0]["tasks"][0]["status"],
+        "pending"
+    );
+    assert_eq!(
+        wire["tool"]["todoPhases"][0]["tasks"][1]["blocker"],
+        "Waiting for access"
+    );
+    assert_eq!(wire["tool"]["result"], "truncated");
+    assert_eq!(wire["tool"]["arguments"]["op"], "init");
+}
+
+#[test]
+fn invalid_todo_details_are_unavailable_and_clear_is_an_empty_snapshot() {
+    let timestamp = "2026-09-20T00:00:00Z".parse().unwrap();
+    for details in [
+        json!({}),
+        json!({"phases":[{"name":"Ship","tasks":[{"content":"Check","status":"future"}]}]}),
+    ] {
+        let item = TimelineItem::tool_completed("todo-1", "todo", "output", false, timestamp)
+            .with_todo_details(&details);
+        assert!(item.tool.unwrap().todo_phases.is_none());
+    }
+    let cleared = TimelineItem::tool_completed("todo-1", "todo", "cleared", false, timestamp)
+        .with_todo_details(&json!({"phases":[]}));
+    assert!(cleared.tool.unwrap().todo_phases.unwrap().is_empty());
+    for (name, error) in [("read", false), ("todo", true)] {
+        let item = TimelineItem::tool_completed("call", name, "output", error, timestamp)
+            .with_todo_details(&json!({"phases":[]}));
+        assert!(item.tool.unwrap().todo_phases.is_none());
+    }
+}
+
+#[tokio::test]
+async fn saved_history_preserves_structured_todo_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    let entry = json!({"id":"entry", "type":"message", "parentId":null,
+    "timestamp":"2026-09-20T00:00:00Z", "message":{
+        "role":"toolResult", "toolCallId":"todo-1", "toolName":"todo",
+        "content":[{"type":"text", "text":"human-readable output"}],
+        "details":{"phases":[{"name":"Ship","tasks":[{"content":"Verify (dropped)","status":"pending"}]}]}
+    }});
+    std::fs::write(&path, format!("{entry}\n")).unwrap();
+    let items = pinkcollab_gateway::history::history(&path).await.unwrap();
+    let wire = serde_json::to_value(&items[0]).unwrap();
+    assert_eq!(
+        wire["tool"]["todoPhases"][0]["tasks"][0]["content"],
+        "Verify (dropped)"
+    );
+}

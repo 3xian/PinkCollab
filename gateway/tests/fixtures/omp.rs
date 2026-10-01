@@ -315,6 +315,17 @@ fn main() {
                     emit(
                         json!({"type":"tool_execution_end","toolCallId":"tool-1","toolName":"bash","result":{"content":[{"type":"text","text":"tests passed"}]}}),
                     );
+                    if message == "todo snapshot" {
+                        emit(
+                            json!({"type":"tool_execution_start","toolCallId":"todo-1","toolName":"todo","args":{"op":"init"}}),
+                        );
+                        emit(
+                            json!({"type":"tool_execution_end","toolCallId":"todo-1","toolName":"todo","result":{
+                                "content":[{"type":"text","text":"x".repeat(10 * 1024)}],
+                                "details":{"phases":[{"name":"Ship","tasks":[{"content":"Verify (dropped)","status":"pending"}]}]}
+                            }}),
+                        );
+                    }
                     finish("Task complete", &log, &mut parent);
                     emit(
                         json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),

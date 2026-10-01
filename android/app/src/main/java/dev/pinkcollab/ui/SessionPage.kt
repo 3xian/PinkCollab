@@ -1,6 +1,12 @@
 package dev.pinkcollab.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -110,9 +116,14 @@ internal fun SessionPage(
     val savedHistory = detail.savedHistory
     val historyItems = state.historyItems ?: savedHistory.items
     val historyTimeline = remember(historyItems) { projectSessionTimeline(historyItems) }
-    val liveTimeline = if (session.runtimeAttached) {
-        remember(detail.liveItems) { projectSessionTimeline(detail.liveItems) }
-    } else emptyList()
+    val liveItems = if (session.runtimeAttached) detail.liveItems else emptyList()
+    val liveTimeline = remember(liveItems) { projectSessionTimeline(liveItems) }
+    val savedTodo = remember(historyItems) { projectSessionTodo(historyItems) }
+    val liveTodo = remember(liveItems) { projectSessionTodo(liveItems) }
+    val todo = latestSessionTodo(savedTodo, liveTodo)
+    var todoExpanded by rememberSaveable(session.hostId, session.id) { mutableStateOf(false) }
+    LaunchedEffect(todo == null) { if (todo == null) todoExpanded = false }
+    BackHandler(todoExpanded && isActive) { todoExpanded = false }
     val hasSavedMessages = historyTimeline.isNotEmpty() || savedHistory.nextCursor != null
     val historyError = sessionHistoryError(detail, state.host, state.refreshError)
     val syncing = load == LoadState.Loading || detail.snapshotToken == null || savedHistory == SavedHistory.Loading
@@ -198,12 +209,17 @@ internal fun SessionPage(
         .background(composerFill)
     val placeholder = controls.placeholder
 
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val todoClearance = if (todo != null) 72.dp else 0.dp
+        val keyboardHeight = with(density) {
+            (imeInsets.getBottom(this) - navigationInsets.getBottom(this)).coerceAtLeast(0).toDp()
+        }
+        val panelMaxHeight = (maxHeight - composerClearance - keyboardHeight - 12.dp).coerceAtLeast(60.dp)
         if (load is LoadState.Ready) MaterialTheme(
             colorScheme = MaterialTheme.colorScheme,
             typography = SessionTypography,
         ) {
-            Box(Modifier.fillMaxSize().pullToRefresh(
+            Box(Modifier.fillMaxSize().padding(top = todoClearance).pullToRefresh(
                 state = historyPullState,
                 isRefreshing = activity.history,
                 enabled = canLoadEarlier,
@@ -360,7 +376,10 @@ internal fun SessionPage(
                                 .heightIn(min = 48.dp, max = 180.dp)
                                 // Center the first 20sp line beside the 48dp attachment target.
                                 .padding(top = 14.dp)
-                                .onFocusChanged { inputFocused = it.isFocused },
+                                .onFocusChanged {
+                                    inputFocused = it.isFocused
+                                    if (it.isFocused) todoExpanded = false
+                                },
                             enabled = inputEnabled,
                             textStyle = composerTextStyle.copy(
                                 color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
@@ -455,6 +474,23 @@ internal fun SessionPage(
                     onSend = { fileError = null; onPrompt() },
                     modifier = Modifier.composerCard(),
                 )
+            }
+        }
+        if (todo != null) {
+            AnimatedVisibility(todoExpanded, modifier = Modifier.align(Alignment.TopCenter),
+                enter = fadeIn(), exit = fadeOut()) {
+                Box(Modifier.fillMaxWidth().height(panelMaxHeight).testTag("todoDismissArea")
+                    .background(Color.Black.copy(alpha = 0.2f))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        todoExpanded = false
+                    })
+            }
+            key(session.hostId, session.id) {
+                FloatingTodoPanel(todo, live = host?.connected == true && session.status == SessionStatus.Running &&
+                    liveTodo is SessionTodo.Snapshot,
+                    expanded = todoExpanded, onExpandedChange = { todoExpanded = it },
+                    maxHeight = panelMaxHeight.coerceAtMost(maxHeight * 0.65f),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 6.dp))
             }
         }
     }

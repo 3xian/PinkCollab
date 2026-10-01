@@ -58,6 +58,32 @@ pub struct ToolTrace {
     pub is_error: bool,
     #[serde(default)]
     pub completed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub todo_phases: Option<Vec<TodoPhase>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TodoPhase {
+    pub name: String,
+    pub tasks: Vec<TodoTask>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TodoTask {
+    pub content: String,
+    pub status: TodoStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocker: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Abandoned,
+    Blocked,
 }
 
 impl ToolTrace {
@@ -73,6 +99,7 @@ impl ToolTrace {
             result: String::new(),
             is_error: false,
             completed: false,
+            todo_phases: None,
         }
     }
 
@@ -89,6 +116,7 @@ impl ToolTrace {
             result: result.into(),
             is_error,
             completed: true,
+            todo_phases: None,
         }
     }
 
@@ -115,6 +143,9 @@ impl ToolTrace {
         }
         if self.result.is_empty() {
             self.result = previous.result.clone();
+        }
+        if self.todo_phases.is_none() {
+            self.todo_phases = previous.todo_phases.clone();
         }
         // Start and result frames carry different halves of a call and can arrive in either order
         // once a transcript is replayed, so these flags only ever move one way.
@@ -144,6 +175,16 @@ impl TimelineItem {
             ToolTrace::completed(call_id, name, result, is_error),
             timestamp,
         )
+    }
+
+    /// Preserve the typed Todo snapshot independently of the human-readable result preview.
+    pub fn with_todo_details(mut self, details: &serde_json::Value) -> Self {
+        if let Some(trace) = &mut self.tool {
+            if trace.name == "todo" && trace.completed && !trace.is_error {
+                trace.todo_phases = serde_json::from_value(details["phases"].clone()).ok();
+            }
+        }
+        self
     }
 
     /// Tool items carry their payload once, inside `tool`; `detail` stays empty because clients

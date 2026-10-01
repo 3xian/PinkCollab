@@ -85,7 +85,7 @@ data class ToolArguments(
             runCatching { from(JSONObject(raw)) }.getOrElse { ToolArguments() }
     }
 }
-data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean)
+data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean, val todoPhases: List<TodoPhase>? = null)
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
 sealed interface OperationStatus {
     data object Pending : OperationStatus
@@ -252,6 +252,7 @@ fun JSONObject.item(): TimelineItem {
             result = it.optString("result"),
             isError = it.optBoolean("isError"),
             completed = it.optBoolean("completed"),
+            todoPhases = it.optJSONArray("todoPhases")?.let(::parseTodoPhases),
         )
     }
     return TimelineItem(getString("id"), getString("kind"), getString("text"), optString("detail"), getString("timestamp"), tool)

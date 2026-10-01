@@ -78,6 +78,8 @@ fun projectSessionTimeline(
         if (item.kind == "tool") {
             val trace = item.tool
             if (trace != null) {
+                // Structured plans belong to the pinned panel and do not split activity groups.
+                if (trace.isTodoSnapshot() && trace.todoPhases != null) return@forEachIndexed
                 val stage = toolIdentity(trace.name).activityStage
                 if (group?.stage != stage) {
                     flushGroup()

@@ -361,15 +361,19 @@ private fun TasksTopBar(
             .padding(start = 16.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "Sessions $activeTaskCount/$taskCount active",
-            Modifier.weight(1f).padding(end = 10.dp),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            softWrap = false,
-        )
+        if (taskCount > 0) {
+            Text(
+                "Sessions $activeTaskCount/$taskCount active",
+                Modifier.weight(1f).padding(end = 10.dp),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                softWrap = false,
+            )
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
         if (showWorkspaces) {
             TopBarPill(Icons.Outlined.FolderOpen, "Workspaces", openResources)
             Spacer(Modifier.width(6.dp))

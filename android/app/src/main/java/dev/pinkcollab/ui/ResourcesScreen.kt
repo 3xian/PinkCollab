@@ -215,7 +215,7 @@ private fun ConnectingLabel(text: String, color: Color) {
         text,
         style = MaterialTheme.typography.bodySmall.copy(
             brush = Brush.linearGradient(
-                colors = listOf(color, color, Color.White, color, color),
+                colors = listOf(color, color, MaterialTheme.colorScheme.primary, color, color),
                 start = Offset(streakStart, 0f),
                 end = Offset(streakStart + streakWidth.coerceAtLeast(1f), 0f),
             ),

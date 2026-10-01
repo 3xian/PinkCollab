@@ -130,7 +130,8 @@ async fn build_history(path: &Path, strict: bool) -> Result<(Vec<TimelineItem>, 
                     result,
                     m["isError"] == true,
                     timestamp,
-                ),
+                )
+                .with_todo_details(&m["details"]),
             );
             continue;
         }

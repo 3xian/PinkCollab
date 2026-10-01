@@ -152,6 +152,7 @@ impl SessionController {
                             frame["isError"] == true,
                             Utc::now(),
                         )
+                        .with_todo_details(&frame["result"]["details"])
                     };
                     if let Some(previous) =
                         state.messages.iter_mut().find(|entry| entry.id == item_id)

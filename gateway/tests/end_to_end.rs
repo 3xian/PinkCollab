@@ -872,3 +872,64 @@ async fn v1_routes_explain_the_breaking_upgrade() {
         "protocol_upgrade_required"
     );
 }
+
+#[tokio::test]
+async fn live_todo_snapshot_survives_result_preview_truncation() {
+    let h = Harness::new(1, vec![]).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let sessions = format!("{}/api/v3/sessions", h.url);
+    let record: Value = client
+        .post(&sessions)
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"create","hostId":h.host.id,"cwd":h.cwd("todo-snapshot")}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session = format!("{sessions}/{}", record["id"].as_str().unwrap());
+    let response = client
+        .post(format!("{session}/commands"))
+        .bearer_auth(&credential)
+        .json(&json!({"commandId":"prompt","type":"prompt","message":"todo snapshot"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+    wait_operation(
+        &client,
+        &format!("{session}/operations/prompt"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    let view: Value = client
+        .get(&session)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let trace = &view["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["tool"]["name"] == "todo")
+        .expect("live Todo result")["tool"];
+    assert!(
+        trace["result"]
+            .as_str()
+            .unwrap()
+            .contains("Live preview truncated")
+    );
+    assert_eq!(
+        trace["todoPhases"][0]["tasks"][0]["content"],
+        "Verify (dropped)"
+    );
+    assert_eq!(trace["todoPhases"][0]["tasks"][0]["status"], "pending");
+    assert_eq!(trace["arguments"]["op"], "init");
+}
