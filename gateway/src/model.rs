@@ -179,10 +179,12 @@ impl TimelineItem {
 
     /// Preserve the typed Todo snapshot independently of the human-readable result preview.
     pub fn with_todo_details(mut self, details: &serde_json::Value) -> Self {
-        if let Some(trace) = &mut self.tool {
-            if trace.name == "todo" && trace.completed && !trace.is_error {
-                trace.todo_phases = serde_json::from_value(details["phases"].clone()).ok();
-            }
+        if let Some(trace) = &mut self.tool
+            && trace.name == "todo"
+            && trace.completed
+            && !trace.is_error
+        {
+            trace.todo_phases = serde_json::from_value(details["phases"].clone()).ok();
         }
         self
     }
