@@ -176,6 +176,12 @@ nav{font-size:15px}.nav-source{border-color:#4a3e57;background:#211b2b}.eyebrow{
 .usage-photo img{width:100%;height:auto;border:1px solid #433649}
 .usage-photo figcaption{max-width:780px;margin-top:14px;color:var(--text-secondary);font-size:13px;line-height:1.75}
 .usage-photo code{white-space:nowrap}
+@media(min-width:901px){
+  .provider-usage{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:40px;align-items:center}
+  .usage-heading{display:flex;flex-direction:column;align-items:flex-start;gap:22px;margin:0}
+  .usage-heading>p{max-width:420px}
+  .usage-photo{width:100%;max-width:580px;justify-self:end}
+}
 @media(max-width:820px){.usage-heading{grid-template-columns:1fr;gap:22px}.usage-heading>p{max-width:600px}}
 @media(max-width:600px){.model-features .model-control{margin-bottom:44px}.model-control-heading h2,.usage-heading h2{font-size:30px}.usage-heading>p{font-size:15px}.usage-heading{margin-bottom:24px}}
 /* A real-world moment sits between the interactive hero and product details. */
