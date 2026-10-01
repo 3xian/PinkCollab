@@ -21,14 +21,14 @@ jobs:
   # Nothing is published until the site passes its checks, so a broken page or a
   # README that drifted away from the site stops the deploy instead of shipping.
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/check-website
 
   deploy:
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pages: write

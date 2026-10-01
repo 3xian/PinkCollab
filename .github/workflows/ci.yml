@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
@@ -69,7 +69,7 @@ jobs:
   npm:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -83,7 +83,7 @@ jobs:
       - run: npm test --prefix npm/pinkcollab
       - run: npm pack ./npm/pinkcollab --dry-run
   website:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/check-website
@@ -92,7 +92,7 @@ jobs:
     if: ${{ needs.changes.outputs.gateway == 'true' }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -136,7 +136,7 @@ jobs:
       fail-fast: false
       matrix:
         suite: [checks, device-tests]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: android
@@ -205,7 +205,7 @@ jobs:
     name: ci-required
     needs: [changes, npm, website, gateway, release-cache, android]
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Verify required checks
         shell: bash
