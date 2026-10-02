@@ -8,7 +8,7 @@
 - Start sessions in your projects and switch between them.
 - Keep OMP and its model-provider configuration on your computer.
 
-<p align="center"><img src="docs/assets/pinkcollab-readme.jpg" width="720" alt="PinkCollab on Android showing session switching, tool activity, and prompt controls" /></p>
+<p align="center"><img src="docs/assets/pinkcollab-readme.webp" width="720" alt="PinkCollab promotional illustration with the robot mascot and a phone showing AI sessions, task progress, and agent replies" /></p>
 
 ## Quick start
 

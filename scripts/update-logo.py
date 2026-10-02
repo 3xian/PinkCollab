@@ -1,8 +1,8 @@
 """Resize/mask the approved logo; requires Pillow and NumPy.
 
 Run from the repository root: python scripts/update-logo.py
-All inputs are resolved relative to this script, including logo-free promotional
-templates. Repeated runs rebuild outputs from those inputs, never from prior outputs.
+All inputs are resolved relative to this script, including promotional artwork.
+Repeated runs rebuild outputs from those inputs, never from prior outputs.
 """
 
 from pathlib import Path
@@ -57,10 +57,15 @@ def promotional_images(source: Image.Image) -> None:
     composite_logo(card, source, (849, 146), 46, rotation=6)
     save(card.convert("RGB"), ROOT / "website/assets/social-card.png")
 
-    with Image.open(TEMPLATES / "readme-base.png") as template:
-        photo = template.convert("RGBA")
-    composite_logo(photo, source, (1098, 94), 138)
-    photo.convert("RGB").save(ROOT / "docs/assets/pinkcollab-readme.jpg", quality=95, subsampling=0)
+    # The approved artwork already includes its mascot and wordmark.
+    with Image.open(TEMPLATES / "session-review-source.png") as artwork:
+        photo = artwork.convert("RGB")
+    photo.thumbnail((1200, 1200), LANCZOS)
+    photo.save(ROOT / "docs/assets/pinkcollab-readme.webp", quality=82, method=6)
+    # Both surfaces use the same optimized encoding.
+    (ROOT / "website/assets/pinkcollab-session-review.webp").write_bytes(
+        (ROOT / "docs/assets/pinkcollab-readme.webp").read_bytes()
+    )
 
 
 def main() -> None:
