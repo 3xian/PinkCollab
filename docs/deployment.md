@@ -88,6 +88,10 @@ On macOS this is a launchd user agent; it starts at login. Linux uses a systemd 
 
 ### Upgrade checks and duplicate installations
 
+Use the Android APK and npm CLI from the **same release**. Compare `pinkcollab --version` with the tag on the [APK's release page](https://github.com/3xian/PinkCollab/releases/latest). If they differ, install `pinkcollab@X.Y.Z` instead of `pinkcollab@latest`, replacing `X.Y.Z` with the release version without the leading `v`. This also applies to older releases.
+
+After installing the matching APK and CLI and completing the command checks below, rerun `pinkcollab setup` to update and start the background Gateway. Repeating setup merges workspace roots and preserves existing settings, sessions, and paired phones; pairing another phone is optional. **Upgrading or applying changed configuration may restart the Gateway and stop active OMP runtimes.** Finish current work first; stored conversations remain. If an update fails, fix the reported error and rerun the same command rather than deleting configuration or pairing credentials.
+
 `npm install -g` updates only the prefix used by that npm invocation. A copy in `~/.local/bin`, another Node manager, or a standalone download may precede the updated entry on PATH. Running that older `pinkcollab setup` installs the older Gateway again, even when `npm list -g` reports a new version.
 
 After `npm install -g pinkcollab@latest`, run the packaged PATH diagnostic directly from your shell. npm changes PATH and the working directory inside lifecycle scripts, so the check is not an install hook. It resolves relative and empty PATH entries from your current directory, changes neither PATH nor other installations, and refuses lifecycle invocation rather than guessing the original environment. Shell aliases, cached lookups, and PowerShell-only script precedence still require the shell checks below. Resolve any warning before setup.
