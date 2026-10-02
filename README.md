@@ -7,7 +7,6 @@
   <a href="https://kotlinlang.org/"><img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat&amp;logo=kotlin&amp;logoColor=white" alt="Kotlin" /></a>
   <a href="https://developer.android.com/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-4285F4?style=flat&amp;logo=jetpackcompose&amp;logoColor=white" alt="Jetpack Compose" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-000000?style=flat&amp;logo=rust&amp;logoColor=white" alt="Rust" /></a>
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-5FA04E?style=flat&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js" /></a>
 </p>
 
 [PinkCollab](https://3xian.github.io/PinkCollab/) is an **Android client for [Oh My Pi (OMP)](https://omp.sh/)**. Use OMP on your own computer from your phone.
