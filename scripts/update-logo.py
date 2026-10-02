@@ -5,10 +5,11 @@ All inputs are resolved relative to this script, including promotional artwork.
 Repeated runs rebuild outputs from those inputs, never from prior outputs.
 """
 
+import argparse
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "docs/assets/pinkcollab-logo-source.png"
@@ -32,34 +33,16 @@ def save(image: Image.Image, path: Path) -> None:
     image.save(path, optimize=True)
 
 
-def composite_logo(
-    canvas: Image.Image,
-    source: Image.Image,
-    center: tuple[int, int],
-    size: int,
-    rotation: float = 0,
-) -> None:
-    if rotation:
-        # Rotate before downsampling so small tilted icons keep smooth edges.
-        tile = masked_tile(source, size * 4, 0.20).rotate(
-            rotation, resample=Image.Resampling.BICUBIC, expand=True
-        )
-        tile = tile.resize((round(tile.width / 4), round(tile.height / 4)), LANCZOS)
-    else:
-        tile = masked_tile(source, size, 0.20)
-    canvas.alpha_composite(tile, (center[0] - tile.width // 2, center[1] - tile.height // 2))
-
-
-def promotional_images(source: Image.Image) -> None:
-    with Image.open(TEMPLATES / "social-card-base.png") as template:
-        card = template.convert("RGBA")
-    composite_logo(card, source, (102, 78), 52)
-    composite_logo(card, source, (849, 146), 46, rotation=6)
-    save(card.convert("RGB"), ROOT / "website/assets/social-card.png")
-
+def promotional_images() -> None:
     # The approved artwork already includes its mascot and wordmark.
     with Image.open(TEMPLATES / "session-review-source.png") as artwork:
         photo = artwork.convert("RGB")
+    # JPEG preserves smooth gradients in the 1.91:1 social crop at a small size.
+    card = ImageOps.fit(photo, (1200, 630), LANCZOS)
+    card.save(
+        ROOT / "website/assets/social-card.jpg",
+        quality=86, subsampling=0, optimize=True, progressive=True,
+    )
     photo.thumbnail((1200, 1200), LANCZOS)
     photo.save(ROOT / "docs/assets/pinkcollab-readme.webp", quality=82, method=6)
     # Both surfaces use the same optimized encoding.
@@ -102,8 +85,14 @@ def main() -> None:
     corners = np.asarray(source)[np.ix_([0, source.height - 1], [0, source.width - 1])]
     background = Image.fromarray(corners).resize((432, 432), Image.Resampling.BILINEAR)
     save(background, RES / "drawable-nodpi/ic_launcher_background.png")
-    promotional_images(source)
+    promotional_images()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--promotional-only", action="store_true", help="Rebuild README, hero, and social images only")
+    args = parser.parse_args()
+    if args.promotional_only:
+        promotional_images()
+    else:
+        main()

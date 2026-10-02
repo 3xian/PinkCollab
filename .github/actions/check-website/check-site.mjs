@@ -38,10 +38,21 @@ function idsOf(html) {
   return new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
 }
 
-function pngSize(file) {
+function jpegSize(file) {
   const bytes = readFileSync(file);
-  if (bytes.length < 24 || bytes.readUInt32BE(0) !== 0x89504e47) return null;
-  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  if (bytes.length < 4 || bytes.readUInt16BE(0) !== 0xffd8) return null;
+  // The branding generator writes baseline or progressive JPEG frames.
+  for (let offset = 2; offset + 4 <= bytes.length;) {
+    const marker = bytes.readUInt16BE(offset);
+    const length = bytes.readUInt16BE(offset + 2);
+    if (length < 2 || offset + 2 + length > bytes.length) return null;
+    if ((marker === 0xffc0 || marker === 0xffc2) && length >= 8) {
+      return { width: bytes.readUInt16BE(offset + 7), height: bytes.readUInt16BE(offset + 5) };
+    }
+    if (marker === 0xffda || marker === 0xffd9) return null;
+    offset += 2 + length;
+  }
+  return null;
 }
 
 // GitHub's heading slug rules, close enough for anchor checking.
@@ -137,12 +148,27 @@ for (const [from, to, hash] of inlineAnchors) {
   check(ids[to].has(hash), `${from}: "#${hash}" has no matching id in ${to}`);
 }
 
+// --- First-screen artwork and install controls ---------------------------
+
+const hero = /<section class="hero"[^>]*>([\s\S]*?)<\/section>/.exec(html['index.html'])?.[1] ?? '';
+const heroImage = /<img\b[^>]*src="assets\/pinkcollab-session-review\.webp"[^>]*>/.exec(hero)?.[0] ?? '';
+check(Boolean(heroImage), 'index.html: the approved artwork must be in the hero');
+check(/fetchpriority="high"/.test(heroImage) && !/loading="lazy"/.test(heroImage),
+  'index.html: the hero artwork must load with high priority, without lazy loading');
+check((html['index.html'].match(/src="assets\/pinkcollab-session-review\.webp"/g) ?? []).length === 1,
+  'index.html: the hero artwork should not be repeated below the fold');
+for (const match of html['index.html'].matchAll(/<button\b[^>]*data-copy="([^"]+)"[^>]*>/g)) {
+  check(ids['index.html'].has(match[1]), `index.html: copy target "${match[1]}" is missing`);
+}
+
 // --- Social card and icons ------------------------------------------------
 
 const ogImage = /property="og:image" content="([^"]+)"/.exec(html['index.html']);
 const twitterImage = /name="twitter:image" content="([^"]+)"/.exec(html['index.html']);
 check(Boolean(ogImage), 'index.html: missing og:image');
 check(Boolean(twitterImage), 'index.html: missing twitter:image');
+check(/property="og:image:type" content="image\/jpeg"/.test(html['index.html']),
+  'index.html: the social-card media type must match its JPEG encoding');
 if (ogImage && twitterImage) {
   check(ogImage[1] === twitterImage[1], 'index.html: twitter:image must match og:image');
   const url = new URL(ogImage[1]);
@@ -152,7 +178,7 @@ if (ogImage && twitterImage) {
   referenced.add(url.pathname.slice(BASE.length + 1));
   check(existsSync(file), `index.html: og:image file ${url.pathname} is missing`);
   if (existsSync(file)) {
-    const size = pngSize(file);
+    const size = jpegSize(file);
     check(size?.width === 1200 && size?.height === 630, `og:image must be 1200x630, got ${JSON.stringify(size)}`);
   }
 }
