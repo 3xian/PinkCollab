@@ -42,61 +42,68 @@ class ModelPickerDeviceTest {
     }
     private val catalog = ModelCatalog(models, listOf("off", "low", "high"))
 
-    @Test fun requesting_runtime_does_not_report_failure_before_starting_state_arrives() {
+    @Test fun runtime_start_stays_pending_until_snapshot_or_failure_arrives() {
         var starting by mutableStateOf(false)
+        var attached by mutableStateOf(false)
         var requests = 0
+        var attempt by mutableStateOf<RuntimeStartAttempt?>(null)
         compose.setContent {
-            ModelPickerSheet(state = null, current = null, enabled = false, runtimeAttached = false,
-                runtimeStarting = starting, canStartRuntime = !starting, startRuntime = { requests++ },
-                dismiss = {}, retry = {}, refresh = {}, apply = {})
+            ModelPickerSheet(state = if (attached) LoadState.Ready(catalog) else null,
+                current = null, enabled = attached, runtimeAttached = attached,
+                runtimeStarting = starting, canStartRuntime = !starting && !attached,
+                startRuntime = { requests++; attempt = RuntimeStartAttempt.Pending(null) },
+                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartAttempt = attempt)
         }
-        compose.onNodeWithText("Choose another model").performClick()
         compose.runOnIdle { assertEquals(1, requests) }
         compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
         compose.runOnIdle { starting = true }
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
         compose.runOnIdle { starting = false }
-        compose.onNodeWithText("Could not start OMP\nPlease try again.").assertIsDisplayed()
-        compose.onNodeWithText("Choose another model").performClick()
         compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.onNodeWithText("Retry").assertDoesNotExist()
+        compose.runOnIdle { attached = true }
+        compose.onNodeWithTag("modelList").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, requests) }
     }
 
     @Test fun failed_runtime_start_keeps_picker_open_and_shows_error() {
-        var starting by mutableStateOf(true)
+        var starting by mutableStateOf(false)
+        var attempt by mutableStateOf<RuntimeStartAttempt?>(null)
         compose.setContent {
             ModelPickerSheet(state = null, current = null, enabled = false, runtimeAttached = false,
-                runtimeStarting = starting, canStartRuntime = !starting, startRuntime = { starting = true },
-                dismiss = {}, retry = {}, refresh = {}, apply = {},
-                runtimeStartError = "previous runtime exit is not confirmed")
+                runtimeStarting = starting, canStartRuntime = !starting,
+                startRuntime = { attempt = RuntimeStartAttempt.Pending(null) },
+                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartAttempt = attempt)
         }
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
-        compose.runOnIdle { starting = false }
+        compose.runOnIdle { attempt = RuntimeStartAttempt.Failed("previous runtime exit is not confirmed") }
         compose.onNodeWithText("Could not start OMP\nprevious runtime exit is not confirmed").assertIsDisplayed()
-        compose.onNodeWithText("Choose another model").assertIsEnabled().performClick()
+        compose.onNodeWithText("Retry").assertIsEnabled().performClick()
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
     }
 
     @Test fun attached_runtime_failing_during_initialization_keeps_start_error() {
         var starting by mutableStateOf(false)
         var attached by mutableStateOf(false)
-        var error by mutableStateOf<String?>(null)
+        var attempt by mutableStateOf<RuntimeStartAttempt?>(null)
         compose.setContent {
             ModelPickerSheet(state = null, current = null, enabled = false,
                 runtimeAttached = attached, runtimeStarting = starting,
-                canStartRuntime = !starting, startRuntime = { starting = true },
-                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartError = error)
+                canStartRuntime = !starting,
+                startRuntime = { attempt = RuntimeStartAttempt.Pending(null); starting = true },
+                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartAttempt = attempt)
         }
-        compose.onNodeWithText("Choose another model").performClick()
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
         compose.runOnIdle { attached = true }
         compose.waitForIdle()
         compose.runOnIdle {
             attached = false
             starting = false
-            error = "OMP did not load stored session"
+            attempt = RuntimeStartAttempt.Failed("OMP did not load stored session")
         }
         compose.onNodeWithText("Could not start OMP\nOMP did not load stored session").assertIsDisplayed()
-        compose.onNodeWithText("Choose another model").assertIsEnabled().performClick()
+        compose.onNodeWithText("Retry").assertIsEnabled().performClick()
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
     }
 

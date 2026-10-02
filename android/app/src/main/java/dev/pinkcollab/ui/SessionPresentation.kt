@@ -25,6 +25,7 @@ internal data class SessionPageState(
     val historyItems: List<TimelineItem>? = null,
     val summary: Session? = null,
     val usage: LoadState<dev.pinkcollab.data.UsageSnapshot>? = null,
+    val runtimeStart: RuntimeStartAttempt? = null,
 )
 
 /** Connection recovery waits for a fresh snapshot; old request errors no longer describe it. */

@@ -162,9 +162,10 @@
           <div class="install-route">
             <div class="route-head"><h3>Install with npm</h3><span class="route-badge">Easiest · Node.js 18+</span><button class="copy-button" type="button" data-copy="command-npm" aria-label="Copy the prebuilt gateway command">Copy <span aria-hidden="true">⧉</span></button></div>
             <pre><code id="command-npm">npm install -g pinkcollab@latest
+node "$(npm root -g)/pinkcollab/bin/check-install.js"
 cd ~/projects
 pinkcollab setup</code></pre>
-            <p class="route-note">Installs the released native Gateway binary without Rust. Prefer a direct download? Choose your platform’s Gateway binary and verify it against SHA256SUMS on the <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">latest release</a>.</p>
+            <p class="route-note">Installs the released native Gateway binary without Rust. Run the PATH check after npm finishes and resolve any warning before setup. PowerShell users: use <code>node (Join-Path (npm root -g) "pinkcollab/bin/check-install.js")</code> and inspect <code>Get-Command pinkcollab -All</code>. Prefer a direct download? Choose your platform’s Gateway binary and verify it against SHA256SUMS on the <a class="text-link" href="https://github.com/3xian/PinkCollab/releases/latest">latest release</a>.</p>
           </div>
           <div class="install-route">
             <div class="route-head"><h3>Build from source (optional)</h3><span class="route-badge">Needs Rust 1.89+</span><button class="copy-button" type="button" data-copy="command-source" aria-label="Copy the gateway build commands">Copy <span aria-hidden="true">⧉</span></button></div>
@@ -181,7 +182,7 @@ cargo build --release --locked --bin pinkcollab-gateway</code></pre>
               <li>Check the host with <code>pinkcollab status</code>; investigate problems with <code>pinkcollab doctor</code>. Pair another phone with <code>pinkcollab pair</code>.</li>
             </ol>
             <p class="next-note">Windows service installation needs an administrator terminal as the same user, service login credentials and the Log on as a service right. macOS starts at login; Linux user services may stop on logout. See the deployment guide for details.</p>
-            <p class="next-note">After an npm upgrade, run <code>pinkcollab setup</code> or <code>pinkcollab service install</code> again. Updates may stop active OMP runtimes; stored sessions and pairings remain. Fix any reported error and rerun to finish an interrupted update.</p>
+            <p class="next-note">After an npm upgrade, verify <code>pinkcollab --version</code> matches the installed package before running <code>pinkcollab setup</code> or <code>pinkcollab service install</code> again. A different copy on PATH can still run the old version; see <a class="text-link" href="https://github.com/3xian/PinkCollab/blob/main/docs/deployment.md#upgrade-checks-and-duplicate-installations">duplicate-installation checks</a>. Updates may stop active OMP runtimes; stored sessions and pairings remain. Afterward, <code>pinkcollab doctor</code> must show matching CLI and installed-binary hashes; start a stopped service with <code>pinkcollab service start</code>.</p>
             <p class="next-note">Manual Tailscale Serve and HTTPS proxies are also supported. Their remote access is reported as externally managed, not verified; PinkCollab checks Funnel only when it configured that mapping.</p>
             <p class="next-note">For a source build, run <code>./target/release/pinkcollab-gateway</code> from <code>gateway/</code> instead of <code>pinkcollab</code>, and build the matching Android app from source. For a direct release download, use <code>./pinkcollab-gateway-&lt;your-platform&gt;</code> from its download directory after <code>chmod +x</code> on macOS/Linux; on Windows PowerShell use <code>.\pinkcollab-gateway-win32-x64.exe</code> from its download directory.</p>
             <p id="copy-status" class="copy-status" role="status" aria-live="polite"></p>

@@ -4,6 +4,10 @@ import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.AttentionResponse
+import dev.pinkcollab.data.SessionDetail
+import dev.pinkcollab.data.OperationReceipt
+import dev.pinkcollab.data.OperationStatus
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
@@ -25,6 +29,7 @@ class SessionOperationsTest {
         private val uncancellableUpload: Boolean = false,
         private val onUpload: (suspend (SelectedFile) -> Unit)? = null,
         private val onSelectModel: (suspend () -> Unit)? = null,
+        private val onCommand: suspend (SessionUserCommand) -> Unit = {},
     ) : SessionActions {
         val uploadStarted = CompletableDeferred<Unit>()
         val finishUpload = CompletableDeferred<Unit>()
@@ -44,7 +49,10 @@ class SessionOperationsTest {
             commands += "prompt"
             try { onPrompt() } finally { promptExited.complete(Unit) }
         }
-        override suspend fun command(session: Session, command: SessionUserCommand) { commands += command.wire }
+        override suspend fun command(session: Session, command: SessionUserCommand) {
+            commands += command.wire
+            onCommand(command)
+        }
         override suspend fun respond(session: Session, response: AttentionResponse) { commands += "respond" }
 
         override suspend fun selectModel(session: Session, model: ModelInfo) {
@@ -60,6 +68,63 @@ class SessionOperationsTest {
         override suspend fun loadEarlierHistory(session: Session) {
             historyStarted.complete(Unit)
             finishHistory.await()
+        }
+    }
+
+    @Test fun startup_transport_failure_remains_retryable_without_a_receipt() = runTest {
+        val detached = session.copy(runtimeAttached = false, generation = null, status = SessionStatus.Idle)
+        val drafts = SessionDraftStore()
+        var fail = true
+        val actions = FakeActions(onCommand = { if (fail) throw IOException("Start outcome was not confirmed") })
+        val errors = mutableListOf<String>()
+        val coordinator = SessionOperations(backgroundScope, actions, drafts, drafts::clearIfVersion, errors::add)
+        coordinator.updateDetails(mapOf(key to SessionDetail(detached, snapshotToken = "subscription")))
+
+        coordinator.command(detached, SessionUserCommand.Start)
+        runCurrent()
+        assertEquals(RuntimeStartAttempt.Failed("Start outcome was not confirmed"), coordinator.runtimeStarts.value[key])
+        assertTrue(!coordinator.operations.value.activity(key).action)
+        assertEquals(listOf("Start outcome was not confirmed"), errors)
+
+        fail = false
+        coordinator.command(detached, SessionUserCommand.Start)
+        runCurrent()
+        assertTrue(coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Pending)
+        assertTrue(!coordinator.operations.value.activity(key).action)
+        coordinator.updateDetails(mapOf(key to SessionDetail(session, snapshotToken = "ready")))
+        assertTrue(key !in coordinator.runtimeStarts.value)
+    }
+
+    @Test fun startup_waits_for_ready_snapshot_and_ignores_the_previous_failure() = runTest {
+        val old = OperationReceipt("old", OperationStatus.Failed, "start_runtime", errorMessage = "Old failure")
+        val detached = session.copy(runtimeAttached = false, generation = null, status = SessionStatus.Idle)
+        val initial = SessionDetail(detached, snapshotToken = "subscription", operations = listOf(old))
+        val coordinator = SessionOperations(backgroundScope, FakeActions(), SessionDraftStore(), { _, _ -> }) {}
+        coordinator.updateDetails(mapOf(key to initial))
+        coordinator.command(detached, SessionUserCommand.Start)
+        runCurrent()
+        coordinator.updateDetails(mapOf(key to initial))
+        assertEquals(RuntimeStartAttempt.Pending("old"), coordinator.runtimeStarts.value[key])
+
+        coordinator.updateDetails(mapOf(key to initial.copy(session = session.copy(status = SessionStatus.Starting))))
+        assertTrue(coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Pending)
+        coordinator.updateDetails(mapOf(key to initial.copy(session = session, snapshotToken = null)))
+        assertTrue(coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Pending)
+        coordinator.updateDetails(mapOf(key to initial.copy(session = session)))
+        assertTrue(key !in coordinator.runtimeStarts.value)
+    }
+
+    @Test fun terminal_start_receipts_without_messages_resolve_pending_attempts() = runTest {
+        for (status in listOf(OperationStatus.Failed, OperationStatus.Cancelled, OperationStatus.OutcomeUnknown)) {
+            val detached = session.copy(runtimeAttached = false, generation = null, status = SessionStatus.Idle)
+            val initial = SessionDetail(detached, snapshotToken = "subscription")
+            val coordinator = SessionOperations(backgroundScope, FakeActions(), SessionDraftStore(), { _, _ -> }) {}
+            coordinator.updateDetails(mapOf(key to initial))
+            coordinator.command(detached, SessionUserCommand.Start)
+            runCurrent()
+            coordinator.updateDetails(mapOf(key to initial.copy(operations =
+                listOf(OperationReceipt("start", status, "start_runtime")))))
+            assertTrue("$status must resolve startup", coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Failed)
         }
     }
 

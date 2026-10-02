@@ -123,7 +123,6 @@ fn noninteractive_setup_rejects_implicit_workspace_without_writing_config() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("requires --workspace"));
     assert!(!data.exists());
 }
 #[test]

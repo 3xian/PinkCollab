@@ -84,7 +84,8 @@ internal fun FloatingTodoPanel(
             .padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (focus?.status == TodoStatus.Active) GlowDot(accent, pulse = live, size = 6.dp)
+                if (focus?.status == TodoStatus.Active) GlowDot(accent,
+                    modifier = Modifier.todoDotBreathing(live), size = 6.dp)
                 else Icon(if (settled) Icons.Outlined.CheckCircle else Icons.Outlined.Checklist,
                     null, Modifier.size(18.dp), tint = accent)
                 Text(if (settled) "Plan settled" else focus?.content ?: "Task plan",

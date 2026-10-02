@@ -56,6 +56,8 @@ Each compact session card displays the session title on its first line and the f
 
 The model picker keeps an unset thinking level distinct from the first supported level. Until a supported level is selected, it offers explicit level buttons, including the first level; afterward, multi-level models use a slider with the model's supported-level indices. Apply sends only the user's selected changes.
 
+Opening the model picker for an inactive session automatically starts OMP, then loads the model catalog once the runtime attaches. There is no default-versus-another-model confirmation step. `SessionOperations` owns each startup attempt across picker dismissal and reopening: command errors (including unconfirmed transport outcomes) and terminal receipts become retryable failures; only a ready subscription snapshot resolves a pending start. The picker derives progress and error presentation from that state instead of retaining its own startup flag.
+
 Session detail separates retained conversation content from current-work status, attention requests, and command receipts. See the [Session Presentation Contract](session-presentation.md) for type catalogs, grouping rules, status precedence, visual behavior, and current support limitations. It defines Android's display policy without changing runtime or transcript ownership.
 
 ## Conversations created outside PinkCollab

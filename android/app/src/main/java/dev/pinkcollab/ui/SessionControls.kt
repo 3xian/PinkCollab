@@ -38,7 +38,7 @@ internal fun ExitConfirmationDialog(
     AlertDialog(
         onDismissRequest = dismiss,
         icon = { Icon(Icons.AutoMirrored.Outlined.Logout, null, tint = TextMid) },
-        title = { Text("Exit this runtime?") },
+        title = { Text("End this runtime?") },
         text = {
             Text(
                 "This ends the current OMP process. The conversation stays, but this cannot be undone.",
@@ -49,7 +49,7 @@ internal fun ExitConfirmationDialog(
             TextButton(
                 onClick = rememberHapticOnClick(confirm),
                 colors = ButtonDefaults.textButtonColors(contentColor = TextHigh),
-            ) { Text("Exit", fontWeight = FontWeight.SemiBold) }
+            ) { Text("End", fontWeight = FontWeight.SemiBold) }
         },
         dismissButton = {
             TextButton(
@@ -74,7 +74,7 @@ private val ComposerRailActionMinHeight = 48.dp
 private val ComposerControlBorderWidth = 1.dp
 private val ComposerControlBorderColor = Color.White.copy(alpha = 0.06f)
 
-/** Stop aborts the turn; Exit opens confirmation before stopping the runtime. */
+/** Stop aborts the turn; End opens confirmation before stopping the runtime. */
 @Composable
 internal fun ComposerRail(
     controls: SessionControlsState,
@@ -92,15 +92,15 @@ internal fun ComposerRail(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ComposerRailButton(
-            label = "Stop",
-            onClick = { onCommand(SessionUserCommand.Interrupt) },
-            enabled = controls.canInterrupt,
+            label = "End",
+            onClick = onExit,
+            enabled = controls.canStop,
             contentColor = TextMid,
         )
         ComposerRailButton(
-            label = "Exit",
-            onClick = onExit,
-            enabled = controls.canStop,
+            label = "Stop",
+            onClick = { onCommand(SessionUserCommand.Interrupt) },
+            enabled = controls.canInterrupt,
             contentColor = TextMid,
         )
         ComposerRailButton(
@@ -150,8 +150,8 @@ private fun ComposerRailButton(
 
 /** Detached conversations use OMP's current default when their runtime starts. */
 internal fun composerModelLabel(model: ModelInfo?): String {
-    model ?: return "OMP default"
-    return model.name.takeIf { it.isNotBlank() } ?: model.id.takeIf { it.isNotBlank() } ?: "OMP default"
+    model ?: return "model"
+    return model.name.takeIf { it.isNotBlank() } ?: model.id.takeIf { it.isNotBlank() } ?: "model"
 }
 
 internal fun composerThinkingLabel(model: ModelInfo?): String? =

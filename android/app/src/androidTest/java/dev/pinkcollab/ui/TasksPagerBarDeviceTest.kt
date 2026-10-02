@@ -32,8 +32,6 @@ import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SavedHistory
 import dev.pinkcollab.data.TimelineItem
-import dev.pinkcollab.data.OperationReceipt
-import dev.pinkcollab.data.OperationStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -300,14 +298,17 @@ class TasksPagerBarDeviceTest {
             connection = ConnectionState.Online(1L), sessions = sessions))
         var detail by mutableStateOf(SessionDetail(target, snapshotToken = "subscription"))
         var operations by mutableStateOf(emptySet<SessionOperationKey>())
+        var runtimeStart by mutableStateOf<RuntimeStartAttempt?>(null)
         compose.setContent {
             TasksScreen(
                 TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
                     mapOf(targetKey to detail), emptyMap(), emptyMap(), operations,
-                    emptyMap(), emptyMap(), emptyMap(), selected),
+                    emptyMap(), emptyMap(), emptyMap(), selected,
+                    runtimeStarts = runtimeStart?.let { mapOf(targetKey to it) } ?: emptyMap()),
                 TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, action ->
                     if (action == SessionAction.Command(SessionUserCommand.Start)) {
                         operations = setOf(SessionOperationKey(targetKey, SessionLane.Action))
+                        runtimeStart = RuntimeStartAttempt.Pending(null)
                         val starting = target.copy(status = SessionStatus.Starting)
                         detail = detail.copy(session = starting)
                         host = host.copy(sessions = sessions.dropLast(1) + starting)
@@ -315,20 +316,18 @@ class TasksPagerBarDeviceTest {
                 }, { _, _ -> true }),
             )
         }
-        compose.onNode(hasContentDescription("Choose model: OMP default") and isEnabled()).performClick()
-        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNode(hasContentDescription("Choose model: model") and isEnabled()).performClick()
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals(targetKey, selected)
             operations = emptySet()
-            detail = detail.copy(session = target, operations = listOf(
-                OperationReceipt("start-1", OperationStatus.Failed, "start_runtime",
-                    errorMessage = "OMP did not load stored session")))
+            detail = detail.copy(session = target)
+            runtimeStart = RuntimeStartAttempt.Failed("OMP did not load stored session")
             host = host.copy(sessions = sessions)
         }
         compose.onNodeWithText("Could not start OMP\nOMP did not load stored session").assertIsDisplayed()
         compose.runOnIdle { assertEquals(targetKey, selected) }
-        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNodeWithText("Retry").performClick()
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
     }
 

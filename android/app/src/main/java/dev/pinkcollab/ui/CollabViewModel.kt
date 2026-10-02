@@ -89,7 +89,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         },
         { session ->
             loadDetail(session)
-            sessionCoordinator.command(session, SessionUserCommand.Start)
+            sessionCommand(session, SessionUserCommand.Start)
         },
     )
     internal val operations = hostOperations.operations
@@ -102,6 +102,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         ::showError,
     )
     internal val sessionOperations = sessionCoordinator.operations
+    internal val runtimeStarts = sessionCoordinator.runtimeStarts
     internal val sendProgress = sessionCoordinator.sendProgress
     private val mutableFileSelections = MutableStateFlow<Map<SessionKey, Int>>(emptyMap())
     internal val fileSelections = mutableFileSelections.asStateFlow()
@@ -123,6 +124,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         }
         connectivity.registerDefaultNetworkCallback(networkCallback)
         viewModelScope.launch { repository.errors.collect(::showError) }
+        viewModelScope.launch { repository.state.collect { sessionCoordinator.updateDetails(it.details) } }
     }
 
     internal suspend fun followTaskFocus(selections: Flow<SessionKey?>) {
@@ -171,7 +173,10 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     }
 
     internal fun sendPrompt(session: Session) = sessionCoordinator.send(session)
-    internal fun sessionCommand(session: Session, command: SessionUserCommand) = sessionCoordinator.command(session, command)
+    internal fun sessionCommand(session: Session, command: SessionUserCommand) {
+        sessionCoordinator.updateDetails(repository.state.value.details)
+        sessionCoordinator.command(session, command)
+    }
     internal fun respond(session: Session, response: AttentionResponse) = sessionCoordinator.respond(session, response)
     internal fun applyModelSettings(session: Session, changes: ModelSettingsChanges) =
         sessionCoordinator.applyModelSettings(session, changes)

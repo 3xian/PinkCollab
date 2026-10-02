@@ -1,5 +1,6 @@
 package dev.pinkcollab.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -8,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.*
@@ -75,6 +77,35 @@ class ActivityGroupDeviceTest {
         compose.onNode(hasScrollAction(), useUnmergedTree = true).performTouchInput { swipeRight() }
         compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
+    }
+
+    @Test fun scrolling_to_an_icon_after_its_batch_deadline_does_not_restart_the_fade() {
+        compose.mainClock.autoAdvance = false
+        val item = group((0..99).map { operation(it, ActivityStatus.Succeeded) })
+        compose.setContent {
+            PinkCollabTheme {
+                val context = LocalContext.current
+                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
+                Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+                    DisplayItem(item, renderer, liveActivity = false)
+                }
+            }
+        }
+        compose.mainClock.advanceTimeByFrame()
+        // Expire the entire batch using its real monotonic clock, without advancing
+        // Compose's animation clock. A restarted fade would remain transparent.
+        SystemClock.sleep(8_000)
+        compose.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToIndex(99)
+        compose.mainClock.advanceTimeByFrame()
+        val pixels = compose.onNodeWithContentDescription("Command 99, Completed", useUnmergedTree = true)
+            .assertIsDisplayed().captureToImage().toPixelMap()
+        var visibleCheckPixels = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val color = pixels[x, y]
+            if (color.green > 0.35f && color.blue > 0.35f && color.red < color.green * 0.8f)
+                visibleCheckPixels++
+        }
+        assertTrue("The completed check must be painted immediately", visibleCheckPixels > 20)
     }
 
     @Test fun expanding_a_tall_group_keeps_the_header_visible_and_tappable() {

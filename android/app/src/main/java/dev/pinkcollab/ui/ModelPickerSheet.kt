@@ -40,7 +40,7 @@ import dev.pinkcollab.ui.theme.*
 
 private enum class ModelPickerAvailability(val message: String? = null) {
     Available,
-    RuntimeDetached("Start OMP to edit model settings."),
+    RuntimeDetached("Connecting to OMP…"),
     RuntimeStarting("Starting runtime…"),
     LoadFailed("Models could not be loaded. Retry to continue."),
     Loading("Loading models…"),
@@ -64,13 +64,11 @@ internal fun ModelPickerSheet(
     apply: (ModelSettingsChanges) -> Unit,
     usageState: LoadState<dev.pinkcollab.data.UsageSnapshot>? = null,
     loadUsage: () -> Unit = {},
-    runtimeStartError: String? = null,
+    runtimeStartAttempt: RuntimeStartAttempt? = null,
 ) {
-    var sawRuntimeStarting by remember { mutableStateOf(false) }
-    LaunchedEffect(runtimeStarting, runtimeAttached) {
-        // An attached process can still be initializing; only a ready runtime ends the attempt.
-        if (runtimeStarting) sawRuntimeStarting = true
-        else if (runtimeAttached) sawRuntimeStarting = false
+    LaunchedEffect(Unit) {
+        if (!runtimeAttached && !runtimeStarting && runtimeStartAttempt !is RuntimeStartAttempt.Pending && canStartRuntime)
+            startRuntime()
     }
     var showUsage by remember { mutableStateOf(false) }
     if (showUsage) UsageSheet(usageState, loadUsage) { showUsage = false }
@@ -117,12 +115,11 @@ internal fun ModelPickerSheet(
                     ModelPickerHeader({ showUsage = true; loadUsage() }, refresh, runtimeAttached, runtimeAttached &&
                         ((ready != null && !ready.refreshing) || state is LoadState.Failed))
                     if (!runtimeAttached) {
-                        DefaultModelContent(runtimeStarting, canStartRuntime, {
-                            // Dispatching is not evidence that a runtime attempt already ended.
-                            // Wait for the actual starting state before showing a fallback error.
-                            sawRuntimeStarting = false
-                            startRuntime()
-                        }, dismiss, runtimeStartError ?: if (sawRuntimeStarting) "Please try again." else null)
+                        DefaultModelContent(
+                            runtimeStartAttempt !is RuntimeStartAttempt.Failed &&
+                                (runtimeStarting || runtimeStartAttempt is RuntimeStartAttempt.Pending),
+                            canStartRuntime, startRuntime, dismiss,
+                            (runtimeStartAttempt as? RuntimeStartAttempt.Failed)?.message)
                     } else if (ready != null) {
                         val catalog = ready.value
                         if (catalog.models.isNotEmpty()) ModelSearchField(query) { query = it }
@@ -223,19 +220,6 @@ private fun DefaultModelContent(starting: Boolean, canStart: Boolean, start: () 
         Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Check, contentDescription = null, tint = Purple400, modifier = Modifier.size(24.dp))
-                Spacer(Modifier.width(12.dp))
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("OMP default", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Your next message will use OMP’s default model.", style = MaterialTheme.typography.bodyMedium, color = TextMid)
-                }
-            }
-        }
         if (starting) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = Purple400, strokeWidth = 2.dp)
@@ -245,14 +229,14 @@ private fun DefaultModelContent(starting: Boolean, canStart: Boolean, start: () 
             Text("Could not start OMP\n$error", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error)
         } else {
-            Text("To choose another model, start OMP and load the model list.", style = MaterialTheme.typography.bodyMedium, color = TextMid)
+            Text("Waiting to connect to OMP.", style = MaterialTheme.typography.bodyMedium, color = TextMid)
         }
         if (!starting) Button(
             onClick = rememberHapticOnClick(start), enabled = canStart,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) { Text("Choose another model") }
+        ) { Text("Retry") }
         TextButton(onClick = rememberHapticOnClick(dismiss), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Text(if (starting) "Close" else "Keep default")
+            Text("Close")
         }
     }
 }

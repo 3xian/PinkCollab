@@ -83,6 +83,8 @@ Android consumes the flat protocol 3 events through `ProtocolReducer`; OMP frame
 
 `runtime.state` is the sole wire status: `starting`, `idle`, `running`, `waiting_input`, or `stopping`. A null runtime clears generation, model, pending input, and work timing. Generation changes clear the live tail and invalidate in-flight history reads; saved history reloads when a mapping exists. Local snapshot tokens and history epochs reject stale responses and are never sent over the wire. The UI does not parse runtime `phase` or `execution`, or choose prompt delivery; the Gateway chooses normal versus steering at dispatch.
 
+Switching sessions invalidates the subscription snapshot, not the host connection. While an online host supplies a fresh snapshot, retained messages remain readable and the page shows conversation synchronization instead of current work or `Host offline`; runtime controls stay disabled. Actual host connection failures still take precedence, even when the session snapshot is missing.
+
 ### Session switcher status
 
 The top session cards derive status from the host connection and session runtime summary. Connection states take precedence over retained execution evidence. Online cards show Starting or Stopping during lifecycle transitions, Inactive when no runtime is attached, Needs you for pending input, `Working` for `running`, `Ready` for attached `idle`, and `Starting` for `starting` (including execution not yet confirmed by the Gateway). Ready does not claim task completion; Inactive does not imply the session has never run. Cards do not infer status from transcript text or tool results.
@@ -183,7 +185,9 @@ Stages control grouping and specialized change details. They do not prove what a
 
 A running structured activity animates only when it belongs to the live section, the host is connected, and runtime execution is active. Otherwise it uses an hourglass and `Last seen running`. This changes presentation, not the stored tool result.
 
-Activity cards toggle expansion when tapped anywhere on the card, except where an operation's independent detail control or a selection/scroll gesture handles the input. A decorative chevron sits in a dedicated header row with a 20dp right inset matching the title's 20dp left inset; there is no Details/status-label row. The chevron stays beside the header when expanded, and operation details below it use the full content width. Accessibility exposes the card's expand/collapse action and expanded state. Below the summary, one horizontal icon per operation shows its actual status, with accessible action/status labels. Adjacent 18dp icons overlap by 4dp. The row scrolls without a count cap; new icons fade/scale in and scroll into view without replaying on return.
+Activity cards toggle expansion when tapped anywhere on the card, except where an operation's independent detail control or a selection/scroll gesture handles the input. A decorative chevron sits in a dedicated header row with a 20dp right inset matching the title's 20dp left inset; there is no Details/status-label row. The chevron stays beside the header when expanded, and operation details below it use the full content width. Accessibility exposes the card's expand/collapse action and expanded state. Below the summary, one horizontal icon per operation shows its actual status, with accessible action/status labels. Adjacent 18dp icons overlap by 4dp. The row scrolls without a count cap. On first appearance, icons fade in from left to right, staggered by 70ms with a 280ms fade per icon and no scaling. Each newly appended batch gets the same left-to-right entrance and scrolls into view; previously displayed icons do not replay on status updates, expansion, or horizontal scrolling back.
+
+Entrance batches use absolute monotonic completion deadlines. An icon first composed after its deadline is immediately opaque; an icon composed earlier consumes only the remaining delay and fade. Lazy scrolling never restarts an expired entrance.
 
 **Current limitation:** that timeline qualification is section-wide. Unlike the work-status strip, it does not filter individual groups to the newest user turn. Do not interpret every retained unfinished live tool as independent proof of current execution.
 
@@ -220,6 +224,8 @@ Groups start collapsed. Opening a single-operation group opens that operation's 
 ### 5.6 Todo panel
 
 The floating todo card retains its compact focus header, settled-task count, progress bar, and expand/collapse control. Its expanded body shows phase headings, phase counts, and task rows only; it has no QUEST LOG summary row or Details/raw arguments-and-output expander.
+
+During live work, active-task purple dots in both the focus header and expanded task rows breathe with synchronized scale and opacity changes over a 2.2-second cycle. Animation affects drawing only, so the card and row bounds remain stable. Retained/offline plans and non-active task states do not animate their dots.
 
 ## 6. Current-work contract
 
@@ -287,6 +293,8 @@ These surfaces are composed by `SessionPage`; they are not variants of `SessionD
 
 The Gateway currently admits `select`, `confirm`, `input`, and `editor` requests. Android projects the first pending input into `session.attention`; it does not render a queue of request cards. Response controls require a connected attached runtime and no input-busy operation. The status strip summarizes waiting; the card owns the actual response.
 
+Attention requests use an inset, neutral card with proportional reading text and a distinct question heading. Select options are full-width, left-aligned rows with wrapping labels and at least 48 dp touch targets; tapping still submits the original option string immediately. Cancel is a secondary, trailing action. Connection and operation gating apply to every response control.
+
 ### 7.2 Command receipt notices
 
 Only the last receipt is considered for the page's notice:
@@ -338,7 +346,8 @@ Loading shows a longer-wait hint after eight seconds without a stage change. Tim
 - The floating composer uses a static black scrim: a short fade-in above the work-status strip already dims content behind “Thinking”, then the scrim darkens continuously to opaque black at the bottom.
 - Status is not action permission. `sessionControls` independently gates sending, attachment, model selection, interrupt, and runtime exit. For example, Ready does not override an input-busy operation.
 - While sending, the work-status strip shows a neutral shimmering label for message submission or the current file index and count, with the file name below. The submission label has no trailing ellipsis. The composer has no send-progress component or animated progress bar. After sending finishes, the strip resumes the runtime work status; host connection status takes precedence while disconnected.
-- Stop interrupts the turn; Exit is a separate runtime action with confirmation. A status-label change must not change those meanings.
+- The composer action rail is ordered End, Stop, Send from top to bottom. Stop interrupts the turn; End is a separate runtime action with confirmation. A status-label change must not change those meanings.
+- Without a known model, the composer button reads `model`; a known model still shows its name or ID. Opening the picker for a detached runtime starts OMP. `SessionOperations` owns the attempt; closing and reopening the picker does not dispatch a duplicate pending start. Startup remains pending across separate operation and runtime-snapshot updates; a falling startup flag alone is not failure evidence. Explicit command errors and failed, cancelled, or unconfirmed start receipts resolve the attempt to a visible, retryable error even when the receipt has no error message. Retry clears that attempt's error without resending an unconfirmed outbox command under a new identity.
 
 ## Host history entries
 
@@ -358,7 +367,7 @@ These are behavior checks, not requirements to pin exact wording in tests.
 | Begin a new user turn after an interrupted call | Old call does not become the strip's current tool |
 | Receive an attention request during active execution | Waiting status takes precedence; request controls remain separate |
 | Runtime settles with old incomplete traces retained | Strip becomes Ready; it does not claim task success or keep spinning |
-| Load history containing incomplete tools | Historical tools do not animate or drive current work |
+| Load history containing incomplete tools | Historical tools use static hourglasses and do not drive current work; entrance fades are presentation-only |
 | Lose history connectivity after showing messages | Keep retained content and expose recovery, not false emptiness |
 | Scroll back while new work arrives | Reading position is respected; current-work strip remains visible |
 | Receive assistant text deltas through protocol 3 | Existing assistant content updates; no duplicate final message or invented streaming event |

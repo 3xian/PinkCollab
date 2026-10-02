@@ -47,6 +47,7 @@ internal data class TasksScreenState(
     val fileSelections: Map<SessionKey, Int>,
     val selectedSession: SessionKey?,
     val usageLoads: Map<String, LoadState<UsageSnapshot>> = emptyMap(),
+    val runtimeStarts: Map<SessionKey, RuntimeStartAttempt> = emptyMap(),
 )
 
 internal data class TasksScreenActions(
@@ -184,6 +185,7 @@ internal fun TasksScreen(
                         sendProgress = sendProgress[key],
                         model = modelLoads[key],
                         usage = state.usageLoads[session.hostId],
+                        runtimeStart = state.runtimeStarts[key],
                         historyItems = displayed?.historyItems,
                         refreshError = if (detailLoads[key] is LoadState.Failed)
                             "Could not refresh this conversation" else null,

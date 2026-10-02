@@ -70,9 +70,12 @@ Install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/do
 ```sh
 npm install -g pinkcollab@latest
 npm list -g pinkcollab --depth=0
+node "$(npm root -g)/pinkcollab/bin/check-install.js"
 ```
 
 Use the APK and CLI from the **same release**. Compare the installed npm version with the tag on the [APK's release page](https://github.com/3xian/PinkCollab/releases/latest). If they differ, install `pinkcollab@X.Y.Z` instead of `pinkcollab@latest`, replacing `X.Y.Z` with that release's version without the leading `v`. This also applies when installing an older release.
+
+Run the PATH check directly from your shell after npm finishes; npm changes PATH inside install scripts, so they cannot reliably check your shell's command selection. The check warns if another `pinkcollab` takes precedence. In PowerShell, use `node (Join-Path (npm root -g) "pinkcollab/bin/check-install.js")` and inspect `Get-Command pinkcollab -All`. Check `pinkcollab --version` before setup; `npm list -g` only describes the current npm prefix. Resolve any warning or version mismatch using the [duplicate-installation upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations).
 
 ### 3. Set up and pair
 
@@ -118,6 +121,8 @@ Open **Workspaces**, choose a directory, create a session, and send a prompt. Sw
 | Update the background Gateway after upgrading the CLI | `pinkcollab setup` or `pinkcollab service install` |
 
 To upgrade, install the APK and npm package from the same release, then update the background Gateway. Repeating setup merges workspace roots and preserves existing settings, sessions, and paired phones; pairing another phone is optional. **Upgrading or applying changed configuration may restart the Gateway and stop active OMP runtimes.** Stored conversations remain.
+
+Verify the command version before upgrading the service, then run `pinkcollab doctor` afterward: its CLI and installed-binary SHA-256 values must match. If the service is stopped, run `pinkcollab service start`. Updating one npm prefix does not update another prefix or automatically replace the background Gateway.
 
 If a service update fails, correct the reported error and rerun the same command; do not delete your configuration or pairing credentials. See [deployment and service management](docs/deployment.md) for update recovery and diagnostic details.
 

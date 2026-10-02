@@ -25,6 +25,26 @@ import dev.pinkcollab.ui.theme.*
 import kotlin.math.cos
 import kotlin.math.sin
 
+/** Animate drawing only; retained plans have no live motion or changing layout bounds. */
+@Composable
+internal fun Modifier.todoDotBreathing(live: Boolean): Modifier {
+    if (!live) return this
+    val transition = rememberInfiniteTransition(label = "todoDotBreathing")
+    val breath = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse,
+        ),
+        label = "todoDotBreath",
+    )
+    return graphicsLayer {
+        alpha = 0.45f + 0.55f * breath.value
+        scaleX = 0.8f + 0.3f * breath.value
+        scaleY = scaleX
+    }
+}
+
 @Composable
 internal fun QuestTaskRow(task: TodoTask, live: Boolean) {
     val target = when (task.status) {
@@ -61,7 +81,8 @@ internal fun QuestTaskRow(task: TodoTask, live: Boolean) {
     }.padding(horizontal = 4.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-            if (task.status == TodoStatus.Active) GlowDot(color, pulse = live, size = 8.dp)
+            if (task.status == TodoStatus.Active) GlowDot(color,
+                modifier = Modifier.todoDotBreathing(live), size = 8.dp)
             else {
                 val icon = when (task.status) {
                     TodoStatus.Completed -> Icons.Outlined.CheckCircle

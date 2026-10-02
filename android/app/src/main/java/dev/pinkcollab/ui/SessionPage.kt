@@ -102,14 +102,14 @@ internal fun SessionPage(
         }
     }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
-    var modelStartBaseline by remember(session.id) { mutableStateOf<String?>(null) }
-    val latestRuntimeStart = detail.operations.lastOrNull { it.commandType == "start_runtime" }
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
-    val workStatus = if (load is LoadState.Ready) {
-        remember(session, detail.liveItems, detail.streaming.isNotBlank(), host?.connection, state.sendProgress) {
-            sessionWorkStatus(detail, host, state.sendProgress)
+    // Subscription readiness gates current work, not the host's connection state.
+    val workStatus = if (load is LoadState.Ready &&
+        (detail.snapshotToken != null || state.host?.connected != true)) {
+        remember(session, detail.liveItems, detail.streaming.isNotBlank(), state.host?.connection, state.sendProgress) {
+            sessionWorkStatus(detail, state.host, state.sendProgress)
         }
     } else null
     val savedHistory = detail.savedHistory
@@ -442,10 +442,7 @@ internal fun SessionPage(
                         ComposerModelButton(
                             label = composerModelLabel(detail.model),
                             thinkingLevel = composerThinkingLabel(detail.model),
-                            onClick = {
-                                modelStartBaseline = latestRuntimeStart?.commandId
-                                showModels = true
-                            },
+                            onClick = { showModels = true },
                             enabled = controls.canChooseModel,
                             modifier = Modifier.weight(1f),
                         )
@@ -495,14 +492,10 @@ internal fun SessionPage(
             current = detail.model,
             enabled = attached && !activity.inputBusy,
             runtimeAttached = attached,
-            runtimeStarting = session.status == SessionStatus.Starting || activity.action,
+            runtimeStarting = session.status == SessionStatus.Starting,
             canStartRuntime = controls.canChooseModel,
-            startRuntime = {
-                modelStartBaseline = latestRuntimeStart?.commandId
-                onCommand(SessionUserCommand.Start)
-            },
-            runtimeStartError = latestRuntimeStart
-                ?.takeIf { it.commandId != modelStartBaseline && it.status == OperationStatus.Failed }?.errorMessage,
+            startRuntime = { onCommand(SessionUserCommand.Start) },
+            runtimeStartAttempt = state.runtimeStart,
             dismiss = { showModels = false },
             retry = { onLoadModels(true) },
             refresh = { onLoadModels(true) },

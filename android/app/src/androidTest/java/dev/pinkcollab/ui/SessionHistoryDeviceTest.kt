@@ -91,6 +91,28 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
     }
 
+    @Test fun subscription_refresh_does_not_report_an_online_host_as_offline() {
+        val detail = mutableStateOf(SessionDetail(session, snapshotToken = "first", liveItems = listOf(live)))
+        val connection = mutableStateOf(host)
+        compose.setContent {
+            SessionPage(SessionPageState(LoadState.Ready(detail.value), connection.value, SessionDraft(), 0,
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
+        }
+        compose.onNodeWithTag("sessionInput").assertIsEnabled()
+        compose.runOnIdle { detail.value = detail.value.copy(snapshotToken = null) }
+        compose.onNodeWithText("Host offline").assertDoesNotExist()
+        compose.onNodeWithTag("sessionSyncProgress").assertIsDisplayed()
+        compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
+        compose.runOnIdle { connection.value = host.copy(connection = ConnectionState.Offline()) }
+        compose.onNodeWithText("Host offline").assertIsDisplayed()
+        compose.runOnIdle { connection.value = host }
+        compose.onNodeWithText("Host offline").assertDoesNotExist()
+        compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
+        compose.runOnIdle { detail.value = detail.value.copy(snapshotToken = "second") }
+        compose.onNodeWithTag("sessionInput").assertIsEnabled()
+        compose.onNodeWithTag("sessionSyncProgress").assertDoesNotExist()
+    }
+
     @Test fun composer_and_draft_survive_detail_loading_failure_and_retry() {
         val load = mutableStateOf<LoadState<SessionDetail>>(LoadState.Loading)
         compose.setContent {

@@ -4,6 +4,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -13,12 +16,11 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.pinkcollab.data.ConnectionState
+import dev.pinkcollab.data.AttentionResponse
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.ModelInfo
-import dev.pinkcollab.data.OperationReceipt
-import dev.pinkcollab.data.OperationStatus
 import dev.pinkcollab.data.PairedHost
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionDetail
@@ -29,6 +31,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.atomic.AtomicInteger
+import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class ComposerRailDeviceTest {
@@ -75,7 +78,7 @@ class ComposerRailDeviceTest {
         }
 
         val stop = compose.onNodeWithText("Stop")
-        val exit = compose.onNodeWithText("Exit")
+        val exit = compose.onNodeWithText("End")
         val send = compose.onNodeWithText("Send")
         assertEquals(stop.fetchSemanticsNode().boundsInRoot.left, exit.fetchSemanticsNode().boundsInRoot.left)
         assertEquals(stop.fetchSemanticsNode().boundsInRoot.left, send.fetchSemanticsNode().boundsInRoot.left)
@@ -84,42 +87,56 @@ class ComposerRailDeviceTest {
         compose.runOnIdle { assertEquals(1, sent.get()) }
     }
 
-    @Test fun fast_start_failure_shows_current_error_and_retry_clears_previous_error() {
+    @Test fun transport_start_failure_without_receipt_is_retryable_and_pending_survives_reopening() {
         val host = HostState(
             PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client"),
             connection = ConnectionState.Online(1L),
         )
         val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
             "", "", false, null)
-        val oldFailure = OperationReceipt("old-start", OperationStatus.Failed, "start_runtime",
-            errorMessage = "Old failure")
-        val initial = SessionDetail(session, snapshotToken = "subscription", operations = listOf(oldFailure))
-        var page by mutableStateOf(SessionPageState(LoadState.Ready(initial), host,
-            SessionDraft(), 0, SessionActivity(), null, null))
+        val initial = SessionDetail(session, snapshotToken = "subscription")
+        val page = SessionPageState(LoadState.Ready(initial), host,
+            SessionDraft(), 0, SessionActivity(), null, null)
+        val key = SessionKey(session.hostId, session.id)
         var requests = 0
-        compose.setContent {
-            SessionPage(page, onAction = { action ->
-                if (action == SessionAction.Command(SessionUserCommand.Start)) {
-                    requests++
-                    if (requests == 1) {
-                        // The failure arrives without a rendered Starting or busy frame.
-                        page = page.copy(detail = LoadState.Ready(initial.copy(operations = listOf(
-                            oldFailure, OperationReceipt("new-start", OperationStatus.Failed, "start_runtime",
-                                errorMessage = "previous runtime exit is not confirmed")))))
-                    }
-                }
-            }, onApplyModelSettings = { true })
+        val actions = object : SessionActions {
+            override suspend fun command(session: Session, command: SessionUserCommand) {
+                check(command == SessionUserCommand.Start)
+                requests++
+                if (requests == 1) throw IOException("Start outcome was not confirmed")
+            }
+            override suspend fun upload(session: Session, file: SelectedFile) = error("Unexpected upload")
+            override suspend fun prompt(session: Session, message: String, fileIds: List<String>, intentId: String) = error("Unexpected prompt")
+            override suspend fun respond(session: Session, response: AttentionResponse) = error("Unexpected response")
+            override suspend fun selectModel(session: Session, model: ModelInfo) = error("Unexpected model selection")
+            override suspend fun setThinkingLevel(session: Session, level: String) = error("Unexpected thinking change")
+            override suspend fun setFastMode(session: Session, enabled: Boolean) = error("Unexpected fast change")
+            override suspend fun loadEarlierHistory(session: Session) = error("Unexpected history load")
         }
-        compose.onNodeWithContentDescription("Choose model: OMP default").performClick()
-        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("Choose another model").performClick()
-        compose.onNodeWithText("Could not start OMP\nprevious runtime exit is not confirmed").assertIsDisplayed()
-        compose.onNodeWithText("Choose another model").assertIsEnabled().performClick()
+        compose.setContent {
+            val scope = rememberCoroutineScope()
+            val coordinator = remember {
+                SessionOperations(scope, actions, SessionDraftStore(), { _, _ -> }, {}).also {
+                    it.updateDetails(mapOf(key to initial))
+                }
+            }
+            val starts by coordinator.runtimeStarts.collectAsState()
+            val operations by coordinator.operations.collectAsState()
+            SessionPage(page.copy(runtimeStart = starts[key], activity = operations.activity(key)),
+                onAction = { action ->
+                    if (action is SessionAction.Command) coordinator.command(session, action.command)
+                }, onApplyModelSettings = { true })
+        }
+        compose.onNodeWithContentDescription("Choose model: model").performClick()
+        compose.onNodeWithText("Could not start OMP\nStart outcome was not confirmed").assertIsDisplayed()
+        compose.onNodeWithText("Retry").assertIsEnabled().performClick()
         compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
         compose.runOnIdle { assertEquals(2, requests) }
-        compose.onNodeWithText("Keep default").performClick()
-        compose.onNodeWithContentDescription("Choose model: OMP default").performClick()
+        compose.onNodeWithText("Close").performClick()
+        compose.onNodeWithContentDescription("Choose model: model").performClick()
         compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(2, requests) }
     }
 
     @Test fun exited_session_can_start_choose_model_then_send() {
@@ -142,12 +159,11 @@ class ComposerRailDeviceTest {
             })
         }
 
-        compose.onNodeWithContentDescription("Choose model: OMP default").performClick()
-        compose.onNodeWithText("Choose another model").assertExists()
-        compose.runOnIdle { assertTrue(actions.isEmpty()) }
-        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNodeWithContentDescription("Choose model: model").performClick()
+        compose.onNodeWithText("Choose another model").assertDoesNotExist()
+        compose.onNodeWithText("Keep default").assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(SessionAction.Command(SessionUserCommand.Start), actions.last())
+            assertEquals(listOf(SessionAction.Command(SessionUserCommand.Start)), actions)
             page = page.copy(detail = LoadState.Ready(initialDetail.copy(session = exited.copy(status = SessionStatus.Starting))),
                 activity = SessionActivity(action = true))
         }

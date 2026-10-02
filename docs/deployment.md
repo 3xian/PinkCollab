@@ -86,6 +86,50 @@ The installer copies the currently executing native binary to a stable user dire
 
 On macOS this is a launchd user agent; it starts at login. Linux uses a systemd user service. Without user lingering it may stop on logout; `doctor` reports this, but PinkCollab never enables lingering automatically. Windows uses SCM with the current user's explicit credentials, never LocalSystem. Run installation in an administrator terminal as that same user and grant *Log on as a service* if Windows requires it. Passwordless accounts may need a Windows-supported service login credential or manual foreground operation. Non-interactive setup requires the Windows service to have been installed interactively already.
 
+### Upgrade checks and duplicate installations
+
+`npm install -g` updates only the prefix used by that npm invocation. A copy in `~/.local/bin`, another Node manager, or a standalone download may precede the updated entry on PATH. Running that older `pinkcollab setup` installs the older Gateway again, even when `npm list -g` reports a new version.
+
+After `npm install -g pinkcollab@latest`, run the packaged PATH diagnostic directly from your shell. npm changes PATH and the working directory inside lifecycle scripts, so the check is not an install hook. It resolves relative and empty PATH entries from your current directory, changes neither PATH nor other installations, and refuses lifecycle invocation rather than guessing the original environment. Shell aliases, cached lookups, and PowerShell-only script precedence still require the shell checks below. Resolve any warning before setup.
+
+On macOS/Linux, inspect both the npm prefix and shell entries before updating:
+
+```sh
+npm prefix -g
+npm list -g pinkcollab --depth=0
+node "$(npm root -g)/pinkcollab/bin/check-install.js"
+type -a pinkcollab
+pinkcollab --version
+```
+
+To bypass a shadowing command without deleting it, invoke the package from the current npm prefix explicitly. **The service update may stop active OMP runtimes**; wait for current work to finish first:
+
+```sh
+node "$(npm root -g)/pinkcollab/bin/pinkcollab.js" --version
+node "$(npm root -g)/pinkcollab/bin/pinkcollab.js" service install
+node "$(npm root -g)/pinkcollab/bin/pinkcollab.js" service start
+node "$(npm root -g)/pinkcollab/bin/pinkcollab.js" doctor
+```
+
+In Windows PowerShell:
+
+```powershell
+Get-Command pinkcollab -All
+npm prefix -g
+npm list -g pinkcollab --depth=0
+node (Join-Path (npm root -g) "pinkcollab/bin/check-install.js")
+$launcher = Join-Path (npm root -g) "pinkcollab/bin/pinkcollab.js"
+node $launcher --version
+node $launcher service install
+node $launcher service start
+node $launcher doctor
+```
+
+The explicit launcher version must match the intended Android release, and `doctor` must report matching CLI and installed-binary SHA-256 values with a healthy running service. No new pairing is required.
+
+To make plain `pinkcollab` select the same package, correct PATH or uninstall only the obsolete npm copy using its original prefix: `npm uninstall -g --prefix "/verified/old/prefix" pinkcollab`. Do not use the current prefix blindly or delete configuration, sessions, or pairing data. Open a new terminal afterward to discard cached command lookups and verify `pinkcollab --version` again.
+
+
 ### Windows background service
 
 PinkCollab uses a same-user Windows Service so the Gateway can start before login and survive logout. A per-user Task Scheduler logon task could avoid storing an account password and requiring administrator elevation, but would depend on an interactive user session. It is not implemented; adopting it would require lifecycle validation and an explicit change to the host availability contract.

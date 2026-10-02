@@ -2,6 +2,7 @@ package dev.pinkcollab.ui
 
 import android.content.Context
 import android.graphics.Typeface
+import android.os.SystemClock
 import android.text.method.LinkMovementMethod
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
@@ -372,7 +373,16 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
 @Composable
 private fun ActivityOperationIcons(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean) {
     val rowState = rememberLazyListState()
-    val seenOperations = remember(group.id) { group.operations.mapTo(HashSet()) { it.id } }
+    val entranceDurationMillis = 280
+    // Completion deadlines belong to the batch, not to lazy item composition.
+    val entranceDeadlines = remember(group.id) { HashMap<String, Long>() }
+    val batchStartMillis = SystemClock.uptimeMillis()
+    var entranceIndex = 0
+    for (operation in group.operations) {
+        if (operation.id !in entranceDeadlines) {
+            entranceDeadlines[operation.id] = batchStartMillis + entranceIndex++ * 70L + entranceDurationMillis
+        }
+    }
     var previousCount by remember(group.id) { mutableIntStateOf(group.operations.size) }
     LaunchedEffect(group.operations.size) {
         val grew = group.operations.size > previousCount
@@ -386,14 +396,28 @@ private fun ActivityOperationIcons(group: SessionDisplayItem.ActivityGroup, live
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items(group.operations, key = { it.id }) { operation ->
-            val entrance = remember(operation.id) { Animatable(if (seenOperations.add(operation.id)) 0f else 1f) }
-            LaunchedEffect(entrance) { entrance.animateTo(1f, tween(280)) }
+            val deadlineMillis = entranceDeadlines.getValue(operation.id)
+            val entrance = remember(operation.id) {
+                Animatable(if (SystemClock.uptimeMillis() >= deadlineMillis) 1f else 0f)
+            }
+            LaunchedEffect(entrance) {
+                val remainingMillis = (deadlineMillis - SystemClock.uptimeMillis()).coerceAtLeast(0)
+                if (remainingMillis == 0L) {
+                    entrance.snapTo(1f)
+                } else {
+                    entrance.animateTo(
+                        1f,
+                        tween(
+                            durationMillis = remainingMillis.coerceAtMost(entranceDurationMillis.toLong()).toInt(),
+                            delayMillis = (remainingMillis - entranceDurationMillis).coerceAtLeast(0).toInt(),
+                        ),
+                    )
+                }
+            }
             Box(
                 Modifier.animateItem(fadeInSpec = null, placementSpec = tween(280))
                     .graphicsLayer {
                         alpha = entrance.value
-                        scaleX = 0.6f + entrance.value * 0.4f
-                        scaleY = scaleX
                     },
             ) {
                 ActivityStatusIcon(operation.status, liveActivity, operation.action)
