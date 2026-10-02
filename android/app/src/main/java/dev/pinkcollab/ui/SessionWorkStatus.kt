@@ -30,6 +30,11 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -50,7 +55,7 @@ import dev.pinkcollab.ui.theme.Purple400
 import dev.pinkcollab.ui.theme.TextHigh
 import dev.pinkcollab.ui.theme.TextMid
 
-internal enum class WorkStatusKind { Working, Starting, Stopping, Attention, Offline, Ready, History }
+internal enum class WorkStatusKind { Sending, Working, Starting, Stopping, Attention, Offline, Ready, History }
 
 internal data class SessionWorkStatus(
     val kind: WorkStatusKind,
@@ -60,7 +65,21 @@ internal data class SessionWorkStatus(
     val timing: WorkTiming? = null,
 )
 
-internal fun sessionWorkStatus(detail: SessionDetail, host: HostState?): SessionWorkStatus {
+internal fun sessionWorkStatus(
+    detail: SessionDetail,
+    host: HostState?,
+    sendProgress: SendProgress? = null,
+): SessionWorkStatus {
+    if (host?.connected == true && sendProgress != null) {
+        return when (sendProgress) {
+            is SendProgress.Uploading -> SessionWorkStatus(
+                WorkStatusKind.Sending,
+                "Sending file ${sendProgress.fileIndex} of ${sendProgress.fileCount}",
+                sendProgress.fileName,
+            )
+            SendProgress.Submitting -> SessionWorkStatus(WorkStatusKind.Sending, "Sending message")
+        }
+    }
     val status = deriveSessionWorkStatus(detail, host)
     val timing = detail.session.workTiming?.takeIf {
         host?.connected == true && detail.session.runtimeAttached &&
@@ -172,9 +191,10 @@ private fun joinWorkDetail(first: String?, second: String?): String = when {
 
 @Composable
 internal fun SessionWorkStatusStrip(status: SessionWorkStatus, modifier: Modifier = Modifier) {
+    val sendingTextEffect = if (status.kind == WorkStatusKind.Sending) sendingTextShimmer() else Modifier
     val tint = when (status.kind) {
         WorkStatusKind.Attention -> Amber300
-        WorkStatusKind.Working, WorkStatusKind.Starting, WorkStatusKind.Stopping -> Purple400
+        WorkStatusKind.Sending, WorkStatusKind.Working, WorkStatusKind.Starting, WorkStatusKind.Stopping -> Purple400
         else -> TextMid
     }
     Row(
@@ -205,7 +225,8 @@ internal fun SessionWorkStatusStrip(status: SessionWorkStatus, modifier: Modifie
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     status.title,
-                    modifier = Modifier.weight(1f, fill = false).semantics { liveRegion = LiveRegionMode.Polite },
+                    modifier = Modifier.weight(1f, fill = false).then(sendingTextEffect)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
                     color = TextHigh,
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
@@ -232,6 +253,31 @@ internal fun SessionWorkStatusStrip(status: SessionWorkStatus, modifier: Modifie
             )
         }
     }
+}
+
+/** A neutral highlight sweeps over the glyphs; animation only invalidates drawing. */
+@Composable
+private fun sendingTextShimmer(): Modifier {
+    val phase = rememberInfiniteTransition(label = "sendingTextShimmer").animateFloat(
+        initialValue = -1f,
+        targetValue = 2f,
+        animationSpec = infiniteRepeatable(tween(1_600, easing = LinearEasing)),
+        label = "sendingTextHighlight",
+    )
+    return Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val center = size.width * phase.value
+            val halfWidth = size.width * 0.35f
+            drawRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(TextMid, Color.White, TextMid),
+                    start = Offset(center - halfWidth, 0f),
+                    end = Offset(center + halfWidth, 0f),
+                ),
+                blendMode = BlendMode.SrcIn,
+            )
+        }
 }
 
 /** Four fixed tiles light up clockwise; animation state is read only during drawing. */

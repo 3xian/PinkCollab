@@ -1,6 +1,6 @@
 {
   "name": "@pinkcollab/gateway-darwin-x64",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "PinkCollab Gateway binary for macOS x64",
   "license": "MIT",
   "repository": {

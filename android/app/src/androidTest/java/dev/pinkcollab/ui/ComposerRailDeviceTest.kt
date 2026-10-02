@@ -10,12 +10,15 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.ModelInfo
+import dev.pinkcollab.data.OperationReceipt
+import dev.pinkcollab.data.OperationStatus
 import dev.pinkcollab.data.PairedHost
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionDetail
@@ -79,6 +82,44 @@ class ComposerRailDeviceTest {
         compose.onNodeWithText("Start").assertDoesNotExist()
         send.performClick()
         compose.runOnIdle { assertEquals(1, sent.get()) }
+    }
+
+    @Test fun fast_start_failure_shows_current_error_and_retry_clears_previous_error() {
+        val host = HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client"),
+            connection = ConnectionState.Online(1L),
+        )
+        val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
+            "", "", false, null)
+        val oldFailure = OperationReceipt("old-start", OperationStatus.Failed, "start_runtime",
+            errorMessage = "Old failure")
+        val initial = SessionDetail(session, snapshotToken = "subscription", operations = listOf(oldFailure))
+        var page by mutableStateOf(SessionPageState(LoadState.Ready(initial), host,
+            SessionDraft(), 0, SessionActivity(), null, null))
+        var requests = 0
+        compose.setContent {
+            SessionPage(page, onAction = { action ->
+                if (action == SessionAction.Command(SessionUserCommand.Start)) {
+                    requests++
+                    if (requests == 1) {
+                        // The failure arrives without a rendered Starting or busy frame.
+                        page = page.copy(detail = LoadState.Ready(initial.copy(operations = listOf(
+                            oldFailure, OperationReceipt("new-start", OperationStatus.Failed, "start_runtime",
+                                errorMessage = "previous runtime exit is not confirmed")))))
+                    }
+                }
+            }, onApplyModelSettings = { true })
+        }
+        compose.onNodeWithContentDescription("Choose model: OMP default").performClick()
+        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNodeWithText("Could not start OMP\nprevious runtime exit is not confirmed").assertIsDisplayed()
+        compose.onNodeWithText("Choose another model").assertIsEnabled().performClick()
+        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(2, requests) }
+        compose.onNodeWithText("Keep default").performClick()
+        compose.onNodeWithContentDescription("Choose model: OMP default").performClick()
+        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
     }
 
     @Test fun exited_session_can_start_choose_model_then_send() {

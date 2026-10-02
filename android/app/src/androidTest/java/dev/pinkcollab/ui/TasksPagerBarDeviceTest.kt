@@ -10,6 +10,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -30,6 +32,8 @@ import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SavedHistory
 import dev.pinkcollab.data.TimelineItem
+import dev.pinkcollab.data.OperationReceipt
+import dev.pinkcollab.data.OperationStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -285,6 +289,47 @@ class TasksPagerBarDeviceTest {
         compose.runOnIdle { host = host.copy(sessions = host.sessions.drop(1)) }
         compose.waitForIdle()
         assertEquals(SessionKey("host", "s1"), selected)
+    }
+
+    @Test fun model_picker_survives_runtime_start_and_failure_reordering() {
+        val target = sessions.last()
+        val targetKey = SessionKey("host", target.id)
+        var selected by mutableStateOf<SessionKey?>(targetKey)
+        var host by mutableStateOf(HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            connection = ConnectionState.Online(1L), sessions = sessions))
+        var detail by mutableStateOf(SessionDetail(target, snapshotToken = "subscription"))
+        var operations by mutableStateOf(emptySet<SessionOperationKey>())
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
+                    mapOf(targetKey to detail), emptyMap(), emptyMap(), operations,
+                    emptyMap(), emptyMap(), emptyMap(), selected),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, action ->
+                    if (action == SessionAction.Command(SessionUserCommand.Start)) {
+                        operations = setOf(SessionOperationKey(targetKey, SessionLane.Action))
+                        val starting = target.copy(status = SessionStatus.Starting)
+                        detail = detail.copy(session = starting)
+                        host = host.copy(sessions = sessions.dropLast(1) + starting)
+                    }
+                }, { _, _ -> true }),
+            )
+        }
+        compose.onNode(hasContentDescription("Choose model: OMP default") and isEnabled()).performClick()
+        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(targetKey, selected)
+            operations = emptySet()
+            detail = detail.copy(session = target, operations = listOf(
+                OperationReceipt("start-1", OperationStatus.Failed, "start_runtime",
+                    errorMessage = "OMP did not load stored session")))
+            host = host.copy(sessions = sessions)
+        }
+        compose.onNodeWithText("Could not start OMP\nOMP did not load stored session").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(targetKey, selected) }
+        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
     }
 
     private fun assertCentered(id: String) {

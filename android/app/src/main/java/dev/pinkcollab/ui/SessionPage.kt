@@ -43,12 +43,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
-import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.PlatformTextStyle
@@ -106,12 +103,13 @@ internal fun SessionPage(
     }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
     var modelStartBaseline by remember(session.id) { mutableStateOf<String?>(null) }
+    val latestRuntimeStart = detail.operations.lastOrNull { it.commandType == "start_runtime" }
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
     val workStatus = if (load is LoadState.Ready) {
-        remember(session, detail.liveItems, detail.streaming.isNotBlank(), host?.connection) {
-            sessionWorkStatus(detail, host)
+        remember(session, detail.liveItems, detail.streaming.isNotBlank(), host?.connection, state.sendProgress) {
+            sessionWorkStatus(detail, host, state.sendProgress)
         }
     } else null
     val savedHistory = detail.savedHistory
@@ -440,32 +438,14 @@ internal fun SessionPage(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    state.sendProgress?.let { progress ->
-                        val status = when (progress) {
-                            is SendProgress.Uploading -> "Sending file ${progress.fileIndex} of ${progress.fileCount}  ${progress.fileName}"
-                            SendProgress.Submitting -> "Sending message…"
-                        }
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = ComposerContentInset)
-                                .semantics { liveRegion = LiveRegionMode.Polite },
-                        ) {
-                            Text(status, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                color = TextMid, style = MaterialTheme.typography.bodySmall)
-                            Spacer(Modifier.height(6.dp))
-                            LinearProgressIndicator(
-                                modifier = Modifier.fillMaxWidth().height(3.dp),
-                                color = Purple400,
-                                trackColor = Color.White.copy(alpha = 0.08f),
-                            )
-                        }
-                    }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         ComposerModelButton(
                             label = composerModelLabel(detail.model),
                             thinkingLevel = composerThinkingLabel(detail.model),
-                            onClick = { showModels = true },
+                            onClick = {
+                                modelStartBaseline = latestRuntimeStart?.commandId
+                                showModels = true
+                            },
                             enabled = controls.canChooseModel,
                             modifier = Modifier.weight(1f),
                         )
@@ -518,10 +498,10 @@ internal fun SessionPage(
             runtimeStarting = session.status == SessionStatus.Starting || activity.action,
             canStartRuntime = controls.canChooseModel,
             startRuntime = {
-                modelStartBaseline = detail.operations.lastOrNull { it.commandType == "start_runtime" }?.commandId
+                modelStartBaseline = latestRuntimeStart?.commandId
                 onCommand(SessionUserCommand.Start)
             },
-            runtimeStartError = detail.operations.lastOrNull { it.commandType == "start_runtime" }
+            runtimeStartError = latestRuntimeStart
                 ?.takeIf { it.commandId != modelStartBaseline && it.status == OperationStatus.Failed }?.errorMessage,
             dismiss = { showModels = false },
             retry = { onLoadModels(true) },

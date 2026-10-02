@@ -337,6 +337,7 @@ Loading shows a longer-wait hint after eight seconds without a stage change. Tim
 - Bottom clearance includes the work strip and composer so the final content can be scrolled above them.
 - The floating composer uses a static black scrim: a short fade-in above the work-status strip already dims content behind “Thinking”, then the scrim darkens continuously to opaque black at the bottom.
 - Status is not action permission. `sessionControls` independently gates sending, attachment, model selection, interrupt, and runtime exit. For example, Ready does not override an input-busy operation.
+- While sending, the work-status strip shows a neutral shimmering label for message submission or the current file index and count, with the file name below. The submission label has no trailing ellipsis. The composer has no send-progress component or animated progress bar. After sending finishes, the strip resumes the runtime work status; host connection status takes precedence while disconnected.
 - Stop interrupts the turn; Exit is a separate runtime action with confirmation. A status-label change must not change those meanings.
 
 ## Host history entries

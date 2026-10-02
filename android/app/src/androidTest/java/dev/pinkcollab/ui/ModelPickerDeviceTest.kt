@@ -42,6 +42,25 @@ class ModelPickerDeviceTest {
     }
     private val catalog = ModelCatalog(models, listOf("off", "low", "high"))
 
+    @Test fun requesting_runtime_does_not_report_failure_before_starting_state_arrives() {
+        var starting by mutableStateOf(false)
+        var requests = 0
+        compose.setContent {
+            ModelPickerSheet(state = null, current = null, enabled = false, runtimeAttached = false,
+                runtimeStarting = starting, canStartRuntime = !starting, startRuntime = { requests++ },
+                dismiss = {}, retry = {}, refresh = {}, apply = {})
+        }
+        compose.onNodeWithText("Choose another model").performClick()
+        compose.runOnIdle { assertEquals(1, requests) }
+        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
+        compose.runOnIdle { starting = true }
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.runOnIdle { starting = false }
+        compose.onNodeWithText("Could not start OMP\nPlease try again.").assertIsDisplayed()
+        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
+    }
+
     @Test fun failed_runtime_start_keeps_picker_open_and_shows_error() {
         var starting by mutableStateOf(true)
         compose.setContent {

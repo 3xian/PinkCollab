@@ -118,10 +118,11 @@ internal fun ModelPickerSheet(
                         ((ready != null && !ready.refreshing) || state is LoadState.Failed))
                     if (!runtimeAttached) {
                         DefaultModelContent(runtimeStarting, canStartRuntime, {
-                            sawRuntimeStarting = true
+                            // Dispatching is not evidence that a runtime attempt already ended.
+                            // Wait for the actual starting state before showing a fallback error.
+                            sawRuntimeStarting = false
                             startRuntime()
-                        }, dismiss, if (sawRuntimeStarting && !runtimeStarting)
-                            runtimeStartError ?: "Please try again." else null)
+                        }, dismiss, runtimeStartError ?: if (sawRuntimeStarting) "Please try again." else null)
                     } else if (ready != null) {
                         val catalog = ready.value
                         if (catalog.models.isNotEmpty()) ModelSearchField(query) { query = it }
