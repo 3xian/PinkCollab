@@ -1,5 +1,6 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,9 +11,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -20,7 +25,7 @@ import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import dev.pinkcollab.data.UsageAccount
 import dev.pinkcollab.data.UsageLimit
 import dev.pinkcollab.data.UsageSnapshot
-import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -45,7 +50,6 @@ internal fun UsageSheet(state: LoadState<UsageSnapshot>?, reload: () -> Unit, ba
                             Spacer(Modifier.width(4.dp)); Text("Reload")
                         }
                     }
-                    HorizontalDivider()
                     when (state) {
                         null, LoadState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
@@ -79,17 +83,22 @@ internal fun UsageSheet(state: LoadState<UsageSnapshot>?, reload: () -> Unit, ba
 @Composable
 private fun UsageAccountCard(account: UsageAccount) {
     OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(listOfNotNull(account.accountLabel, account.plan).joinToString(" · "), fontWeight = FontWeight.SemiBold)
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top) {
+                Text(listOfNotNull(account.accountLabel, account.plan).joinToString(" · "),
+                    modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                account.fetchedAt?.let {
+                    Text("Updated ${usageClockTime(it)}", maxLines = 1,
+                        style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.End,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             when (account.status) {
                 "disabled" -> Text("Account disabled. Reconnect it on the host.", color = MaterialTheme.colorScheme.error)
                 "unavailable" -> Text("Usage data unavailable", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             account.limits.forEach { UsageLimitRow(it) }
-            account.fetchedAt?.let {
-                Text("Updated ${usageTime(it)}", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
     }
 }
@@ -101,16 +110,39 @@ private fun UsageLimitRow(limit: UsageLimit) {
         "warning" -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(listOfNotNull(limit.label, limit.modelId, limit.tier).distinct().joinToString(" · "),
             style = MaterialTheme.typography.bodyMedium)
         if (limit.windowLabel != null && !limit.label.contains(limit.windowLabel, ignoreCase = true)) {
             Text(limit.windowLabel, style = MaterialTheme.typography.bodySmall)
         }
-        Text(usageAmount(limit), color = color, style = MaterialTheme.typography.bodyMedium)
+        val absoluteAmount = usageAbsoluteAmount(limit)
+        if (absoluteAmount != null || limit.usedFraction == null) {
+            Text(absoluteAmount ?: "Usage unknown", color = color, style = MaterialTheme.typography.bodyMedium)
+        }
         limit.usedFraction?.let { fraction ->
-            LinearProgressIndicator(progress = { fraction.toFloat().coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth(), color = color)
+            val progress = fraction.toFloat().coerceIn(0f, 1f)
+            val fillColor = when (limit.status) {
+                "exhausted" -> MaterialTheme.colorScheme.errorContainer
+                "warning" -> MaterialTheme.colorScheme.tertiaryContainer
+                else -> MaterialTheme.colorScheme.primaryContainer
+            }
+            Box(
+                Modifier.fillMaxWidth().heightIn(min = 32.dp).clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .semantics(mergeDescendants = true) {
+                        progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(Modifier.matchParentSize()) {
+                    Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(fillColor))
+                }
+                Text(String.format(Locale.US, "%.1f%% used", fraction * 100),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface)
+            }
         }
         if (limit.status == "warning") Text("Near quota limit", color = color, style = MaterialTheme.typography.bodySmall)
         if (limit.status == "exhausted") Text("Quota exhausted", color = color, style = MaterialTheme.typography.bodySmall)
@@ -119,7 +151,10 @@ private fun UsageLimitRow(limit: UsageLimit) {
 }
 internal fun usageAmount(limit: UsageLimit): String {
     val percentage = limit.usedFraction?.let { String.format(Locale.US, "%.1f%% used", it * 100) }
-    val absolute = if (limit.unit !in listOf(null, "percent", "unknown")) {
+    return listOfNotNull(percentage, usageAbsoluteAmount(limit)).joinToString(" · ").ifEmpty { "Usage unknown" }
+}
+private fun usageAbsoluteAmount(limit: UsageLimit): String? =
+    if (limit.unit !in listOf(null, "percent", "unknown")) {
         when {
             limit.used != null && limit.limit != null -> "${usageNumber(limit.used)} / ${usageNumber(limit.limit)} ${limit.unit}"
             limit.remaining != null -> "${usageNumber(limit.remaining)} ${limit.unit} remaining"
@@ -127,7 +162,6 @@ internal fun usageAmount(limit: UsageLimit): String {
             else -> null
         }
     } else null
-    return listOfNotNull(percentage, absolute).joinToString(" · ").ifEmpty { "Usage unknown" }
-}
 private fun usageNumber(value: Double): String = java.text.NumberFormat.getNumberInstance().format(value)
-private fun usageTime(value: Long): String = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(value))
+private fun usageTime(value: Long): String = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(value))
+private fun usageClockTime(value: Long): String = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(value))

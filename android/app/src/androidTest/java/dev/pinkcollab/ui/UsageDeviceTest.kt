@@ -24,7 +24,7 @@ class UsageDeviceTest {
                 retry = {}, refresh = {}, apply = {}, usageState = LoadState.Ready(UsageSnapshot(1790781273269, listOf(account))),
                 loadUsage = { loads++ })
         } }
-        compose.onNodeWithText("Reload").assertIsDisplayed()
+        compose.onNodeWithText("Reload").assertDoesNotExist()
         pauseForInspection()
         compose.onNodeWithContentDescription("Close model settings").assertDoesNotExist()
         compose.onNodeWithText("Usage").performClick()

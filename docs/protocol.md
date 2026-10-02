@@ -11,7 +11,7 @@ Paths below are relative to `/api/v3`. JSON fields use camelCase.
 ## Core models
 
 - **Session**: `{id,hostId,cwd,title,createdAt,updatedAt,origin}`. `origin` is `managed` or `discovered`; clients must use this field rather than infer origin from ID/title/runtime. Missing origin from older Gateway builds is interpreted as managed. Managed records are persistent conversation metadata, independent of the process. Titles default to `New session`; an accepted prompt replaces the title with its normalized first 80 characters. Attachment-only prompts retain the title.
-- **Runtime**: `null`, or `{generation,state,activity,model,pendingInputs,workTiming}`. `state` is `starting`, `idle`, `running`, `waiting_input`, or `stopping`. Completing a prompt can leave an idle runtime attached. `model` contains `{provider,id,name,thinkingLevel,thinkingLevels}`; unavailable values can be null. Input requests contain `{id,type,text,options}`.
+- **Runtime**: `null`, or `{generation,state,activity,model,pendingInputs,workTiming}`. `state` is `starting`, `idle`, `running`, `waiting_input`, or `stopping`. Completing a prompt can leave an idle runtime attached. `model` contains `{provider,id,name,thinkingLevel,thinkingLevels,fastModeEnabled?,fastModeActive?}`; unavailable values can be null. Fast fields are omitted when OMP does not report them. `fastModeEnabled` is the preference for the active model family; `fastModeActive` indicates whether it is currently effective. Input requests contain `{id,type,text,options}`.
 - **Operation**: `{id,kind,state,error}`. `id` is the submitted commandId; `kind` is its command type. `state` is `pending`, `succeeded`, `failed`, `cancelled`, or `unknown`. `error` is null or `{code,message}`. Persistence fingerprints, dispatch stages and result objects are private.
 - **Timeline item**: `{id,kind,text,detail,timestamp,tool?}`. Tool traces contain `{callId,name,arguments,result,isError,completed}`. Live IDs are generation-scoped; live previews are bounded to 64 items with bounded text. Full text belongs to history.
 
@@ -66,6 +66,7 @@ The ordered socket is the event stream. Clients maintain no wire subscription ID
 | `respond` | `generation`, `inputRequestId`, optional `value`, `confirmed`, `cancelled` |
 | `select_model` | `generation`, `provider`, `modelId` |
 | `set_thinking_level` | `generation`, `level` |
+| `set_fast_mode` | `generation`, `enabled` (boolean) |
 
 Generation guards target one process lifetime. A mismatch fails without affecting a newer runtime. A prompt with no generation means the caller observed **no runtime**: Gateway starts one only if still absent. An attached runtime requires its generation. Gateway routes idle prompts normally and running prompts as steering; Android sends no delivery choice. Starting/stopping runtimes and pending input reject inappropriate work. Stop confirms process-tree exit before releasing its slot; Interrupt keeps the process.
 
@@ -86,6 +87,8 @@ Before a prompt can reach OMP, Gateway durably marks its mapped transcript as po
 `PUT /sessions/:id/files/:fileId?name=...` uploads raw `application/octet-stream` bytes. IDs are `file_` plus 32 hex digits; each file is 1 byte–10 MiB, with up to five files per prompt. Identical retries are idempotent. References are scoped to the session. Idle prompts use quoted host file mentions; steering uses host paths and embeds recognized images up to 512 KiB. Frames exceeding the 1 MiB OMP limit fail. Uploaded files remain in the Gateway data directory until removed there.
 
 Other core reads: `GET /fs/list?path=...` returns `{path,parent,directories}` within allowed roots; `GET /sessions/:id/models` returns `{models,thinkingLevels}` from the attached runtime.
+
+Detached conversations display `OMP default`. When restoring their transcript, Gateway reads the new OMP process's default model before loading history, then selects that model before sending a prompt. The attached runtime reports the actual model name; later explicit model changes apply for that runtime.
 
 ## Errors and optional REST reads
 

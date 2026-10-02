@@ -159,6 +159,7 @@ fn main() {
     };
     let mut model_index = 0;
     let mut thinking_level = "medium".to_owned();
+    let mut fast_mode = false;
     let title_file = std::env::current_dir().unwrap().join("fixture-title.txt");
     let mut session_title = std::fs::read_to_string(&title_file).unwrap_or_default();
     let mut pending_prompt_id: Option<Value> = None;
@@ -184,7 +185,7 @@ fn main() {
         };
         match frame["type"].as_str().unwrap_or_default() {
             "get_state" => ack(
-                json!({"sessionFile":log,"sessionId":session_id,"sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"isSettled":pending_prompt_id.is_none() && !args.iter().any(|arg| arg == "--unknown-execution"),"isStreaming":pending_prompt_id.is_some()}),
+                json!({"sessionFile":log,"sessionId":session_id,"sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"fastModeEnabled":fast_mode,"fastModeActive":fast_mode,"isSettled":pending_prompt_id.is_none() && !args.iter().any(|arg| arg == "--unknown-execution"),"isStreaming":pending_prompt_id.is_some()}),
             ),
             "get_available_thinking_levels" => {
                 let mut levels = vec![json!("off")];
@@ -198,6 +199,9 @@ fn main() {
                 ack(json!({"levels":levels}));
             }
             "switch_session" => {
+                if args.iter().any(|arg| arg == "--restore-smart-model") {
+                    model_index = 1;
+                }
                 log = std::path::PathBuf::from(frame["sessionPath"].as_str().unwrap());
                 session_id = std::fs::read_to_string(&log)
                     .unwrap_or_default()
@@ -244,12 +248,17 @@ fn main() {
                 thinking_level = frame["level"].as_str().unwrap_or("medium").to_owned();
                 ack(json!({}));
             }
+            "set_fast_mode" => {
+                fast_mode = frame["enabled"].as_bool().unwrap();
+                ack(json!({"enabled":fast_mode,"active":fast_mode}));
+            }
             "prompt" => {
                 if args.iter().any(|arg| arg == "--record-prompt-frame") {
-                    std::fs::write(
-                        std::env::current_dir().unwrap().join("last-prompt.json"),
-                        frame.to_string(),
-                    )
+                    std::fs::write(std::env::current_dir().unwrap().join("last-prompt.json"), {
+                        let mut recorded = frame.clone();
+                        recorded["fixtureModelId"] = models[model_index]["id"].clone();
+                        recorded.to_string()
+                    })
                     .unwrap();
                 }
                 let message = frame["message"].as_str().unwrap_or_default();

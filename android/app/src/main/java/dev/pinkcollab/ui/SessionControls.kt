@@ -1,7 +1,10 @@
 package dev.pinkcollab.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -10,11 +13,15 @@ import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -59,10 +66,13 @@ internal fun ExitConfirmationDialog(
 /** Leading/trailing inset for composer content; the composer card itself stays unpadded. */
 internal val ComposerContentInset = 14.dp
 
-private val ComposerRailMinWidth = 64.dp
+private val ComposerRailMinWidth = 52.dp
 
 /** Each rail action keeps a 48 dp touch target even when the composer card is short. */
 private val ComposerRailActionMinHeight = 48.dp
+
+private val ComposerControlBorderWidth = 1.dp
+private val ComposerControlBorderColor = Color.White.copy(alpha = 0.06f)
 
 /** Stop aborts the turn; Exit opens confirmation before stopping the runtime. */
 @Composable
@@ -74,37 +84,31 @@ internal fun ComposerRail(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        Modifier
-            .fillMaxHeight()
+        modifier
             // Expand with scaled labels rather than clipping them inside a fixed-width rail.
             .widthIn(min = ComposerRailMinWidth)
             .width(IntrinsicSize.Max)
-            .heightIn(min = ComposerRailActionMinHeight * 3)
-            .then(modifier),
+            .wrapContentHeight(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ComposerRailButton(
             label = "Stop",
             onClick = { onCommand(SessionUserCommand.Interrupt) },
             enabled = controls.canInterrupt,
             contentColor = TextMid,
-            modifier = Modifier.weight(1f),
         )
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
         ComposerRailButton(
             label = "Exit",
             onClick = onExit,
             enabled = controls.canStop,
             contentColor = TextMid,
-            modifier = Modifier.weight(1f),
         )
         ComposerRailButton(
             label = "Send",
             onClick = onSend,
             enabled = controls.canSend,
             contentColor = MaterialTheme.colorScheme.onPrimary,
-            modifier = Modifier.weight(1f),
-            // Disabled Send is a plain rail row like Stop: no fill, same dim label.
-            fill = if (controls.canSend) BrandGradient else null,
+            fill = if (controls.canSend) BrandGradient else SolidColor(Purple400.copy(alpha = 0.12f)),
         )
     }
 }
@@ -115,15 +119,22 @@ private fun ComposerRailButton(
     onClick: () -> Unit,
     enabled: Boolean,
     contentColor: Color,
-    modifier: Modifier = Modifier,
     fill: Brush? = null,
 ) {
     val color = if (enabled) contentColor else Gray400.copy(alpha = 0.34f)
+    val shape = RoundedCornerShape(12.dp)
+    val background = fill ?: Brush.verticalGradient(
+        listOf(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.surfaceContainer),
+    )
     Box(
-        modifier
+        Modifier
             .fillMaxWidth()
-            .then(if (fill == null) Modifier else Modifier.background(fill))
-            .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick)),
+            .heightIn(min = ComposerRailActionMinHeight)
+            .clip(shape)
+            .background(background)
+            .border(ComposerControlBorderWidth, ComposerControlBorderColor, shape)
+            .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick))
+            .padding(horizontal = 8.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -137,14 +148,62 @@ private fun ComposerRailButton(
     }
 }
 
-/** Visible composer copy is the selected model name, never the word "Model". */
+/** Detached conversations use OMP's current default when their runtime starts. */
 internal fun composerModelLabel(model: ModelInfo?): String {
-    model ?: return "Select model"
-    return model.name.takeIf { it.isNotBlank() } ?: model.id.takeIf { it.isNotBlank() } ?: "Select model"
+    model ?: return "OMP default"
+    return model.name.takeIf { it.isNotBlank() } ?: model.id.takeIf { it.isNotBlank() } ?: "OMP default"
 }
 
 internal fun composerThinkingLabel(model: ModelInfo?): String? =
     model?.thinkingLevel?.takeIf { it.isNotBlank() }
+
+@Composable
+internal fun ComposerFastSwitch(
+    checked: Boolean,
+    enabled: Boolean,
+    active: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val toggle = rememberHapticOnClick { onCheckedChange(!checked) }
+    val color = when {
+        !enabled -> Gray400.copy(alpha = 0.34f)
+        checked -> Purple200
+        else -> TextMid
+    }
+    Row(
+        Modifier
+            .heightIn(min = 48.dp)
+            .padding(end = ComposerContentInset)
+            .toggleable(value = checked, interactionSource = remember { MutableInteractionSource() },
+                indication = null, enabled = enabled, role = Role.Switch,
+                onValueChange = { toggle() })
+            .semantics {
+                contentDescription = if (checked && !active) "Fast mode, currently inactive" else "Fast mode"
+            },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("Fast", color = color, style = MaterialTheme.typography.labelMedium)
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            enabled = enabled,
+            modifier = Modifier.border(
+                ComposerControlBorderWidth, ComposerControlBorderColor, RoundedCornerShape(50),
+            ),
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Purple400,
+                checkedBorderColor = Color.Transparent,
+                uncheckedThumbColor = TextMid,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                uncheckedBorderColor = Color.Transparent,
+                disabledCheckedBorderColor = Color.Transparent,
+                disabledUncheckedBorderColor = Color.Transparent,
+            ),
+        )
+    }
+}
 
 @Composable
 internal fun ComposerModelButton(

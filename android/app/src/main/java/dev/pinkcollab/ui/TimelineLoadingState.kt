@@ -4,7 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -12,23 +12,17 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.ui.theme.PinkCollabTypography
-import kotlinx.coroutines.delay
 
 /** A small progress row also works above retained messages during a refresh. */
 @Composable
 internal fun SessionSyncProgress(message: String, modifier: Modifier = Modifier) {
-    var slow by remember(message) { mutableStateOf(false) }
-    LaunchedEffect(message) {
-        delay(8_000)
-        slow = true
-    }
-    Column(modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
-            Text(message, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
-                style = PinkCollabTypography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (slow) Text("Taking longer than usual. You can switch sessions while this loads.",
+    Row(
+        modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
+        Text(message, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite },
             style = PinkCollabTypography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

@@ -54,6 +54,9 @@ class SessionOperationsTest {
         override suspend fun setThinkingLevel(session: Session, level: String) {
             commands += "thinking:$level"
         }
+        override suspend fun setFastMode(session: Session, enabled: Boolean) {
+            commands += "fast:$enabled"
+        }
         override suspend fun loadEarlierHistory(session: Session) {
             historyStarted.complete(Unit)
             finishHistory.await()
@@ -244,6 +247,16 @@ class SessionOperationsTest {
         coordinator.applyModelSettings(session, modelSettingsChanges(current, ModelSettingsDraft(current, "high")))
         runCurrent()
         assertEquals(listOf("select:anthropic/sonnet", "thinking:high"), actions.commands)
+    }
+
+    @Test fun fast_switch_submits_both_on_and_off_without_changing_model() = runTest {
+        val actions = FakeActions()
+        val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }) {}
+        assertTrue(coordinator.applyModelSettings(session, ModelSettingsChanges(null, null, true)))
+        runCurrent()
+        assertTrue(coordinator.applyModelSettings(session, ModelSettingsChanges(null, null, false)))
+        runCurrent()
+        assertEquals(listOf("fast:true", "fast:false"), actions.commands)
     }
 
     @Test fun apply_model_and_thinking_shares_one_action_job_in_order() = runTest {

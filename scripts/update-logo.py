@@ -1,0 +1,104 @@
+"""Resize/mask the approved logo; requires Pillow and NumPy.
+
+Run from the repository root: python scripts/update-logo.py
+All inputs are resolved relative to this script, including logo-free promotional
+templates. Repeated runs rebuild outputs from those inputs, never from prior outputs.
+"""
+
+from pathlib import Path
+
+import numpy as np
+from PIL import Image, ImageDraw
+
+ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "docs/assets/pinkcollab-logo-source.png"
+RES = ROOT / "android/app/src/main/res"
+TEMPLATES = ROOT / "docs/assets/branding"
+LANCZOS = Image.Resampling.LANCZOS
+
+
+def masked_tile(source: Image.Image, size: int, radius: float) -> Image.Image:
+    tile = source.convert("RGBA").resize((size, size), LANCZOS)
+    mask = Image.new("L", (size * 4, size * 4))
+    ImageDraw.Draw(mask).rounded_rectangle(
+        (0, 0, size * 4 - 1, size * 4 - 1), radius=radius * size * 4, fill=255
+    )
+    tile.putalpha(mask.resize((size, size), LANCZOS))
+    return tile
+
+
+def save(image: Image.Image, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, optimize=True)
+
+
+def composite_logo(
+    canvas: Image.Image,
+    source: Image.Image,
+    center: tuple[int, int],
+    size: int,
+    rotation: float = 0,
+) -> None:
+    if rotation:
+        # Rotate before downsampling so small tilted icons keep smooth edges.
+        tile = masked_tile(source, size * 4, 0.20).rotate(
+            rotation, resample=Image.Resampling.BICUBIC, expand=True
+        )
+        tile = tile.resize((round(tile.width / 4), round(tile.height / 4)), LANCZOS)
+    else:
+        tile = masked_tile(source, size, 0.20)
+    canvas.alpha_composite(tile, (center[0] - tile.width // 2, center[1] - tile.height // 2))
+
+
+def promotional_images(source: Image.Image) -> None:
+    with Image.open(TEMPLATES / "social-card-base.png") as template:
+        card = template.convert("RGBA")
+    composite_logo(card, source, (102, 78), 52)
+    composite_logo(card, source, (849, 146), 46, rotation=6)
+    save(card.convert("RGB"), ROOT / "website/assets/social-card.png")
+
+    with Image.open(TEMPLATES / "readme-base.png") as template:
+        photo = template.convert("RGBA")
+    composite_logo(photo, source, (1098, 94), 138)
+    photo.convert("RGB").save(ROOT / "docs/assets/pinkcollab-readme.jpg", quality=95, subsampling=0)
+
+
+def main() -> None:
+    source = Image.open(SOURCE).convert("RGB")
+    save(masked_tile(source, 512, 0.22), ROOT / "docs/assets/pinkcollab-logo.png")
+    for name, size, radius in (
+        ("logo-96", 96, 0.22), ("logo-144", 144, 0.22),
+        ("favicon-32", 32, 0.22), ("favicon-48", 48, 0.22),
+        ("apple-touch-icon", 180, 0),
+    ):
+        # Indexed PNGs keep the small website icons within its page-size budget.
+        tile = masked_tile(source, size, radius).quantize(
+            colors=256, method=Image.Quantize.FASTOCTREE
+        )
+        save(tile, ROOT / f"website/assets/{name}.png")
+    for density, size in (("mdpi", 48), ("hdpi", 72), ("xhdpi", 96), ("xxhdpi", 144), ("xxxhdpi", 192)):
+        save(masked_tile(source, size, 0.22), RES / f"mipmap-{density}/ic_launcher.png")
+        save(masked_tile(source, size, 0.5), RES / f"mipmap-{density}/ic_launcher_round.png")
+
+    # Only the purple backdrop has R > G and B > R. Keep the black, white,
+    # and cyan artwork, with a soft one-pixel transition at its antialiased edge.
+    pixels = np.asarray(source, dtype=np.float32)
+    purple = np.minimum(pixels[:, :, 0] - pixels[:, :, 1], pixels[:, :, 2] - pixels[:, :, 0])
+    alpha = np.clip(1 - purple / 18, 0, 1)
+    character = source.convert("RGBA")
+    character.putalpha(Image.fromarray(np.uint8(alpha * 255)))
+    save(character.resize((512, 512), LANCZOS), RES / "drawable-nodpi/pinkcollab_logo.png")
+
+    # Adaptive icons use a 108dp canvas. Keep the complete artwork in the
+    # central 72dp so launcher masks have room without cutting off the flames.
+    foreground = Image.new("RGBA", (432, 432))
+    foreground.alpha_composite(character.resize((288, 288), LANCZOS), (72, 72))
+    save(foreground, RES / "drawable-nodpi/ic_launcher_foreground.png")
+    corners = np.asarray(source)[np.ix_([0, source.height - 1], [0, source.width - 1])]
+    background = Image.fromarray(corners).resize((432, 432), Image.Resampling.BILINEAR)
+    save(background, RES / "drawable-nodpi/ic_launcher_background.png")
+    promotional_images(source)
+
+
+if __name__ == "__main__":
+    main()

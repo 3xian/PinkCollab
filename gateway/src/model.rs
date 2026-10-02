@@ -29,6 +29,10 @@ pub struct ModelInfo {
     pub thinking_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_levels: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_mode_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fast_mode_active: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

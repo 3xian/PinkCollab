@@ -35,6 +35,21 @@ internal class CommandDispatcher(
         }
     }
 
+    suspend fun setFastMode(hostId: String, id: String, enabled: Boolean) {
+        if (currentSession(hostId, id)?.runtimeAttached != true) {
+            command(hostId, id, "start")
+            awaitSnapshot(state, "OMP did not become ready for Fast mode") {
+                currentSession(hostId, id)?.let { session ->
+                    session.runtimeAttached && session.generation != null && session.status != SessionStatus.Starting
+                } == true
+            }
+        }
+        val target = runtimeTarget(hostId, id)
+        sendCommand(hostId, id, target.action("set_fast_mode:$enabled"), "set_fast_mode") {
+            target.fields().put("enabled", enabled)
+        }
+    }
+
     suspend fun prompt(hostId: String, id: String, message: String, fileIds: List<String>, intentId: String) =
         command(hostId, id, "prompt", JSONObject().put("message", message).put("fileIds", JSONArray(fileIds)), intentId)
 

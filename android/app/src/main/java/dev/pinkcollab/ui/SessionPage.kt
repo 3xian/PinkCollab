@@ -105,6 +105,7 @@ internal fun SessionPage(
         }
     }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
+    var modelStartBaseline by remember(session.id) { mutableStateOf<String?>(null) }
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
@@ -460,19 +461,28 @@ internal fun SessionPage(
                             )
                         }
                     }
-                    ComposerModelButton(
-                        label = composerModelLabel(detail.model),
-                        thinkingLevel = composerThinkingLabel(detail.model),
-                        onClick = { showModels = true },
-                        enabled = controls.canChooseModel,
-                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        ComposerModelButton(
+                            label = composerModelLabel(detail.model),
+                            thinkingLevel = composerThinkingLabel(detail.model),
+                            onClick = { showModels = true },
+                            enabled = controls.canChooseModel,
+                            modifier = Modifier.weight(1f),
+                        )
+                        ComposerFastSwitch(
+                            checked = detail.model?.fastModeEnabled == true,
+                            active = detail.model?.fastModeActive == true,
+                            enabled = controls.canChooseModel,
+                            onCheckedChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
+                        )
+                    }
                 }
                 ComposerRail(
                     controls = controls,
                     onCommand = onCommand,
                     onExit = { showExitConfirmation = true },
                     onSend = { fileError = null; onPrompt() },
-                    modifier = Modifier.composerCard(),
+                    modifier = Modifier.align(Alignment.Bottom),
                 )
             }
         }
@@ -507,7 +517,12 @@ internal fun SessionPage(
             runtimeAttached = attached,
             runtimeStarting = session.status == SessionStatus.Starting || activity.action,
             canStartRuntime = controls.canChooseModel,
-            startRuntime = { onCommand(SessionUserCommand.Start) },
+            startRuntime = {
+                modelStartBaseline = detail.operations.lastOrNull { it.commandType == "start_runtime" }?.commandId
+                onCommand(SessionUserCommand.Start)
+            },
+            runtimeStartError = detail.operations.lastOrNull { it.commandType == "start_runtime" }
+                ?.takeIf { it.commandId != modelStartBaseline && it.status == OperationStatus.Failed }?.errorMessage,
             dismiss = { showModels = false },
             retry = { onLoadModels(true) },
             refresh = { onLoadModels(true) },

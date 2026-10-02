@@ -50,6 +50,7 @@ pairing*.png
 
 # Node dependencies for repository tooling
 node_modules/
+__pycache__/
 
 
 # Scratch review dumps

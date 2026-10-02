@@ -88,6 +88,56 @@ impl Drop for Harness {
     }
 }
 
+#[allow(dead_code)]
+pub(crate) async fn create_session(
+    client: &reqwest::Client,
+    harness: &Harness,
+    credential: &str,
+    cwd: &str,
+) -> String {
+    let sessions = format!("{}/api/v3/sessions", harness.url);
+    let response = client
+        .post(&sessions)
+        .bearer_auth(credential)
+        .json(&json!({"commandId":"create","hostId":harness.host.id,"cwd":cwd}))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let record: Value = response.json().await.unwrap();
+    format!("{sessions}/{}", record["id"].as_str().unwrap())
+}
+
+#[allow(dead_code)]
+pub(crate) async fn command_succeeds(
+    client: &reqwest::Client,
+    session: &str,
+    credential: &str,
+    command_id: &str,
+    mut command: Value,
+) {
+    command["commandId"] = json!(command_id);
+    assert_eq!(
+        client
+            .post(format!("{session}/commands"))
+            .bearer_auth(credential)
+            .json(&command)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    wait_operation(
+        client,
+        &format!("{session}/operations/{command_id}"),
+        credential,
+        "succeeded",
+    )
+    .await;
+}
+
 pub(crate) async fn wait_operation(
     client: &reqwest::Client,
     url: &str,

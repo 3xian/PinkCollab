@@ -136,6 +136,7 @@ impl SessionController {
             } else {
                 false
             };
+            let mut startup_model = None;
             if let Some(reference) = session.engine_session_ref.as_deref()
                 && !missing_unwritten
             {
@@ -143,6 +144,9 @@ impl SessionController {
                     Path::new(reference).is_file(),
                     "stored OMP session is unavailable"
                 );
+                // Read OMP's configured default before switch_session restores the historical model.
+                let initial = runtime.request(json!({"type":"get_state"})).await?;
+                startup_model = Some(model_info(&initial["data"]).context("OMP default model unavailable")?);
                 let response = runtime
                     .request(json!({"type":"switch_session","sessionPath":reference}))
                     .await?;
@@ -151,7 +155,22 @@ impl SessionController {
                     "OMP did not load stored session"
                 );
             }
-            let response = runtime.request(json!({"type":"get_state"})).await?;
+            let mut response = runtime.request(json!({"type":"get_state"})).await?;
+            ensure!(
+                expected_omp_id
+                    .as_deref()
+                    .is_none_or(|expected| omp::string(&response["data"], "sessionId") == expected),
+                "history_unavailable: OMP loaded a different session identity"
+            );
+            if let Some(default_model) = startup_model {
+                let restored_model = model_info(&response["data"]);
+                if restored_model.as_ref().is_none_or(|model| {
+                    model.provider != default_model.provider || model.id != default_model.id
+                }) {
+                    runtime.request(json!({"type":"set_model","provider":default_model.provider,"modelId":default_model.id})).await?;
+                    response = runtime.request(json!({"type":"get_state"})).await?;
+                }
+            }
             let data = &response["data"];
             ensure!(
                 expected_omp_id

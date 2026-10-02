@@ -214,6 +214,27 @@ class GatewayRepositorySafetyTest {
         assertFalse(posted.has("generation"))
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun detached_fast_switch_waits_for_started_runtime_and_uses_its_generation() = runTest {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        val detached = Session("session", "host", "/tmp", "Work", SessionStatus.Idle, "", false, null,
+            "2026-01-01", "2026-01-01", false, null)
+        val state = MutableStateFlow(AppState(hosts = mapOf("host" to HostState(host, sessions = listOf(detached)))))
+        val transport = RecordingTransport(::accepted)
+        val dispatcher = CommandDispatcher(state, { host }, transport, MemoryOutbox(), HostCommandGate())
+        val toggle = async { dispatcher.setFastMode("host", "session", true) }
+        runCurrent()
+        assertEquals(listOf("start_runtime"), transport.posts.map { it.getString("type") })
+        assertFalse(toggle.isCompleted)
+
+        state.value = runtimeState(host, "started-generation")
+        toggle.await()
+        val fast = transport.posts.last()
+        assertEquals("set_fast_mode", fast.getString("type"))
+        assertEquals("started-generation", fast.getString("generation"))
+        assertTrue(fast.getBoolean("enabled"))
+    }
+
     @Test fun lookup_authentication_failure_never_posts_or_discards_a_command() = runBlocking {
         val storage = MemoryOutbox()
         var posts = 0
@@ -355,6 +376,7 @@ class GatewayRepositorySafetyTest {
         checkScoped { it.respond("host", "session", AttentionResponse.Value("input-1", "answer")) }
         checkScoped { it.selectModel("host", "session", ModelInfo("provider", "model", "Model")) }
         checkScoped { it.setThinkingLevel("host", "session", "high") }
+        checkScoped { it.setFastMode("host", "session", true) }
     }
 
     @Test fun runtime_commands_use_the_same_host_summary_fallback() = runBlocking {

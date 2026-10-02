@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
@@ -29,6 +30,33 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(AndroidJUnit4::class)
 class ComposerRailDeviceTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun fast_switch_is_clickable_for_detached_and_attached_sessions_without_fast_state() {
+        val host = HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client"),
+            connection = ConnectionState.Online(1L),
+        )
+        val detached = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
+            "", "", false, null)
+        var page by mutableStateOf(SessionPageState(LoadState.Ready(SessionDetail(detached, snapshotToken = "subscription")), host,
+            SessionDraft(), 0, SessionActivity(), null, null))
+        val applied = mutableListOf<ModelSettingsChanges>()
+        compose.setContent {
+            SessionPage(page, onAction = {}, onApplyModelSettings = { applied += it; true })
+        }
+        compose.onNodeWithContentDescription("Fast mode").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            page = page.copy(detail = LoadState.Ready(SessionDetail(
+                detached.copy(runtimeAttached = true, generation = "started"),
+                model = ModelInfo("provider", "model", "Model"),
+                snapshotToken = "subscription",
+            )))
+        }
+        compose.onNodeWithContentDescription("Fast mode").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(ModelSettingsChanges(null, null, true), ModelSettingsChanges(null, null, true)), applied)
+        }
+    }
 
     @Test fun detached_composer_shows_send_without_start_and_sends_on_tap() {
         val host = PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client")
@@ -73,10 +101,10 @@ class ComposerRailDeviceTest {
             })
         }
 
-        compose.onNodeWithContentDescription("Choose model: Select model").performClick()
-        compose.onNodeWithText("Start runtime").assertExists()
+        compose.onNodeWithContentDescription("Choose model: OMP default").performClick()
+        compose.onNodeWithText("Choose another model").assertExists()
         compose.runOnIdle { assertTrue(actions.isEmpty()) }
-        compose.onNodeWithText("Start runtime").performClick()
+        compose.onNodeWithText("Choose another model").performClick()
         compose.runOnIdle {
             assertEquals(SessionAction.Command(SessionUserCommand.Start), actions.last())
             page = page.copy(detail = LoadState.Ready(initialDetail.copy(session = exited.copy(status = SessionStatus.Starting))),

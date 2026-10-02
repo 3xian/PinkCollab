@@ -19,8 +19,9 @@ internal data class ModelSettingsDraft(
 internal data class ModelSettingsChanges(
     val model: ModelInfo?,
     val thinkingLevel: String?,
+    val fastModeEnabled: Boolean? = null,
 ) {
-    val isEmpty: Boolean get() = model == null && thinkingLevel == null
+    val isEmpty: Boolean get() = model == null && thinkingLevel == null && fastModeEnabled == null
 }
 
 internal fun modelSettingsChanges(current: ModelInfo?, pending: ModelSettingsDraft): ModelSettingsChanges =

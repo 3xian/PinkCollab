@@ -25,6 +25,7 @@ internal interface SessionActions {
     suspend fun respond(session: Session, response: AttentionResponse)
     suspend fun selectModel(session: Session, model: ModelInfo)
     suspend fun setThinkingLevel(session: Session, level: String)
+    suspend fun setFastMode(session: Session, enabled: Boolean)
     suspend fun loadEarlierHistory(session: Session)
 }
 
@@ -49,6 +50,9 @@ internal class RepositorySessionActions(
 
     override suspend fun setThinkingLevel(session: Session, level: String) =
         repository.setThinkingLevel(session.hostId, session.id, level)
+
+    override suspend fun setFastMode(session: Session, enabled: Boolean) =
+        repository.setFastMode(session.hostId, session.id, enabled)
 
     override suspend fun loadEarlierHistory(session: Session) = repository.loadEarlierHistory(session.hostId, session.id)
 }
@@ -149,6 +153,7 @@ internal class SessionOperations(
         return launch(session.key(), SessionLane.Action) {
             changes.model?.let { actions.selectModel(session, it) }
             changes.thinkingLevel?.let { actions.setThinkingLevel(session, it) }
+            changes.fastModeEnabled?.let { actions.setFastMode(session, it) }
         }
     }
 

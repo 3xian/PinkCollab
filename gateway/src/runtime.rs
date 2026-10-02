@@ -77,6 +77,10 @@ pub enum Command {
         generation: String,
         level: String,
     },
+    SetFastMode {
+        generation: String,
+        enabled: bool,
+    },
 }
 
 impl Command {
@@ -89,6 +93,7 @@ impl Command {
             Self::Respond { .. } => "respond",
             Self::SelectModel { .. } => "select_model",
             Self::SetThinkingLevel { .. } => "set_thinking_level",
+            Self::SetFastMode { .. } => "set_fast_mode",
         }
     }
     fn validate(&self) -> Result<()> {
@@ -106,7 +111,9 @@ impl Command {
                     "Invalid file IDs"
                 );
             }
-            Self::Interrupt { generation } | Self::StopRuntime { generation } => {
+            Self::Interrupt { generation }
+            | Self::StopRuntime { generation }
+            | Self::SetFastMode { generation, .. } => {
                 ensure!(!generation.is_empty(), "generation required")
             }
             Self::Respond {
@@ -199,6 +206,7 @@ pub struct SessionDirectory {
 }
 
 mod directory;
+mod settings;
 mod startup;
 mod title;
 mod work_timing;
@@ -558,53 +566,31 @@ impl SessionController {
                 provider,
                 model_id,
             } => {
-                let (_, runtime) = self.dispatchable_runtime(&generation).await?;
-                self.bind_generation(receipt, &generation).await?;
-                runtime
-                    .request(json!({"type":"set_model","provider":provider,"modelId":model_id}))
-                    .await
-                    .map_err(rpc_failure)?;
-                self.refresh_state(&generation, &runtime)
-                    .await
-                    .map_err(|err| {
-                        CommandFailure::uncertain(format!("Model set; state refresh failed: {err}"))
-                    })?;
-                Ok(CommandResult::Succeeded(json!({"generation":generation})))
+                self.apply_model_setting(
+                    receipt,
+                    &generation,
+                    settings::ModelSetting::Model { provider, model_id },
+                )
+                .await
+            }
+            Command::SetFastMode {
+                generation,
+                enabled,
+            } => {
+                self.apply_model_setting(
+                    receipt,
+                    &generation,
+                    settings::ModelSetting::FastMode(enabled),
+                )
+                .await
             }
             Command::SetThinkingLevel { generation, level } => {
-                let (_, runtime) = self.dispatchable_runtime(&generation).await?;
-                self.bind_generation(receipt, &generation).await?;
-                let available = runtime
-                    .request(json!({"type":"get_available_thinking_levels"}))
-                    .await
-                    .map_err(rpc_failure)?;
-                let levels = available["data"]["levels"].as_array().ok_or_else(|| {
-                    CommandFailure::failed(
-                        "unsupported_capability",
-                        "OMP did not return thinking levels",
-                    )
-                })?;
-                if !levels.iter().any(|candidate| {
-                    candidate.as_str() == Some(level.as_str())
-                        || candidate["id"].as_str() == Some(level.as_str())
-                }) {
-                    return Err(CommandFailure::failed(
-                        "unsupported_capability",
-                        "Thinking level is unavailable",
-                    ));
-                }
-                runtime
-                    .request(json!({"type":"set_thinking_level","level":level}))
-                    .await
-                    .map_err(rpc_failure)?;
-                self.refresh_state(&generation, &runtime)
-                    .await
-                    .map_err(|err| {
-                        CommandFailure::uncertain(format!(
-                            "Thinking level set; state refresh failed: {err}"
-                        ))
-                    })?;
-                Ok(CommandResult::Succeeded(json!({"generation":generation})))
+                self.apply_model_setting(
+                    receipt,
+                    &generation,
+                    settings::ModelSetting::ThinkingLevel(level),
+                )
+                .await
             }
         }
     }
@@ -752,6 +738,8 @@ fn model_info(data: &Value) -> Option<ModelInfo> {
         name: omp::string(model, "name").into(),
         thinking_level: data["thinkingLevel"].as_str().map(str::to_owned),
         thinking_levels,
+        fast_mode_enabled: data["fastModeEnabled"].as_bool(),
+        fast_mode_active: data["fastModeActive"].as_bool(),
     })
     .filter(|model| !model.provider.is_empty() && !model.id.is_empty())
 }

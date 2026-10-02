@@ -110,7 +110,7 @@ internal fun FloatingTodoPanel(
                     key(phaseIndex, phase.name) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text((phaseIndex + 1).toString().padStart(2, '0'), color = accent,
-                                style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(28.dp))
+                                style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 6.dp))
                             Text(phase.name, color = TextHigh, style = MaterialTheme.typography.labelMedium,
                                 modifier = Modifier.weight(1f))
                             Text("${phase.tasks.count { it.status == TodoStatus.Completed || it.status == TodoStatus.Abandoned }}/${phase.tasks.size}",

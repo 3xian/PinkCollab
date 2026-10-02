@@ -42,6 +42,45 @@ class ModelPickerDeviceTest {
     }
     private val catalog = ModelCatalog(models, listOf("off", "low", "high"))
 
+    @Test fun failed_runtime_start_keeps_picker_open_and_shows_error() {
+        var starting by mutableStateOf(true)
+        compose.setContent {
+            ModelPickerSheet(state = null, current = null, enabled = false, runtimeAttached = false,
+                runtimeStarting = starting, canStartRuntime = !starting, startRuntime = { starting = true },
+                dismiss = {}, retry = {}, refresh = {}, apply = {},
+                runtimeStartError = "previous runtime exit is not confirmed")
+        }
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.runOnIdle { starting = false }
+        compose.onNodeWithText("Could not start OMP\nprevious runtime exit is not confirmed").assertIsDisplayed()
+        compose.onNodeWithText("Choose another model").assertIsEnabled().performClick()
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+    }
+
+    @Test fun attached_runtime_failing_during_initialization_keeps_start_error() {
+        var starting by mutableStateOf(false)
+        var attached by mutableStateOf(false)
+        var error by mutableStateOf<String?>(null)
+        compose.setContent {
+            ModelPickerSheet(state = null, current = null, enabled = false,
+                runtimeAttached = attached, runtimeStarting = starting,
+                canStartRuntime = !starting, startRuntime = { starting = true },
+                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartError = error)
+        }
+        compose.onNodeWithText("Choose another model").performClick()
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.runOnIdle { attached = true }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            attached = false
+            starting = false
+            error = "OMP did not load stored session"
+        }
+        compose.onNodeWithText("Could not start OMP\nOMP did not load stored session").assertIsDisplayed()
+        compose.onNodeWithText("Choose another model").assertIsEnabled().performClick()
+        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+    }
+
     @Test fun unchanged_settings_can_close_without_applying_and_current_survives_draft_selection() {
         var applied: ModelSettingsChanges? = null
         var dismissed = 0

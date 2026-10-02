@@ -23,8 +23,8 @@ class SmallButtonDeviceTest {
                 ModelPickerSheet(
                     state = LoadState.Ready(ModelCatalog(emptyList(), emptyList())),
                     current = null,
-                    enabled = true,
-                    runtimeAttached = false,
+                    enabled = false,
+                    runtimeAttached = true,
                     runtimeStarting = false,
                     canStartRuntime = false,
                     startRuntime = {},

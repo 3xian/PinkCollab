@@ -32,6 +32,8 @@ data class ModelInfo(
     val name: String,
     val thinkingLevel: String? = null,
     val thinkingLevels: List<String>? = null,
+    val fastModeEnabled: Boolean? = null,
+    val fastModeActive: Boolean? = null,
 )
 data class ModelCatalog(val models: List<ModelInfo>, val thinkingLevels: List<String>)
 enum class SessionStatus { Starting, Running, NeedsInput, Stopping, Idle }
@@ -107,7 +109,8 @@ sealed interface OperationStatus {
     }
 }
 
-data class OperationReceipt(val commandId: String, val status: OperationStatus, val commandType: String, val errorCode: String? = null)
+data class OperationReceipt(val commandId: String, val status: OperationStatus, val commandType: String, val errorCode: String? = null,
+    val errorMessage: String? = null)
 /** Saved transcript for this subscription. Loading and Failed are not an empty page. */
 sealed interface SavedHistory {
     val sourceId: String? get() = null
@@ -237,7 +240,8 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
         })
 }
 fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))
-fun JSONObject.receipt() = OperationReceipt(getString("id"), OperationStatus.fromWire(getString("state")), getString("kind"), optJSONObject("error")?.optString("code"))
+fun JSONObject.receipt() = OperationReceipt(getString("id"), OperationStatus.fromWire(getString("state")), getString("kind"),
+    optJSONObject("error")?.optString("code"), optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() })
 fun JSONObject.item(): TimelineItem {
     val tool = optJSONObject("tool")?.let {
         val arguments = when (val value = it.opt("arguments")) {
@@ -263,6 +267,8 @@ fun JSONObject.modelInfo() = ModelInfo(
     name = getString("name"),
     thinkingLevel = optString("thinkingLevel").takeIf { it.isNotBlank() },
     thinkingLevels = optJSONArray("thinkingLevels")?.strings(),
+    fastModeEnabled = opt("fastModeEnabled") as? Boolean,
+    fastModeActive = opt("fastModeActive") as? Boolean,
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }

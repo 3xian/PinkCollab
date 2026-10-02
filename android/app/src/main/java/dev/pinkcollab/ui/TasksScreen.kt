@@ -375,11 +375,10 @@ private fun TasksTopBar(
             Spacer(Modifier.weight(1f))
         }
         if (showWorkspaces) {
-            TopBarPill(Icons.Outlined.FolderOpen, "Workspaces", openResources)
-            Spacer(Modifier.width(6.dp))
+            TopBarAction(Icons.Outlined.FolderOpen, "Workspaces", openResources)
         }
         Box {
-            TopBarPill(Icons.Outlined.Settings, "Conf") { showConfMenu = true }
+            TopBarAction(Icons.Outlined.Settings, "Conf") { showConfMenu = true }
             DropdownMenu(expanded = showConfMenu, onDismissRequest = { showConfMenu = false }) {
                 DropdownMenuItem(
                     text = { Text("Check for updates") },
@@ -395,7 +394,7 @@ private fun TasksTopBar(
 }
 
 @Composable
-private fun TopBarPill(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun TopBarAction(icon: ImageVector, label: String, onClick: () -> Unit) {
     TextButton(
         onClick = rememberHapticOnClick(onClick),
         contentPadding = PaddingValues(0.dp),
@@ -403,8 +402,7 @@ private fun TopBarPill(icon: ImageVector, label: String, onClick: () -> Unit) {
         Row(
             Modifier
                 .height(30.dp)
-                .background(Color.White.copy(alpha = 0.065f), RoundedCornerShape(50))
-                .padding(horizontal = 9.dp),
+                .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Purple400)

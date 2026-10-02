@@ -72,7 +72,8 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithText("Opening conversation…").assertIsDisplayed()
         compose.onNodeWithTag("sessionSyncRetry").assertDoesNotExist()
         compose.mainClock.advanceTimeBy(8_100)
-        compose.onNodeWithText("Taking longer than usual. You can switch sessions while this loads.").assertIsDisplayed()
+        compose.onNodeWithText("Taking longer than usual. You can switch sessions while this loads.").assertDoesNotExist()
+        compose.onNodeWithText("Opening conversation…").assertIsDisplayed()
         compose.onNodeWithText("Retry").assertDoesNotExist()
         compose.onNodeWithTag("sessionInput").assertTextEquals("Keep draft").assertIsNotEnabled()
     }

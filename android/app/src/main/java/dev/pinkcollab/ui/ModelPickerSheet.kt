@@ -64,10 +64,20 @@ internal fun ModelPickerSheet(
     apply: (ModelSettingsChanges) -> Unit,
     usageState: LoadState<dev.pinkcollab.data.UsageSnapshot>? = null,
     loadUsage: () -> Unit = {},
+    runtimeStartError: String? = null,
 ) {
+    var sawRuntimeStarting by remember { mutableStateOf(false) }
+    LaunchedEffect(runtimeStarting, runtimeAttached) {
+        // An attached process can still be initializing; only a ready runtime ends the attempt.
+        if (runtimeStarting) sawRuntimeStarting = true
+        else if (runtimeAttached) sawRuntimeStarting = false
+    }
     var showUsage by remember { mutableStateOf(false) }
     if (showUsage) UsageSheet(usageState, loadUsage) { showUsage = false }
     var pending by remember { mutableStateOf(ModelSettingsDraft.from(current)) }
+    LaunchedEffect(current) {
+        if (pending.model == null && current != null) pending = ModelSettingsDraft.from(current)
+    }
     var query by remember { mutableStateOf("") }
     var expandedProviders by remember { mutableStateOf<Set<String>?>(null) }
     var searchCollapsedProviders by remember(query) { mutableStateOf(emptySet<String>()) }
@@ -97,15 +107,22 @@ internal fun ModelPickerSheet(
             )
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .widthIn(max = BottomSheetDefaults.SheetMaxWidth).fillMaxHeight(0.93f)
+                    .widthIn(max = BottomSheetDefaults.SheetMaxWidth)
+                    .then(if (runtimeAttached) Modifier.fillMaxHeight(0.93f) else Modifier)
                     .semantics { paneTitle = "Model settings" },
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
             ) {
-                Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-                    ModelPickerHeader({ showUsage = true; loadUsage() }, refresh, runtimeAttached &&
+                Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+                    ModelPickerHeader({ showUsage = true; loadUsage() }, refresh, runtimeAttached, runtimeAttached &&
                         ((ready != null && !ready.refreshing) || state is LoadState.Failed))
-                    if (runtimeAttached && ready != null) {
+                    if (!runtimeAttached) {
+                        DefaultModelContent(runtimeStarting, canStartRuntime, {
+                            sawRuntimeStarting = true
+                            startRuntime()
+                        }, dismiss, if (sawRuntimeStarting && !runtimeStarting)
+                            runtimeStartError ?: "Please try again." else null)
+                    } else if (ready != null) {
                         val catalog = ready.value
                         if (catalog.models.isNotEmpty()) ModelSearchField(query) { query = it }
                         else HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -145,18 +162,6 @@ internal fun ModelPickerSheet(
                     } else {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             when {
-                                !runtimeAttached -> Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                    modifier = Modifier.padding(24.dp),
-                                ) {
-                                    Text(
-                                        if (runtimeStarting) "Starting OMP…" else "Start OMP to choose a model before sending your next message.",
-                                        color = TextMid,
-                                    )
-                                    if (runtimeStarting) CircularProgressIndicator(color = Purple400)
-                                    else Button(onClick = rememberHapticOnClick(startRuntime), enabled = canStartRuntime) { Text("Start runtime") }
-                                }
                                 state == null || state == LoadState.Loading -> CircularProgressIndicator(color = Purple400)
                                 state is LoadState.Failed -> Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -179,7 +184,7 @@ internal fun ModelPickerSheet(
                             }
                         }
                     }
-                    ModelPickerActions(
+                    if (runtimeAttached) ModelPickerActions(
                         dismiss = dismiss,
                         apply = { apply(changes) },
                         unchanged = changes.isEmpty,
@@ -192,13 +197,13 @@ internal fun ModelPickerSheet(
 }
 
 @Composable
-private fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, canRefresh: Boolean) {
+private fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, showRefresh: Boolean, canRefresh: Boolean) {
     Row(
         Modifier.fillMaxWidth().height(56.dp).padding(start = 20.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Models", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        TextButton(onClick = rememberHapticOnClick(refresh), enabled = canRefresh) {
+        if (showRefresh) TextButton(onClick = rememberHapticOnClick(refresh), enabled = canRefresh) {
             Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(4.dp))
             Text("Reload")
@@ -207,6 +212,46 @@ private fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, canRefresh
             Icon(Icons.Outlined.DataUsage, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(4.dp))
             Text("Usage")
+        }
+    }
+}
+
+@Composable
+private fun DefaultModelContent(starting: Boolean, canStart: Boolean, start: () -> Unit, dismiss: () -> Unit, error: String?) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Check, contentDescription = null, tint = Purple400, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("OMP default", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Your next message will use OMP’s default model.", style = MaterialTheme.typography.bodyMedium, color = TextMid)
+                }
+            }
+        }
+        if (starting) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(Modifier.size(20.dp), color = Purple400, strokeWidth = 2.dp)
+                Text("Starting OMP…", style = MaterialTheme.typography.bodyMedium, color = TextMid)
+            }
+        } else if (error != null) {
+            Text("Could not start OMP\n$error", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error)
+        } else {
+            Text("To choose another model, start OMP and load the model list.", style = MaterialTheme.typography.bodyMedium, color = TextMid)
+        }
+        if (!starting) Button(
+            onClick = rememberHapticOnClick(start), enabled = canStart,
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+        ) { Text("Choose another model") }
+        TextButton(onClick = rememberHapticOnClick(dismiss), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            Text(if (starting) "Close" else "Keep default")
         }
     }
 }
