@@ -46,6 +46,8 @@ cargo test --all-features --locked
 
 Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smoke -- --ignored`.
 
+On Windows, `cargo test --all-features --locked --test windows_background` checks the hidden login launcher, duplicate starts, graceful stop/restart, and preserved host identity using isolated temporary directories. It does not register real login startup or modify Windows services.
+
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
 

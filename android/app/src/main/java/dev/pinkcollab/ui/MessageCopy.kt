@@ -19,7 +19,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.pinkcollab.ui.theme.BrandPink
 import dev.pinkcollab.ui.theme.BrandPurple
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 
@@ -76,7 +75,7 @@ private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
                         translationY = -12.dp.toPx() * progress
                         alpha = minOf(progress / 0.12f, (1f - progress) / 0.4f, 1f)
                     },
-                color = BrandPink,
+                color = MaterialTheme.colorScheme.tertiary,
                 style = MaterialTheme.typography.labelSmall,
                 fontFamily = FontFamily.Default,
                 fontSize = 10.sp,

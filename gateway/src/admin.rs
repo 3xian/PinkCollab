@@ -320,6 +320,8 @@ pub async fn doctor(dir: &Path) -> Result<()> {
         }
     }
     println!("Service");
+    #[cfg(windows)]
+    println!("  mode: current-user login startup (stops on logout; no password required)");
     match crate::service::Installation::new(dir) {
         Ok(installation) => {
             println!(

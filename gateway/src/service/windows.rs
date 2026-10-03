@@ -1,43 +1,25 @@
+//! Per-user login startup with ownership-checked management of older SCM installs.
 use super::*;
+use std::time::{Duration, Instant};
 use windows_service::{
-    service::{ServiceAccess, ServiceStartType, ServiceState},
+    service::{ServiceAccess, ServiceState},
     service_manager::{ServiceManager as Scm, ServiceManagerAccess},
 };
+
 pub struct Manager<'a> {
     pub installation: &'a Installation,
 }
-impl Manager<'_> {
-    fn open(&self) -> Result<windows_service::service::Service> {
-        self.open_with(ServiceAccess::empty())
-    }
-    fn open_with(&self, access: ServiceAccess) -> Result<windows_service::service::Service> {
-        Scm::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?
-            .open_service(
-                "PinkCollab",
-                ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | access,
-            )
-            .context("open PinkCollab service (administrator permission may be required)")
-    }
-    fn verify_account(&self, service: &windows_service::service::Service) -> Result<()> {
-        let account = service
-            .query_config()?
-            .account_name
-            .context("service account is missing")?;
-        let identity = checked(&SystemRunner, "whoami", &[])?;
-        windows_ux::account(
-            &account.to_string_lossy(),
-            String::from_utf8_lossy(&identity.stdout).trim(),
-        )?;
-        Ok(())
-    }
+
+enum Backend {
+    Desktop,
+    Legacy(windows_service::service::Service),
+    Missing,
 }
+
 fn environment(path: &str) -> Result<String> {
-    let mut values = std::collections::BTreeMap::new();
-    for key in ["HOME", "APPDATA", "LOCALAPPDATA"] {
-        if let Ok(value) = std::env::var(key) {
-            values.insert(key.to_owned(), value);
-        }
-    }
+    let values = ["HOME", "APPDATA", "LOCALAPPDATA"]
+        .into_iter()
+        .filter_map(|key| std::env::var(key).ok().map(|value| (key.into(), value)));
     windows_ux::serialize_environment(
         path,
         &dirs::home_dir()
@@ -46,76 +28,109 @@ fn environment(path: &str) -> Result<String> {
         values,
     )
 }
-impl ServiceManager for Manager<'_> {
-    fn preflight(&self, non_interactive: bool) -> Result<()> {
-        let output = checked(
-            &SystemRunner,
-            "powershell.exe",
-            &[
-                "-NoProfile",
-                "-Command",
-                "$p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
-            ],
-        )?;
-        windows_ux::elevated(
-            String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .eq_ignore_ascii_case("true"),
-        )?;
-        let identity = checked(&SystemRunner, "whoami", &[])?;
-        let identity: String = String::from_utf8_lossy(&identity.stdout)
-            .trim()
-            .chars()
-            .flat_map(char::escape_debug)
-            .collect();
-        println!("Windows account: {identity}");
-        println!(
-            "Windows service preflight: using the current Windows account. This account needs 'Log on as a service'; a domain deny policy can block startup. Check Local Security Policy or ask your administrator if startup is denied."
-        );
-        if self.status()? == ServiceStatus::NotInstalled {
-            ensure!(
-                !non_interactive,
-                "Install the Windows service interactively first: pinkcollab service install"
+
+impl Manager<'_> {
+    fn backend(&self, access: ServiceAccess) -> Result<Backend> {
+        let i = self.installation;
+        if crate::windows::is_running(&i.dir)? || i.definition.exists() {
+            return Ok(Backend::Desktop);
+        }
+        Ok(match self.legacy(access)? {
+            Some(service) => Backend::Legacy(service),
+            None => Backend::Missing,
+        })
+    }
+    fn definition(&self) -> String {
+        windows_ux::startup_script(&windows_arguments(
+            &self.installation.binary,
+            &self.installation.dir,
+            "background-start",
+        ))
+    }
+    fn legacy(&self, access: ServiceAccess) -> Result<Option<windows_service::service::Service>> {
+        let result = Scm::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?
+            .open_service(
+                "PinkCollab",
+                ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | access,
             );
-        } else {
-            self.verify_account(&self.open()?)?;
+        match result {
+            Ok(service) => {
+                let config = service.query_config()?;
+                let identity = checked(&SystemRunner, "whoami", &[])?;
+                let computer = checked(&SystemRunner, "hostname", &[])?;
+                windows_ux::local_account(
+                    &config.account_name.context("legacy service account missing")?.to_string_lossy(),
+                    String::from_utf8_lossy(&identity.stdout).trim(),
+                    String::from_utf8_lossy(&computer.stdout).trim(),
+                )?;
+                windows_ux::legacy_command(
+                    config.executable_path.as_os_str(),
+                    &self.installation.binary,
+                    &self.installation.dir,
+                )?;
+                Ok(Some(service))
+            }
+            Err(windows_service::Error::Winapi(error)) if error.raw_os_error() == Some(1060) => Ok(None),
+            Err(error) => Err(error).context("Cannot migrate the old Windows service. Run pinkcollab service install once in an Administrator terminal as the same user. Future installs need no elevation or password."),
+        }
+    }
+    fn migrate(&self) -> Result<()> {
+        if let Some(service) = self.legacy(ServiceAccess::STOP | ServiceAccess::DELETE)? {
+            println!("Migrating the old Windows service to login startup...");
+            stop_legacy(&service)?;
+            service.delete()?;
         }
         Ok(())
     }
+}
 
+fn stop_legacy(service: &windows_service::service::Service) -> Result<()> {
+    match service.query_status()?.current_state {
+        ServiceState::Stopped => return Ok(()),
+        ServiceState::StopPending => {}
+        _ => {
+            service.stop()?;
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(45);
+    while service.query_status()?.current_state != ServiceState::Stopped {
+        ensure!(
+            Instant::now() < deadline,
+            "Old Gateway has not stopped; retry after its active work exits"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+impl ServiceManager for Manager<'_> {
+    fn preflight(&self, _non_interactive: bool) -> Result<()> {
+        self.installation.check_owner()?;
+        self.legacy(ServiceAccess::STOP | ServiceAccess::DELETE)?;
+        println!("Windows background Gateway: starts at user login; no password required.");
+        Ok(())
+    }
     fn install(&self) -> Result<InstallOutcome> {
-        use std::io::IsTerminal;
         let i = self.installation;
-        i.check_owner()?;
-        let environment = environment(&i.path)?;
+        self.preflight(false)?;
         let state = self.status()?;
-        let running = state == ServiceStatus::Running;
+        let environment = environment(&i.path)?;
+        let definition = self.definition();
         let update = i.update(
-            &format!("{}\n{environment}", windows_command(&i.binary, &i.dir)),
-            running,
+            &format!("{definition}\n{environment}"),
+            state == ServiceStatus::Running,
         )?;
-        if state != ServiceStatus::NotInstalled {
-            let service = self.open()?;
-            self.verify_account(&service)?;
-            let configuration = service.query_config()?;
-            ensure!(
-                configuration.start_type == ServiceStartType::AutoStart,
-                "set PinkCollab service startup type to Automatic in Windows Services"
-            );
-            let path_same = read_optional(&i.dir.join("service-environment.json"))?
-                .is_some_and(|p| p == environment.as_bytes());
-            let expected = windows_command(&i.binary, &i.dir);
-            if path_same
-                && !update.changed
-                && configuration.executable_path.to_string_lossy() == expected
-            {
-                return Ok(InstallOutcome::Unchanged);
-            }
-        } else {
-            ensure!(
-                std::io::stdin().is_terminal(),
-                "Windows service installation needs an administrator terminal and the current user's service login credentials. Run pinkcollab service install interactively first."
-            );
+        let definition_bytes = windows_ux::startup_bytes(&definition);
+        let definition_same =
+            read_optional(&i.definition)?.is_some_and(|bytes| bytes == definition_bytes);
+        let environment_same = read_optional(&i.dir.join("service-environment.json"))?
+            .is_some_and(|bytes| bytes == environment.as_bytes());
+        if !update.changed
+            && definition_same
+            && environment_same
+            && self.legacy(ServiceAccess::empty())?.is_none()
+        {
+            return Ok(InstallOutcome::Unchanged);
         }
         let outcome = if state == ServiceStatus::NotInstalled {
             InstallOutcome::Installed
@@ -124,33 +139,17 @@ impl ServiceManager for Manager<'_> {
         };
         outcome.progress();
         update.begin()?;
-        if state != ServiceStatus::NotInstalled {
-            self.stop()?;
-        }
+        self.migrate()?;
+        self.stop()?;
         update.stage_binary()?;
         storage::replace_private_file(
             &i.dir.join("service-environment.json"),
             environment.as_bytes(),
         )?;
-        // Credentials stay inside PowerShell's PSCredential and are never command arguments or logs.
-        // New-Service receives an explicit user credential; it can never default to LocalSystem.
-        let script = windows_ux::install_script();
-        if state == ServiceStatus::NotInstalled {
-            println!(
-                "Windows requires PinkCollab's background Gateway to run as your user account.\n\nThis keeps access to:\n- your OMP configuration\n- model-provider credentials\n- project files\n\nWindows will now ask for this account's sign-in credentials (password, not PIN)."
-            );
+        storage::private_dir(i.definition.parent().unwrap())?;
+        if !definition_same {
+            storage::replace_private_file(&i.definition, &definition_bytes)?;
         }
-        let command = windows_command(&i.binary, &i.dir);
-        let status = Command::new("powershell.exe")
-            .args(["-NoProfile", "-Command", &script])
-            .env("PINKCOLLAB_SERVICE_COMMAND", command)
-            .status()?;
-        ensure!(
-            status.success(),
-            "{}",
-            windows_ux::install_recovery(status.code().unwrap_or(0))
-        );
-        self.verify_account(&self.open()?)?;
         if update.resume {
             self.start()?;
         }
@@ -158,77 +157,77 @@ impl ServiceManager for Manager<'_> {
         Ok(outcome)
     }
     fn uninstall(&self) -> Result<()> {
-        if self.status()? == ServiceStatus::NotInstalled {
-            return self.installation.forget_owner();
-        }
+        self.installation.check_owner()?;
+        self.migrate()?;
         self.stop()?;
-        let service = self.open_with(ServiceAccess::DELETE)?;
-        self.verify_account(&service)?;
-        service.delete()?;
+        if self.installation.definition.exists() {
+            std::fs::remove_file(&self.installation.definition)?;
+        }
         self.installation.forget_owner()
     }
     fn start(&self) -> Result<()> {
-        let service = self.open_with(ServiceAccess::START).map_err(start_error)?;
-        self.verify_account(&service)?;
-        if service.query_status()?.current_state != ServiceState::Running {
-            service
-                .start::<&str>(&[])
-                .map_err(|error| start_error(error.into()))?;
-        }
-        Ok(())
-    }
-    fn stop(&self) -> Result<()> {
-        if self.status()? == ServiceStatus::NotInstalled {
+        let i = self.installation;
+        i.check_owner()?;
+        if crate::windows::is_ready(&i.dir)? {
             return Ok(());
         }
-        let service = self.open_with(ServiceAccess::STOP)?;
-        self.verify_account(&service)?;
-        if service.query_status()?.current_state == ServiceState::Stopped {
-            return Ok(());
-        }
-        service.stop()?;
-        for _ in 0..180 {
-            if service.query_status()?.current_state == ServiceState::Stopped {
+        ensure!(
+            i.definition.exists(),
+            "Login startup is not installed; run pinkcollab setup or pinkcollab service install."
+        );
+        storage::private_dir(&i.dir)?;
+        let child = if crate::windows::is_running(&i.dir)? {
+            None
+        } else {
+            Some(crate::windows::spawn(&i.binary, &i.dir)?)
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if crate::windows::is_ready(&i.dir)? {
                 return Ok(());
             }
-            std::thread::sleep(std::time::Duration::from_millis(250));
+            if let Some(child) = &child
+                && let Some(status) = crate::windows::exit_code(child)?
+            {
+                ensure!(
+                    status == 0,
+                    "Background Gateway exited ({status}); inspect {}",
+                    i.dir.join("gateway.log").display()
+                );
+            }
+            ensure!(
+                Instant::now() < deadline,
+                "Gateway startup timed out; inspect {}",
+                i.dir.join("gateway.log").display()
+            );
+            std::thread::sleep(Duration::from_millis(50));
         }
-        anyhow::bail!("Gateway has not stopped; retry after its active work exits")
+    }
+    fn stop(&self) -> Result<()> {
+        self.installation.check_owner()?;
+        match self.backend(ServiceAccess::STOP)? {
+            Backend::Desktop => crate::windows::stop(&self.installation.dir),
+            Backend::Legacy(service) => stop_legacy(&service),
+            Backend::Missing => Ok(()),
+        }
     }
     fn status(&self) -> Result<ServiceStatus> {
-        match self.open() {
-            Ok(service) => {
-                self.verify_account(&service)?;
-                Ok(
-                    if service.query_status()?.current_state == ServiceState::Running {
-                        ServiceStatus::Running
-                    } else if service.query_status()?.exit_code
-                        != windows_service::service::ServiceExitCode::Win32(0)
-                    {
-                        ServiceStatus::Failed(
-                            "Gateway exited with an error; inspect Windows Event Viewer".into(),
-                        )
-                    } else {
-                        ServiceStatus::Stopped
-                    },
-                )
-            }
-            Err(error) => {
-                if matches!(error.downcast_ref::<windows_service::Error>(), Some(windows_service::Error::Winapi(e)) if e.raw_os_error() == Some(1060))
-                {
-                    Ok(ServiceStatus::NotInstalled)
+        Ok(match self.backend(ServiceAccess::empty())? {
+            Backend::Desktop => {
+                if crate::windows::is_ready(&self.installation.dir)? {
+                    ServiceStatus::Running
                 } else {
-                    Err(error)
+                    ServiceStatus::Stopped
                 }
             }
-        }
+            Backend::Legacy(service) => {
+                if service.query_status()?.current_state == ServiceState::Running {
+                    ServiceStatus::Running
+                } else {
+                    ServiceStatus::Stopped
+                }
+            }
+            Backend::Missing => ServiceStatus::NotInstalled,
+        })
     }
-}
-
-fn start_error(error: anyhow::Error) -> anyhow::Error {
-    let code = match error.downcast_ref::<windows_service::Error>() {
-        Some(windows_service::Error::Winapi(e)) => e.raw_os_error().unwrap_or(0),
-        _ => 0,
-    };
-    error.context(windows_ux::start_recovery(code))
 }

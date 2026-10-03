@@ -41,9 +41,9 @@ impl InstallOutcome {
     }
     pub fn message(self) -> &'static str {
         match self {
-            Self::Installed => "✓ Background service installed",
+            Self::Installed => "✓ Background Gateway installed",
             Self::Updated => "✓ Background Gateway updated",
-            Self::Unchanged => "✓ Background service ready",
+            Self::Unchanged => "✓ Background Gateway ready",
         }
     }
 }
@@ -140,7 +140,10 @@ impl Installation {
                 std::env::var_os("LOCALAPPDATA").context("LOCALAPPDATA unavailable")?,
             )
             .join("PinkCollab");
-            (base.clone(), base.join("service-owner.json"))
+            let startup =
+                PathBuf::from(std::env::var_os("APPDATA").context("APPDATA unavailable")?)
+                    .join("Microsoft/Windows/Start Menu/Programs/Startup/PinkCollab.vbs");
+            (base, startup)
         };
         let mut paths: Vec<PathBuf> =
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
@@ -326,15 +329,19 @@ impl Update<'_> {
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(test)]
 fn windows_command(binary: &Path, dir: &Path) -> String {
+    windows_arguments(binary, dir, "service-run")
+}
+#[cfg(any(windows, test))]
+pub(crate) fn windows_arguments(binary: &Path, dir: &Path, action: &str) -> String {
     fn quote(path: &Path) -> String {
         let value = path.to_string_lossy();
         // Windows paths cannot contain quotes; terminal backslashes must be doubled.
         let trailing = value.chars().rev().take_while(|c| *c == '\\').count();
         format!("\"{}{}\"", value, "\\".repeat(trailing))
     }
-    format!("{} --data-dir {} service-run", quote(binary), quote(dir))
+    format!("{} --data-dir {} {action}", quote(binary), quote(dir))
 }
 
 pub fn manager(installation: &Installation) -> Box<dyn ServiceManager + '_> {

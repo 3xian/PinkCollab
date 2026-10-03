@@ -65,7 +65,10 @@ enum Commands {
     Serve,
     #[cfg(windows)]
     #[command(hide = true)]
-    ServiceRun,
+    BackgroundRun,
+    #[cfg(windows)]
+    #[command(hide = true)]
+    BackgroundStart,
     /// Pair another phone.
     #[command(display_order = 2)]
     Pair {
@@ -117,8 +120,8 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     #[cfg(windows)]
-    if matches!(cli.command, Some(Commands::ServiceRun)) {
-        return windows::dispatch(cli.data_dir);
+    if matches!(cli.command, Some(Commands::BackgroundRun)) {
+        return windows::run(cli.data_dir).await;
     }
     let Some(command) = cli.command else {
         return admin::default_entry(&cli.data_dir).await;
@@ -164,16 +167,25 @@ async fn main() -> Result<()> {
         ),
         Commands::Serve => {
             let config = Config::load(&cli.data_dir)?;
-            serve_until(config, Arc::new(Store::open(&cli.data_dir)?), shutdown()).await
+            serve_until(
+                config,
+                Arc::new(Store::open(&cli.data_dir)?),
+                shutdown(),
+                axum_server::Handle::new(),
+            )
+            .await
         }
         #[cfg(windows)]
-        Commands::ServiceRun => unreachable!(),
+        Commands::BackgroundRun => unreachable!(),
+        #[cfg(windows)]
+        Commands::BackgroundStart => service::execute(&cli.data_dir, service::Action::Start),
     }
 }
 async fn serve_until(
     config: Config,
     store: Arc<Store>,
     stop: impl Future<Output = ()>,
+    handle: axum_server::Handle,
 ) -> Result<()> {
     let browser = Arc::new(Browser::new(&config.workspaces)?);
     let host_id = store.host_id()?;
@@ -202,7 +214,6 @@ async fn serve_until(
         bus: bus.clone(),
         sessions: sessions.clone(),
     });
-    let handle = axum_server::Handle::new();
     let server_handle = handle.clone();
     println!(
         "PinkCollab {} listening on {}; host {}",

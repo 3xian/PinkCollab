@@ -40,11 +40,11 @@ In your terminal, change to the directory containing your projects, then run:
 pinkcollab setup
 ```
 
-Setup confirms that directory as a workspace root, guides Tailscale sign-in and Funnel approval, and starts the Gateway as a background service. It does not install OMP or Tailscale. Scan the QR code with the Android app; you can then close the terminal.
+Setup confirms that directory as a workspace root, guides Tailscale sign-in and Funnel approval, and starts the Gateway in the background. It does not install OMP or Tailscale. Scan the QR code with the Android app; you can then close the terminal.
 
 **The default connection is public HTTPS via Tailscale Funnel.** Your tailnet must permit Funnel; app access requires pairing credentials, not a secret URL. Your phone does not need Tailscale. For private access, see [Tailscale Serve or your own HTTPS proxy](docs/deployment.md#other-https-front-ends).
 
-Platform setup: [macOS Tailscale installation](docs/deployment.md#recommended-tailscale-installation-on-macos) · [Windows service requirements](docs/deployment.md#run-as-a-background-service) (use an Administrator terminal as your OMP user).
+On Windows, use a normal terminal as your OMP user. The Gateway starts automatically when you log in; no Windows password or service login permission is needed. Signing out stops it, while closing the terminal or locking the screen does not. See [Windows login startup](docs/deployment.md#windows-login-startup) and [macOS Tailscale installation](docs/deployment.md#recommended-tailscale-installation-on-macos).
 
 ### 3. Send a prompt
 

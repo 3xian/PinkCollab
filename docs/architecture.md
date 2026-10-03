@@ -11,6 +11,10 @@ flowchart LR
     O --> P[Model provider]
 ```
 
+## Host background startup
+
+Windows runs the Gateway as a detached process under the logged-in desktop user. Installation copies the executable to a stable user directory and writes a hidden Startup-folder launcher; no service account credentials are stored. Login starts it, closing the terminal or locking the screen leaves it running, and logout ends it. A named event prevents duplicate instances for the same data directory and signals graceful shutdown. The process record includes its creation time so a reused PID cannot identify an unrelated process. Existing Windows services are removed during an ownership-checked migration. macOS uses a launchd user agent; Linux uses a systemd user service. See [deployment](deployment.md#run-as-a-background-service) for management and migration.
+
 ## Three lifecycles
 
 | Object | Identity | Owner | Lifetime |

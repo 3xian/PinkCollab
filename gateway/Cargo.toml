@@ -1,6 +1,6 @@
 [package]
 name = "pinkcollab-gateway"
-version = "3.0.0"
+version = "3.0.1"
 default-run = "pinkcollab-gateway"
 edition = "2024"
 rust-version = "1.89"
@@ -36,7 +36,7 @@ url = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.8"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Shell"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
