@@ -152,9 +152,17 @@ sealed interface ConnectionState {
     data object Connecting : ConnectionState
     data object Synchronizing : ConnectionState
     data class Online(val sinceEpochMillis: Long) : ConnectionState
-    data class Offline(val reason: String? = null) : ConnectionState
+    data class Offline(
+        val reason: String? = null,
+        val failure: ConnectionFailure = ConnectionFailure.Interrupted,
+    ) : ConnectionState
     data object AuthenticationRequired : ConnectionState
     data object UpgradeRequired : ConnectionState
+}
+
+enum class ConnectionFailure {
+    NetworkUnavailable, HostNotFound, TimedOut, Unreachable, SecureConnectionFailed,
+    HostRejected, InvalidData, HostClosed, Interrupted,
 }
 data class ConnectionProgress(val attempt: Int, val failure: String? = null)
 

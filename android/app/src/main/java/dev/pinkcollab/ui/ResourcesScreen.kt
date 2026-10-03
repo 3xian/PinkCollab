@@ -78,35 +78,24 @@ internal fun ResourcesScreen(
             val connectionPending = host.connection == ConnectionState.Connecting ||
                 host.connection == ConnectionState.Synchronizing
             val (connectionLabel, connectionColor) = when (host.connection) {
-                ConnectionState.Connecting, ConnectionState.Synchronizing -> "Connecting" to BrandPink
-                is ConnectionState.Online -> "Online" to Teal300
+                ConnectionState.Connecting, ConnectionState.Synchronizing ->
+                    (if ((host.connectionProgress?.attempt ?: 1) > 1) "Reconnecting" else "Connecting") to BrandPink
+                is ConnectionState.Online -> "$activeTasks active" to Teal300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
                 ConnectionState.UpgradeRequired -> "App update required" to Red400
             }
             Card(
-                Modifier.fillMaxWidth().glassPanel(CardShape),
+                Modifier.fillMaxWidth().glassPanel(CardShape).clip(CardShape).workspaceBackdrop(host.host.os),
                 shape = CardShape,
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.size(42.dp).background(Purple400.copy(alpha = 0.12f), RoundedCornerShape(13.dp)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Outlined.Dns, null, Modifier.size(22.dp), tint = Purple400)
-                        }
-                        Spacer(Modifier.width(12.dp))
+                        Icon(Icons.Outlined.Dns, null, Modifier.size(22.dp), tint = workspaceIconColor(host.host.os))
+                        Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
                             Text(host.host.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "${host.host.os} · $activeTasks active",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextMid,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
                         }
                         IconButton(
                             onClick = rememberHapticOnClick { refresh(hostId) },
@@ -149,11 +138,20 @@ internal fun ResourcesScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     if (!host.connected || host.workspaces.isEmpty()) {
-                        Text(
-                            workspaceConnectionMessage(host),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Gray400,
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(
+                                Icons.Outlined.ChatBubbleOutline,
+                                contentDescription = null,
+                                modifier = Modifier.padding(top = 2.dp).size(14.dp),
+                                tint = Gray400,
+                            )
+                            Text(
+                                workspaceConnectionMessage(host),
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Gray400,
+                            )
+                        }
                     }
                     if (host.workspaces.isNotEmpty()) {
                         if (!host.connected) Spacer(Modifier.height(8.dp))

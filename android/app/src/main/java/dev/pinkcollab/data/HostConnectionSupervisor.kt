@@ -114,9 +114,7 @@ internal class HostConnectionSupervisor(
                 while (isActive && isCurrent(currentGeneration)) {
                     // Socket opening and host synchronization are separate connection stages.
                     val progress = ConnectionProgress(failedAttempts + 1, lastFailure)
-                    emitState(currentGeneration,
-                        if (failedAttempts == 0) ConnectionState.Connecting
-                        else ConnectionState.Offline(lastFailure), progress)
+                    emitState(currentGeneration, ConnectionState.Connecting, progress)
                     val disconnect = awaitSocket(currentGeneration, progress)
                     if (!isCurrent(currentGeneration)) return@launch
                     if (disconnect.authenticationRequired) {
@@ -128,9 +126,9 @@ internal class HostConnectionSupervisor(
                         return@launch
                     }
                     failedAttempts = if (disconnect.hadSnapshot) 1 else failedAttempts + 1
-                    lastFailure = disconnect.reason
+                    lastFailure = disconnect.failure.reason
                     val retryDelay = retryDelayMillis(failedAttempts)
-                    emitState(currentGeneration, ConnectionState.Offline(lastFailure),
+                    emitState(currentGeneration, disconnect.failure,
                         ConnectionProgress(failedAttempts + 1, lastFailure))
                     delay(retryDelay)
                 }
@@ -149,7 +147,7 @@ internal class HostConnectionSupervisor(
             stop()
             synchronized(lock) {
                 if (connections[paired.host.id] === this) {
-                    onState(paired.host.id, ConnectionState.Offline("Network unavailable"), null)
+                    onState(paired.host.id, ConnectionState.Offline("Network unavailable", ConnectionFailure.NetworkUnavailable), null)
                 }
             }
         }
@@ -230,7 +228,7 @@ internal class HostConnectionSupervisor(
                                         authenticationRequired = response?.code == 401,
                                         upgradeRequired = response?.code == 426,
                                         hadSnapshot = hadSnapshot.get(),
-                                        reason = connectionFailureReason(error, response?.code),
+                                        failure = connectionFailure(error, response?.code),
                                     ),
                                 )
                             }
@@ -246,7 +244,9 @@ internal class HostConnectionSupervisor(
                                 continuation.resume(
                                     Disconnect(
                                         hadSnapshot = hadSnapshot.get(),
-                                        reason = if (code == 1002) "Invalid connection data" else "Host closed the connection",
+                                        failure = if (code == 1002)
+                                            ConnectionState.Offline("Invalid connection data", ConnectionFailure.InvalidData)
+                                        else ConnectionState.Offline("Host closed the connection", ConnectionFailure.HostClosed),
                                     ),
                                 )
                             }
@@ -261,17 +261,17 @@ internal class HostConnectionSupervisor(
         val authenticationRequired: Boolean = false,
         val upgradeRequired: Boolean = false,
         val hadSnapshot: Boolean = false,
-        val reason: String = "Connection interrupted",
+        val failure: ConnectionState.Offline = ConnectionState.Offline("Connection interrupted"),
     )
 }
 
-internal fun connectionFailureReason(error: Throwable, httpCode: Int? = null): String = when {
-    httpCode != null -> "Host rejected the connection (HTTP $httpCode)"
-    error is UnknownHostException -> "Cannot resolve host address"
-    error is SocketTimeoutException -> "Connection timed out"
-    error is ConnectException -> "Cannot reach host address or port"
-    error is SSLException -> "Secure connection failed"
-    else -> "Connection interrupted"
+internal fun connectionFailure(error: Throwable, httpCode: Int? = null): ConnectionState.Offline = when {
+    httpCode != null -> ConnectionState.Offline("Host rejected the connection (HTTP $httpCode)", ConnectionFailure.HostRejected)
+    error is UnknownHostException -> ConnectionState.Offline("Cannot resolve host address", ConnectionFailure.HostNotFound)
+    error is SocketTimeoutException -> ConnectionState.Offline("Connection timed out", ConnectionFailure.TimedOut)
+    error is ConnectException -> ConnectionState.Offline("Cannot reach host address or port", ConnectionFailure.Unreachable)
+    error is SSLException -> ConnectionState.Offline("Secure connection failed", ConnectionFailure.SecureConnectionFailed)
+    else -> ConnectionState.Offline("Connection interrupted")
 }
 
 internal fun retryDelayMillis(attempt: Int, jitter: Double = Random.nextDouble(0.8, 1.2)): Long {

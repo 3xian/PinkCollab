@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transform
 
@@ -95,16 +96,24 @@ internal fun navigationState(app: AppState) = NavigationState(
     loadingCredentials = app.loadingCredentials,
 )
 
+internal enum class TaskListEmptyState { Loading, Ready, Recovery }
+
 internal data class SessionListState(
     val hosts: Map<String, HostState>,
     val loadState: TaskListLoadState,
+    val emptyState: TaskListEmptyState = when (loadState) {
+        TaskListLoadState.Loading -> TaskListEmptyState.Loading
+        TaskListLoadState.Ready -> TaskListEmptyState.Ready
+        TaskListLoadState.Unavailable -> TaskListEmptyState.Recovery
+    },
 ) {
     // Tasks use these host fields; protocol revisions and workspace changes do not affect them.
     fun samePresentation(other: SessionListState): Boolean =
-        loadState == other.loadState && hosts.keys == other.hosts.keys && hosts.all { (id, host) ->
+        loadState == other.loadState && emptyState == other.emptyState && hosts.keys == other.hosts.keys && hosts.all { (id, host) ->
             val next = other.hosts.getValue(id)
             host.sessions == next.sessions && host.connection == next.connection &&
-                host.snapshotToken == next.snapshotToken
+                host.snapshotToken == next.snapshotToken && host.initialSync == next.initialSync &&
+                (host.connectionProgress != null) == (next.connectionProgress != null)
         }
 }
 
@@ -113,6 +122,12 @@ internal fun sessionListState(app: AppState) = SessionListState(app.hosts, app.t
 /** Keep summaries current while Tasks is off screen; transcript changes are observed separately. */
 internal fun StateFlow<AppState>.sessionListPresentation(scope: CoroutineScope): StateFlow<SessionListState> =
     map(::sessionListState)
+        // The ViewModel owns recovery continuity, including while Tasks is off screen.
+        .runningFold(sessionListState(value)) { previous, next ->
+            if (next.loadState == TaskListLoadState.Loading && previous.emptyState == TaskListEmptyState.Recovery &&
+                next.hosts.keys.any { it in previous.hosts }) next.copy(emptyState = TaskListEmptyState.Recovery)
+            else next
+        }
         .distinctUntilChanged(SessionListState::samePresentation)
         .flowOn(Dispatchers.Default)
         .stateIn(scope, SharingStarted.Eagerly, sessionListState(value))

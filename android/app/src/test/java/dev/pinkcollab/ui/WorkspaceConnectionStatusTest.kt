@@ -13,13 +13,13 @@ class WorkspaceConnectionStatusTest {
 
     @Test fun connecting_and_syncing_show_the_actual_stage() {
         assertEquals("Opening connection to host", workspaceConnectionMessage(navigation(ConnectionState.Connecting)))
-        assertEquals("Connection established; syncing sessions and directories",
+        assertEquals("Connection established. Syncing sessions and directories",
             workspaceConnectionMessage(navigation(ConnectionState.Synchronizing)))
     }
 
     @Test fun offline_retry_reports_failure_then_clears_on_recovery() {
         val retrying = navigation(ConnectionState.Offline("Connection timed out"), ConnectionProgress(3, "Connection timed out"))
-        assertEquals("Connection timed out. Checking periodically; refresh to retry now", workspaceConnectionMessage(retrying))
+        assertEquals("Connection timed out. Checking periodically. Refresh to retry now", workspaceConnectionMessage(retrying))
         assertEquals("Network unavailable", workspaceConnectionMessage(navigation(ConnectionState.Offline("Network unavailable"))))
         assertEquals("No allowed directories", workspaceConnectionMessage(navigation(ConnectionState.Online(1))))
     }
@@ -32,12 +32,14 @@ class WorkspaceConnectionStatusTest {
         })
         assertNotEquals(navigationState(before), navigationState(after))
         assertTrue(sessionListState(before).samePresentation(sessionListState(after)))
+        val stopped = after.copy(hosts = after.hosts.mapValues { (_, host) -> host.copy(connectionProgress = null) })
+        assertFalse(sessionListState(after).samePresentation(sessionListState(stopped)))
     }
 
     @Test fun offline_host_reports_periodic_checks_without_an_attempt_counter() {
         val offline = navigation(ConnectionState.Offline("Host rejected the connection (HTTP 502)"),
             ConnectionProgress(17, "Host rejected the connection (HTTP 502)"))
-        assertEquals("Host rejected the connection (HTTP 502). Checking periodically; refresh to retry now",
+        assertEquals("Host rejected the connection (HTTP 502). Checking periodically. Refresh to retry now",
             workspaceConnectionMessage(offline))
         assertEquals("Network unavailable",
             workspaceConnectionMessage(navigation(ConnectionState.Offline("Network unavailable"))))

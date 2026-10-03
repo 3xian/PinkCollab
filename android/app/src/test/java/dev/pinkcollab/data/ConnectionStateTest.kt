@@ -30,11 +30,16 @@ class ConnectionStateTest {
     }
 
     @Test fun connectionFailuresDistinguishNetworkAndHostErrors() {
-        assertEquals("Cannot resolve host address", connectionFailureReason(java.net.UnknownHostException()))
-        assertEquals("Connection timed out", connectionFailureReason(java.net.SocketTimeoutException()))
-        assertEquals("Cannot reach host address or port", connectionFailureReason(java.net.ConnectException()))
-        assertEquals("Secure connection failed", connectionFailureReason(javax.net.ssl.SSLException("TLS")))
-        assertEquals("Host rejected the connection (HTTP 503)",
-            connectionFailureReason(java.io.IOException("handshake failed"), 503))
+        assertEquals(ConnectionState.Offline("Cannot resolve host address", ConnectionFailure.HostNotFound),
+            connectionFailure(java.net.UnknownHostException()))
+        assertEquals(ConnectionState.Offline("Connection timed out", ConnectionFailure.TimedOut),
+            connectionFailure(java.net.SocketTimeoutException()))
+        assertEquals(ConnectionState.Offline("Cannot reach host address or port", ConnectionFailure.Unreachable),
+            connectionFailure(java.net.ConnectException()))
+        assertEquals(ConnectionState.Offline("Secure connection failed", ConnectionFailure.SecureConnectionFailed),
+            connectionFailure(javax.net.ssl.SSLException("TLS")))
+        assertEquals(ConnectionState.Offline("Host rejected the connection (HTTP 503)", ConnectionFailure.HostRejected),
+            connectionFailure(java.io.IOException("handshake failed"), 503))
+        assertEquals(ConnectionState.Offline("Connection interrupted"), connectionFailure(java.io.IOException()))
     }
 }

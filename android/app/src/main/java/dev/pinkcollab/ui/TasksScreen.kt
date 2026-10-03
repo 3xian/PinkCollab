@@ -58,6 +58,7 @@ internal data class TasksScreenActions(
     val showVersion: () -> Unit,
     val session: (Session, SessionAction) -> Unit,
     val applyModelSettings: (Session, ModelSettingsChanges) -> Boolean,
+    val retryHost: (String) -> Unit = {},
 )
 
 @Composable
@@ -134,17 +135,11 @@ internal fun TasksScreen(
         )
         if (sessions.isEmpty()) {
             Box(Modifier.weight(1f)) {
-                when (state.sessions.loadState) {
-                    TaskListLoadState.Loading -> TaskListLoadingState()
-                    TaskListLoadState.Unavailable -> EmptyState(
-                        title = "Sessions unavailable",
-                        description = "PinkCollab could not load sessions from the paired hosts.",
-                        action = "Manage hosts",
-                        onAction = openResources,
-                        modifier = Modifier.offset(y = (-56).dp),
-                    )
+                when (state.sessions.emptyState) {
+                    TaskListEmptyState.Loading -> TaskListLoadingState()
+                    TaskListEmptyState.Recovery -> SessionRecoveryScreen(hosts.values.toList(), actions)
 
-                    TaskListLoadState.Ready -> if (hosts.isEmpty()) {
+                    TaskListEmptyState.Ready -> if (hosts.isEmpty()) {
                         BringOmpEmptyState(connectHost = connectHost)
                     } else {
                         EmptyState(

@@ -156,6 +156,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                 },
                                 session = vm::onSessionAction,
                                 applyModelSettings = vm::applyModelSettings,
+                                retryHost = vm::refreshHost,
                             ),
                         )
 
