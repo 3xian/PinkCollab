@@ -38,7 +38,6 @@ internal fun startupSteps(app: NavigationState): List<StartupStep> {
         val text = when (host.connection) {
             ConnectionState.Connecting -> "Connecting to $name"
             ConnectionState.Synchronizing -> "Syncing sessions · $name"
-            ConnectionState.Reconnecting -> "Reconnecting to $name"
             ConnectionState.AuthenticationRequired -> "Sign-in required · $name"
             ConnectionState.UpgradeRequired -> "Update required · $name"
             is ConnectionState.Offline -> "Host offline · $name"

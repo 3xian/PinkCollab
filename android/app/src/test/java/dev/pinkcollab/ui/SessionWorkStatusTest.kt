@@ -77,7 +77,7 @@ class SessionWorkStatusTest {
             liveItems = listOf(user, tool()),
         )
         for (connection in listOf(
-            ConnectionState.Offline(), ConnectionState.Reconnecting, ConnectionState.Synchronizing,
+            ConnectionState.Offline(), ConnectionState.Synchronizing,
             ConnectionState.Connecting, ConnectionState.AuthenticationRequired, ConnectionState.UpgradeRequired,
         )) {
             val status = sessionWorkStatus(detail, online.copy(connection = connection))

@@ -152,7 +152,6 @@ sealed interface ConnectionState {
     data object Connecting : ConnectionState
     data object Synchronizing : ConnectionState
     data class Online(val sinceEpochMillis: Long) : ConnectionState
-    data object Reconnecting : ConnectionState
     data class Offline(val reason: String? = null) : ConnectionState
     data object AuthenticationRequired : ConnectionState
     data object UpgradeRequired : ConnectionState

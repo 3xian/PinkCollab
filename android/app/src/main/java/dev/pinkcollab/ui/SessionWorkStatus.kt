@@ -100,7 +100,6 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
         val title = when (host?.connection) {
             ConnectionState.Connecting -> "Connecting to host"
             ConnectionState.Synchronizing -> "Syncing with host"
-            ConnectionState.Reconnecting -> "Reconnecting to host"
             ConnectionState.AuthenticationRequired -> "Host sign-in required"
             ConnectionState.UpgradeRequired -> "Update required"
             else -> "Host offline"

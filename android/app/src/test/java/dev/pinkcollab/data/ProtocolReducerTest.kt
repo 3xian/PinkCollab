@@ -70,7 +70,7 @@ class ProtocolReducerTest {
         val detail = first.details.getValue(key)
         val request = HistoryRequest(detail.snapshotToken!!, detail.historyEpoch)
         val retrying = first.copy(hosts = first.hosts.mapValues { (_, host) ->
-            host.copy(connection = ConnectionState.Reconnecting,
+            host.copy(connection = ConnectionState.Offline("Connection timed out"),
                 connectionProgress = ConnectionProgress(3, "Connection timed out"))
         })
         val reconnect = reduce(retrying, host()).state

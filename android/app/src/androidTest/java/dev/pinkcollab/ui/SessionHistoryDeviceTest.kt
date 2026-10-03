@@ -281,7 +281,7 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithText("Saved question 0").assertIsDisplayed()
         for (unavailable in listOf("disconnected", "inactive", "exhausted")) {
             compose.runOnIdle {
-                connection.value = if (unavailable == "disconnected") ConnectionState.Reconnecting
+                connection.value = if (unavailable == "disconnected") ConnectionState.Offline()
                     else ConnectionState.Online(2L)
                 active.value = unavailable != "inactive"
                 if (unavailable == "exhausted") {
@@ -310,7 +310,7 @@ class SessionHistoryDeviceTest {
         compose.runOnIdle {
             assertEquals(0, requests)
             detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, listOf(saved), "older"))
-            connection.value = ConnectionState.Reconnecting
+            connection.value = ConnectionState.Offline()
         }
         timeline.performTouchInput { swipeDown() }
         compose.runOnIdle {
@@ -356,7 +356,7 @@ class SessionHistoryDeviceTest {
                 SessionDraft(), 0, SessionActivity(), null, null, refreshError = "Old snapshot timeout"),
                 onAction = {}, onApplyModelSettings = { true })
         }
-        for (state in listOf(ConnectionState.Connecting, ConnectionState.Reconnecting)) {
+        for (state in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing)) {
             compose.runOnIdle { connection.value = state }
             compose.onNodeWithTag("historyLoading").assertIsDisplayed()
             compose.onNodeWithText("Could not load message history").assertDoesNotExist()

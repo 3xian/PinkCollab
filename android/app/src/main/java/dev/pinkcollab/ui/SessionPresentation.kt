@@ -37,7 +37,6 @@ internal fun sessionHistoryError(detail: SessionDetail, host: HostState?, refres
 
 internal fun sessionSyncMessage(host: HostState?, hasSnapshot: Boolean): String = when (host?.connection) {
     ConnectionState.Connecting -> "Connecting to ${host.paired.host.name}…"
-    ConnectionState.Reconnecting -> "Reconnecting to ${host.paired.host.name}…"
     ConnectionState.Synchronizing -> "Syncing sessions…"
     ConnectionState.AuthenticationRequired -> "Sign-in required. Open hosts to reconnect."
     ConnectionState.UpgradeRequired -> "Update required. Open hosts for details."

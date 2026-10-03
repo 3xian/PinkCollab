@@ -28,7 +28,7 @@ class SessionCardStatusTest {
         val running = session.copy(status = SessionStatus.Running)
         assertEquals(SessionCardStatus.Working, sessionCardStatus(running, online))
         assertEquals(SessionCardStatus.Offline, sessionCardStatus(running, ConnectionState.Offline()))
-        assertEquals(SessionCardStatus.Reconnecting, sessionCardStatus(running.copy(needsAttention = true), ConnectionState.Reconnecting))
+        assertEquals(SessionCardStatus.Offline, sessionCardStatus(running.copy(needsAttention = true), ConnectionState.Offline()))
     }
 
     @Test fun `lifecycle and attention take precedence over execution`() {

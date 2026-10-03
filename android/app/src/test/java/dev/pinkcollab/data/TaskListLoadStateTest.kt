@@ -57,7 +57,7 @@ class TaskListLoadStateTest {
         var host = HostState(paired)
         host = host.withConnectionState(ConnectionState.Offline("Network unavailable"), null)
         assertEquals(TaskListLoadState.Unavailable, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
-        for (connection in listOf(ConnectionState.Connecting, ConnectionState.Reconnecting, ConnectionState.Synchronizing)) {
+        for (connection in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing)) {
             host = host.withConnectionState(connection, ConnectionProgress(2))
             assertEquals(InitialSyncState.Pending, host.initialSync)
             assertEquals(TaskListLoadState.Loading, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)

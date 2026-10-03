@@ -259,16 +259,15 @@ internal fun SessionPage(
                         }
                     }
                     if (session.runtimeAttached && detail.streaming.isNotBlank()) item(key = "streaming") {
-                        Row(
+                        Column(
                             Modifier
                                 .fillMaxWidth()
                                 .timelineBand(tint = Purple400, tintAlpha = 0.055f)
                                 .padding(horizontal = 20.dp, vertical = 18.dp),
-                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Column(Modifier.weight(1f)) {
-                                AgentHeader(detail.model, replying = true)
-                                Spacer(Modifier.height(4.dp))
+                            AgentHeader(detail.model, replying = true)
+                            Spacer(Modifier.height(4.dp))
+                            TimelineMessageBody(detail.streaming) {
                                 Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
                             }
                         }

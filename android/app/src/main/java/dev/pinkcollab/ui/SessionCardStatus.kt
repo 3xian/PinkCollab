@@ -5,7 +5,7 @@ import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
 
 internal enum class SessionCardStatus(val label: String) {
-    Connecting("Connecting"), Syncing("Syncing"), Reconnecting("Reconnecting"),
+    Connecting("Connecting"), Syncing("Syncing"),
     Offline("Offline"), SignIn("Sign in"), UpdateRequired("Update required"),
     Starting("Starting"), Stopping("Stopping"), Working("Working"),
     History("History"), NeedsInput("Needs you"), Ready("Ready"), Inactive("Inactive"), Unknown("Unknown"),
@@ -16,7 +16,6 @@ internal fun sessionCardStatus(session: Session, connection: ConnectionState?): 
     when (connection) {
         ConnectionState.Connecting -> return SessionCardStatus.Connecting
         ConnectionState.Synchronizing -> return SessionCardStatus.Syncing
-        ConnectionState.Reconnecting -> return SessionCardStatus.Reconnecting
         ConnectionState.AuthenticationRequired -> return SessionCardStatus.SignIn
         ConnectionState.UpgradeRequired -> return SessionCardStatus.UpdateRequired
         is ConnectionState.Offline, null -> return SessionCardStatus.Offline

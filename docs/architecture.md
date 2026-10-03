@@ -42,7 +42,7 @@ The ordered WebSocket has no client-visible resource cursors. Typed protocol eve
 
 When Android returns to the foreground or its default network becomes available, it replaces host connections and obtains fresh snapshots, including connections still marked online, connecting, or synchronizing. Those states do not prove a socket survived background suspension or a network change. Authentication-required and upgrade-required hosts remain blocked until explicit user action. Recovery uses the existing subscription supervisor to cancel old connections and resubscribe to the visible session.
 
-Each host retries independently. Brief connection failures use short backoff; after seven consecutive failures without a host snapshot, Android displays the host as offline and checks less often, increasing from one to two to five minutes with jitter. The host remains offline during these probes until a socket opens. Manual refresh and foreground/network recovery bypass the wait; a successful host snapshot resets the backoff for a later interruption.
+Each host retries independently. Android displays the host as offline after the first connection failure and makes one quick retry after one second. Further failures retry after five, ten, then fifteen seconds, with jitter and a fifteen-second delay cap. The host remains offline during these probes until a socket opens, then shows synchronization until a fresh host snapshot arrives. Manual refresh and foreground/network recovery bypass the wait; a successful host snapshot resets the backoff for a later interruption.
 
 ## Android navigation
 

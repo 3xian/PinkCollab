@@ -116,7 +116,7 @@ internal class HostConnectionSupervisor(
                     val progress = ConnectionProgress(failedAttempts + 1, lastFailure)
                     emitState(currentGeneration,
                         if (failedAttempts == 0) ConnectionState.Connecting
-                        else retryConnectionState(failedAttempts, lastFailure), progress)
+                        else ConnectionState.Offline(lastFailure), progress)
                     val disconnect = awaitSocket(currentGeneration, progress)
                     if (!isCurrent(currentGeneration)) return@launch
                     if (disconnect.authenticationRequired) {
@@ -130,7 +130,7 @@ internal class HostConnectionSupervisor(
                     failedAttempts = if (disconnect.hadSnapshot) 1 else failedAttempts + 1
                     lastFailure = disconnect.reason
                     val retryDelay = retryDelayMillis(failedAttempts)
-                    emitState(currentGeneration, retryConnectionState(failedAttempts, lastFailure),
+                    emitState(currentGeneration, ConnectionState.Offline(lastFailure),
                         ConnectionProgress(failedAttempts + 1, lastFailure))
                     delay(retryDelay)
                 }
@@ -162,7 +162,7 @@ internal class HostConnectionSupervisor(
         private fun emitState(generation: Long, state: ConnectionState, progress: ConnectionProgress? = null) {
             synchronized(lock) {
                 if (connectionGeneration.get() == generation && connections[paired.host.id] === this) {
-                    if (state == ConnectionState.Reconnecting || state is ConnectionState.Offline || state == ConnectionState.AuthenticationRequired ||
+                    if (state is ConnectionState.Offline || state == ConnectionState.AuthenticationRequired ||
                         state == ConnectionState.UpgradeRequired) invalidateSubscriptions(paired.host.id)
                     onState(paired.host.id, state, progress)
                 }
@@ -274,21 +274,12 @@ internal fun connectionFailureReason(error: Throwable, httpCode: Int? = null): S
     else -> "Connection interrupted"
 }
 
-// Keep brief interruptions responsive, but treat a persistently unreachable host as offline.
-internal fun retryConnectionState(failedAttempts: Int, reason: String?): ConnectionState =
-    if (failedAttempts >= 7) ConnectionState.Offline(reason) else ConnectionState.Reconnecting
-
 internal fun retryDelayMillis(attempt: Int, jitter: Double = Random.nextDouble(0.8, 1.2)): Long {
     val base = when (attempt) {
-        1 -> 0L
-        2 -> 1_000L
-        3 -> 2_000L
-        4 -> 4_000L
-        5 -> 8_000L
-        6 -> 15_000L
-        7 -> 60_000L
-        8 -> 120_000L
-        else -> 300_000L
+        1 -> 1_000L
+        2 -> 5_000L
+        3 -> 10_000L
+        else -> 15_000L
     }
-    return (base * jitter).toLong().coerceAtMost(300_000L)
+    return (base * jitter).toLong().coerceAtMost(15_000L)
 }

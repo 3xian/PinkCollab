@@ -76,10 +76,9 @@ internal fun ResourcesScreen(
             val busy = hostBusy(hostId)
             val activeTasks = host.activeTasks
             val connectionPending = host.connection == ConnectionState.Connecting ||
-                host.connection == ConnectionState.Synchronizing ||
-                host.connection == ConnectionState.Reconnecting
+                host.connection == ConnectionState.Synchronizing
             val (connectionLabel, connectionColor) = when (host.connection) {
-                ConnectionState.Connecting, ConnectionState.Synchronizing, ConnectionState.Reconnecting -> "Connecting" to BrandPink
+                ConnectionState.Connecting, ConnectionState.Synchronizing -> "Connecting" to BrandPink
                 is ConnectionState.Online -> "Online" to Teal300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400

@@ -158,10 +158,12 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
         SpeakerLine(time) {
             if (isUser) YouLabel() else AgentHeader()
         }
-        if (isUser) {
-            Text(item.text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
-        } else {
-            MarkdownBody(item.id, item.text, color = contentColor, renderer)
+        TimelineMessageBody(item.text) {
+            if (isUser) {
+                Text(item.text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
+            } else {
+                MarkdownBody(item.id, item.text, color = contentColor, renderer)
+            }
         }
     }
 }
@@ -551,10 +553,7 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
     }
     val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
-        Modifier
-            .fillMaxWidth()
-            .then(band)
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+        Modifier.fillMaxWidth().then(band).padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         val time = messageTimeLabel(item.timestamp)
@@ -579,14 +578,16 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
         } else {
             SpeakerLine(time) { YouLabel() }
         }
-        if (item.kind == "assistant") {
-            MarkdownBody(item.id, item.text, color = contentColor, renderer)
-        } else {
-            Text(
-                item.text,
-                style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                color = contentColor,
-            )
+        TimelineMessageBody(item.text, copyable = isUser || item.kind == "assistant") {
+            if (item.kind == "assistant") {
+                MarkdownBody(item.id, item.text, color = contentColor, renderer)
+            } else {
+                Text(
+                    item.text,
+                    style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                    color = contentColor,
+                )
+            }
         }
         if (isDetail && detail.isNotBlank()) {
             DetailToggle("Details", expanded, onClick = { expanded = !expanded })

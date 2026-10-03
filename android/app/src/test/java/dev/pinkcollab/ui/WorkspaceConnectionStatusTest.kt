@@ -17,17 +17,16 @@ class WorkspaceConnectionStatusTest {
             workspaceConnectionMessage(navigation(ConnectionState.Synchronizing)))
     }
 
-    @Test fun reconnecting_reports_failure_and_current_attempt_then_clears_on_recovery() {
-        val retrying = navigation(ConnectionState.Reconnecting, ConnectionProgress(3, "Connection timed out"))
-        assertEquals("Connection timed out. Retrying automatically (attempt 3)", workspaceConnectionMessage(retrying))
-        assertEquals("Retrying connection automatically", workspaceConnectionMessage(navigation(ConnectionState.Reconnecting)))
+    @Test fun offline_retry_reports_failure_then_clears_on_recovery() {
+        val retrying = navigation(ConnectionState.Offline("Connection timed out"), ConnectionProgress(3, "Connection timed out"))
+        assertEquals("Connection timed out. Checking periodically; refresh to retry now", workspaceConnectionMessage(retrying))
         assertEquals("Network unavailable", workspaceConnectionMessage(navigation(ConnectionState.Offline("Network unavailable"))))
         assertEquals("No allowed directories", workspaceConnectionMessage(navigation(ConnectionState.Online(1))))
     }
 
     @Test fun progress_updates_navigation_without_invalidating_session_presentation() {
         val before = AppState(hosts = mapOf("host" to HostState(paired,
-            connection = ConnectionState.Reconnecting, connectionProgress = ConnectionProgress(2))))
+            connection = ConnectionState.Offline(), connectionProgress = ConnectionProgress(2))))
         val after = before.copy(hosts = before.hosts.mapValues { (_, host) ->
             host.copy(connectionProgress = ConnectionProgress(3, "Cannot resolve host address"))
         })

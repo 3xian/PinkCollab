@@ -27,7 +27,7 @@ class SessionPresentationTest {
     @Test fun connection_recovery_does_not_show_history_or_refresh_errors() {
         val failed = SessionDetail(session, snapshotToken = null, savedHistory = SavedHistory.Failed)
         for (connection in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing,
-            ConnectionState.Reconnecting, ConnectionState.Offline())) {
+            ConnectionState.Offline())) {
             assertNull(sessionHistoryError(failed, online.copy(connection = connection), "Snapshot timed out"))
         }
         assertNull(sessionHistoryError(failed, null, "Snapshot timed out"))
