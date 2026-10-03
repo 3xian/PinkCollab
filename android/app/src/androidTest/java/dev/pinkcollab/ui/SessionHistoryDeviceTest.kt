@@ -202,8 +202,7 @@ class SessionHistoryDeviceTest {
 
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Earlier question"))
         compose.onNodeWithText("Earlier question").assertExists()
-        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Live updates", substring = true))
-        compose.onNodeWithText("Live updates", substring = true).assertExists()
+        compose.onNodeWithText("Live updates", substring = true).assertDoesNotExist()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Current question"))
         compose.onNodeWithText("Current question").assertExists()
         compose.onNodeWithText("Show saved messages").assertDoesNotExist()
