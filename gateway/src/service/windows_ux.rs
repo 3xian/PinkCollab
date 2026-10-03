@@ -142,6 +142,13 @@ mod tests {
                 command.replace('"', "\"\"")
             )
         );
+        let bytes = startup_bytes(&script);
+        assert_eq!(&bytes[..2], &[0xff, 0xfe]);
+        let utf16: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&utf16).unwrap(), script);
     }
     #[test]
     fn legacy_local_account_matches_only_the_same_computer_user() {
