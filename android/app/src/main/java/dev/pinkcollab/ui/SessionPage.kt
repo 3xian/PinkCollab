@@ -59,6 +59,7 @@ internal fun SessionPage(
     onAction: (SessionAction) -> Unit,
     onApplyModelSettings: (ModelSettingsChanges) -> Boolean,
     isActive: Boolean = true,
+    loadToolDetails: suspend (String, String?) -> ToolDetailPage = { _, _ -> error("Tool details unavailable") },
 ) {
     val load = state.detail
     val host = state.host.takeIf { load is LoadState.Ready && load.value.snapshotToken != null }
@@ -84,6 +85,10 @@ internal fun SessionPage(
         SessionMarkdownRenderer(createSessionMarkwon(context))
     }
     val session = detail.session
+    val currentDetailLoader by rememberUpdatedState(loadToolDetails)
+    val toolDetails = remember(session.hostId, session.id, session.generation) {
+        ToolDetailsController { callId, cursor -> currentDetailLoader(callId, cursor) }
+    }
     val prompt = draft.text
     val selectedFiles = draft.files
     var fileError by remember(session.id) { mutableStateOf<String?>(null) }
@@ -114,22 +119,22 @@ internal fun SessionPage(
     } else null
     val savedHistory = detail.savedHistory
     val historyItems = state.historyItems ?: savedHistory.items
-    val historyTimeline = remember(historyItems) { projectSessionTimeline(historyItems) }
     val liveItems = if (session.runtimeAttached) detail.liveItems else emptyList()
-    val liveTimeline = remember(liveItems) { projectSessionTimeline(liveItems) }
+    val conversation = remember(historyItems, liveItems) { conversationTimeline(historyItems, liveItems) }
+    val conversationDisplay = remember(conversation) { projectSessionTimeline(conversation) }
+    val liveOperationIds = remember(liveItems) { liveItems.filter { it.tool?.completed == false }.map { it.id }.toSet() }
     val savedTodo = remember(historyItems) { projectSessionTodo(historyItems) }
     val liveTodo = remember(liveItems) { projectSessionTodo(liveItems) }
     val todo = latestSessionTodo(savedTodo, liveTodo)
     var todoExpanded by rememberSaveable(session.hostId, session.id) { mutableStateOf(false) }
     LaunchedEffect(todo == null) { if (todo == null) todoExpanded = false }
     BackHandler(todoExpanded && isActive) { todoExpanded = false }
-    val hasSavedMessages = historyTimeline.isNotEmpty() || savedHistory.nextCursor != null
     val historyError = sessionHistoryError(detail, state.host, state.refreshError)
     val syncing = load == LoadState.Loading || detail.snapshotToken == null || savedHistory == SavedHistory.Loading
     val syncMessage = sessionSyncMessage(state.host, detail.snapshotToken != null)
     val awaitingHistory = historyError == null &&
-        (savedHistory == SavedHistory.Loading || savedHistory == SavedHistory.Failed) && historyTimeline.isEmpty() &&
-        liveTimeline.isEmpty() && detail.streaming.isBlank() && session.attention == null
+        (savedHistory == SavedHistory.Loading || savedHistory == SavedHistory.Failed) && conversationDisplay.isEmpty() &&
+        detail.streaming.isBlank() && session.attention == null
     val timelineState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE)
     val historyPullState = rememberPullToRefreshState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
@@ -164,8 +169,7 @@ internal fun SessionPage(
     }
     LaunchedEffect(
         isActive,
-        historyTimeline,
-        liveTimeline,
+        conversationDisplay,
         detail.streaming,
         session.attention,
         composerHeightPx,
@@ -238,25 +242,10 @@ internal fun SessionPage(
                     ),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    items(historyTimeline, key = { "saved:${it.id}" }, contentType = { it::class }) { item ->
-                        DisplayItem(item, renderer)
-                    }
-                    if (session.runtimeAttached && hasSavedMessages) item(key = "live-divider") {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
-                            HorizontalDivider(color = TextMid.copy(alpha = 0.4f))
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "Live updates (saved messages above may repeat)",
-                                style = PinkCollabTypography.labelMedium,
-                                color = TextMid,
-                            )
-                        }
-                    }
-                    if (session.runtimeAttached) {
-                        items(liveTimeline, key = { "live:${it.id}" }, contentType = { it::class }) { item ->
-                            DisplayItem(item, renderer, liveActivity = host?.connected == true &&
-                                session.status == SessionStatus.Running)
-                        }
+                    items(conversationDisplay, key = { it.id }, contentType = { it::class }) { item ->
+                        val running = item is SessionDisplayItem.ActivityGroup && item.operations.any { it.callId in liveOperationIds }
+                        DisplayItem(item, renderer, liveActivity = running && host?.connected == true &&
+                            session.status == SessionStatus.Running, toolDetails = toolDetails)
                     }
                     if (session.runtimeAttached && detail.streaming.isNotBlank()) item(key = "streaming") {
                         Column(

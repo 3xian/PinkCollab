@@ -11,9 +11,11 @@ pub mod omp;
 pub mod protocol;
 pub mod runtime;
 pub mod storage;
+pub mod tool_details;
 pub mod uploads;
 #[cfg(windows)]
 mod windows_job;
+pub mod wire;
 pub mod workspace;
 
 pub mod usage;

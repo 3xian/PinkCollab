@@ -11,7 +11,7 @@ use tokio_tungstenite::{
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 
 async fn connect(h: &Harness, token: &str, gzip: bool) -> Socket {
-    let mut request = format!("{}/api/v3/events", h.url.replace("http://", "ws://"))
+    let mut request = format!("{}/api/v4/events", h.url.replace("http://", "ws://"))
         .into_client_request()
         .unwrap();
     request
@@ -20,7 +20,7 @@ async fn connect(h: &Harness, token: &str, gzip: bool) -> Socket {
     if gzip {
         request.headers_mut().insert(
             "Sec-WebSocket-Protocol",
-            "pinkcollab.v3.gzip".parse().unwrap(),
+            "pinkcollab.v4.gzip".parse().unwrap(),
         );
     }
     let (socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
@@ -54,7 +54,7 @@ async fn next(socket: &mut Socket, gzip: bool) -> Value {
 }
 
 #[tokio::test]
-async fn compressed_bootstrap_keeps_legacy_clients_and_history_cursors_working() {
+async fn compressed_and_text_v4_bootstrap_share_history_cursors() {
     let h = Harness::new(1, vec![]).await;
     let client = reqwest::Client::new();
     let token = h.pair().await;
@@ -62,7 +62,7 @@ async fn compressed_bootstrap_keeps_legacy_clients_and_history_cursors_working()
     let mut id = String::new();
     for i in 0..8 {
         let record: Value = client
-            .post(format!("{}/api/v3/sessions", h.url))
+            .post(format!("{}/api/v4/sessions", h.url))
             .bearer_auth(&token)
             .json(&json!({"commandId":format!("create-{i}"),"hostId":h.host.id,"cwd":cwd}))
             .send()
@@ -117,7 +117,7 @@ async fn compressed_bootstrap_keeps_legacy_clients_and_history_cursors_working()
     assert_eq!(page["items"].as_array().unwrap().len(), 5);
     assert!(page["source"]["id"].is_string());
     let rest: Value = client
-        .get(format!("{}/api/v3/sessions/{id}/history?limit=5", h.url))
+        .get(format!("{}/api/v4/sessions/{id}/history?limit=5", h.url))
         .bearer_auth(&token)
         .send()
         .await
@@ -127,7 +127,7 @@ async fn compressed_bootstrap_keeps_legacy_clients_and_history_cursors_working()
         .unwrap();
     assert_eq!(page, &rest);
     let earlier: Value = client
-        .get(format!("{}/api/v3/sessions/{id}/history", h.url))
+        .get(format!("{}/api/v4/sessions/{id}/history", h.url))
         .query(&[("cursor", page["nextCursor"].as_str().unwrap())])
         .bearer_auth(&token)
         .send()

@@ -1,6 +1,7 @@
+mod stream;
 use crate::{
     domain::SessionRecord,
-    events::{Bus, Event},
+    events::Bus,
     model::Host,
     protocol::{GATEWAY_PROTOCOL_VERSION, OperationDto, ServerEvent, SessionDto, SessionSnapshot},
     runtime::{Command as ApiCommand, SessionDirectory, SubmitError},
@@ -11,22 +12,17 @@ use crate::{
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{
-        DefaultBodyLimit, Path, Query, State, WebSocketUpgrade,
-        ws::{Message, WebSocket},
-    },
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{any, get, post, put},
 };
-use flate2::{Compression, write::GzEncoder};
-use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::io::Write;
-use std::{collections::HashMap, path::Path as FsPath, sync::Arc, time::Duration};
+use std::{path::Path as FsPath, sync::Arc};
+use stream::api_stream;
 use tower_http::compression::CompressionLayer;
 
 #[derive(Clone)]
@@ -43,31 +39,37 @@ pub fn router(app: App) -> Router {
         app.sessions.omp_args(),
     ));
     let protected = Router::new()
-        .route("/api/v3/host", get(api_host))
-        .route("/api/v3/usage", get(api_usage))
+        .route("/api/v4/host", get(api_host))
+        .route("/api/v4/usage", get(api_usage))
         .layer(axum::Extension(usage))
-        .route("/api/v3/workspaces", get(workspaces))
-        .route("/api/v3/fs/list", get(list))
-        .route("/api/v3/sessions", get(api_sessions).post(api_create))
-        .route("/api/v3/sessions/{id}", get(api_detail))
-        .route("/api/v3/sessions/{id}/commands", post(api_command))
+        .route("/api/v4/workspaces", get(workspaces))
+        .route("/api/v4/fs/list", get(list))
+        .route("/api/v4/sessions", get(api_sessions).post(api_create))
+        .route("/api/v4/sessions/{id}", get(api_detail))
+        .route("/api/v4/sessions/{id}/commands", post(api_command))
         .route(
-            "/api/v3/sessions/{id}/files/{file_id}",
+            "/api/v4/sessions/{id}/files/{file_id}",
             put(api_upload).layer(DefaultBodyLimit::max(uploads::MAX_FILE_BYTES)),
         )
         .route(
-            "/api/v3/sessions/{id}/operations/{command_id}",
+            "/api/v4/sessions/{id}/operations/{command_id}",
             get(api_operation),
         )
-        .route("/api/v3/sessions/{id}/models", get(api_models))
-        .route("/api/v3/sessions/{id}/history", get(api_history))
-        .route("/api/v3/events", get(api_stream))
+        .route("/api/v4/sessions/{id}/models", get(api_models))
+        .route("/api/v4/sessions/{id}/history", get(api_history))
+        .route("/api/v4/sessions/{id}/history/sync", post(api_history_sync))
+        .route(
+            "/api/v4/sessions/{id}/tools/{call_id}",
+            get(api_tool_detail),
+        )
+        .route("/api/v4/events", get(api_stream))
         .route_layer(middleware::from_fn_with_state(app.clone(), authenticate));
     Router::new()
         .route("/health", get(|| async { "pinkcollab:ok" }))
-        .route("/api/v3/pair", post(api_pair))
+        .route("/api/v4/pair", post(api_pair))
         .route("/api/v1/{*path}", any(upgrade_required))
         .route("/api/v2/{*path}", any(upgrade_required))
+        .route("/api/v3/{*path}", any(upgrade_required))
         .merge(protected)
         .layer(DefaultBodyLimit::max(512 * 1024))
         .layer(middleware::from_fn(server_timing))
@@ -199,7 +201,13 @@ async fn api_sessions(
     } else {
         None
     };
-    Ok(Json(json!({"sessions":sessions,"nextCursor":next_cursor})))
+    let mut summaries = serde_json::to_value(sessions).unwrap();
+    for summary in summaries.as_array_mut().unwrap() {
+        crate::wire::compact_runtime(&mut summary["runtime"]);
+    }
+    Ok(Json(
+        json!({"sessions":summaries,"nextCursor":next_cursor,"epoch":app.bus.epoch}),
+    ))
 }
 async fn api_detail(
     State(app): State<App>,
@@ -396,13 +404,136 @@ async fn api_models(
 struct ApiHistoryQuery {
     cursor: Option<String>,
     limit: Option<usize>,
+    anchor: Option<String>,
+    oldest: Option<String>,
 }
 async fn api_history(
     State(app): State<App>,
     Path(id): Path<String>,
     Query(query): Query<ApiHistoryQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    read_history(&app, &id, &query).await.map(Json)
+    let mut page = read_history(&app, &id, &query).await?;
+    crate::wire::share_todos(&mut page, &mut Default::default());
+    Ok(Json(page))
+}
+
+async fn api_history_sync(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    Json(request): Json<crate::history::HistorySync>,
+) -> Result<Json<Value>, ApiError> {
+    let view = app
+        .sessions
+        .history_view(&id)
+        .await
+        .map_err(|_| {
+            ApiError(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "history_unavailable",
+                "History unavailable".into(),
+            )
+        })?
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                "session_not_found",
+                "Session not found".into(),
+            )
+        })?;
+    let Some(path) = view.session.engine_session_ref else {
+        return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
+    };
+    crate::history::sync_history(FsPath::new(&path), &id, &request)
+        .await
+        .map(|mut page| {
+            crate::wire::share_todos(&mut page, &mut Default::default());
+            Json(page)
+        })
+        .map_err(|err| {
+            let code = if err.to_string().contains("stale_cursor") {
+                "stale_cursor"
+            } else if err.to_string().contains("invalid_sync") {
+                "invalid_request"
+            } else {
+                "history_unavailable"
+            };
+            ApiError(
+                if code == "stale_cursor" {
+                    StatusCode::CONFLICT
+                } else if code == "invalid_request" {
+                    StatusCode::BAD_REQUEST
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                },
+                code,
+                "History synchronization unavailable".into(),
+            )
+        })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolDetailQuery {
+    cursor: Option<String>,
+}
+
+async fn api_tool_detail(
+    State(app): State<App>,
+    Path((id, call_id)): Path<(String, String)>,
+    Query(query): Query<ToolDetailQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let unavailable = || {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "tool_detail_unavailable",
+            "Tool details are temporarily unavailable".into(),
+        )
+    };
+    let view = app
+        .sessions
+        .history_view(&id)
+        .await
+        .map_err(|_| unavailable())?
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::NOT_FOUND,
+                "session_not_found",
+                "Session not found".into(),
+            )
+        })?;
+    let tool = match app.sessions.live_tool(&id, &call_id).await {
+        Some(tool) => Some(tool),
+        None => match view.session.engine_session_ref {
+            Some(reference) => crate::history::tool_detail(FsPath::new(&reference), &call_id)
+                .await
+                .map_err(|_| unavailable())?,
+            None => None,
+        },
+    }
+    .ok_or_else(|| {
+        ApiError(
+            StatusCode::NOT_FOUND,
+            "tool_not_found",
+            "Tool is not present in this conversation branch".into(),
+        )
+    })?;
+    crate::tool_details::detail_page(&tool, query.cursor.as_deref())
+        .map(Json)
+        .map_err(|error| {
+            if error.to_string() == "stale_detail" {
+                ApiError(
+                    StatusCode::CONFLICT,
+                    "stale_detail",
+                    "Tool details changed; reload the first page".into(),
+                )
+            } else {
+                ApiError(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_detail_cursor",
+                    "Invalid tool detail cursor".into(),
+                )
+            }
+        })
 }
 
 async fn read_history(app: &App, id: &str, query: &ApiHistoryQuery) -> Result<Value, ApiError> {
@@ -450,11 +581,13 @@ async fn read_history(app: &App, id: &str, query: &ApiHistoryQuery) -> Result<Va
             return Ok(json!({"items":[],"source":null,"nextCursor":null}));
         }
     }
-    let page = crate::history::history_page(
+    let page = crate::history::history_page_with_anchor(
         FsPath::new(&reference),
         id,
         query.cursor.as_deref(),
         query.limit.unwrap_or(50),
+        query.anchor.as_deref(),
+        query.oldest.as_deref(),
     )
     .await
     .map_err(|err| {
@@ -653,20 +786,6 @@ async fn list(
         })?;
     Ok(Json(json!(listing)))
 }
-const GZIP_SOCKET_PROTOCOL: &str = "pinkcollab.v3.gzip";
-
-fn socket_message(encoded: String, gzip: bool) -> std::io::Result<Message> {
-    if encoded.len() > 8 * 1024 * 1024 {
-        return Err(std::io::Error::other("socket frame exceeds budget"));
-    }
-    if gzip && encoded.len() >= 1024 {
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(encoded.as_bytes())?;
-        return Ok(Message::Binary(encoder.finish()?.into()));
-    }
-    Ok(Message::Text(encoded.into()))
-}
-
 async fn server_timing(request: axum::extract::Request, next: Next) -> Response {
     let started = std::time::Instant::now();
     let mut response = next.run(request).await;
@@ -681,34 +800,6 @@ async fn server_timing(request: axum::extract::Request, next: Next) -> Response 
     response
 }
 
-async fn api_stream(
-    State(app): State<App>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    let token = credential(&headers).unwrap_or_default().to_owned();
-    let upgrade = upgrade.protocols([GZIP_SOCKET_PROTOCOL]);
-    let gzip = upgrade.selected_protocol().is_some();
-    upgrade
-        .max_message_size(4096)
-        .on_upgrade(move |socket| events(socket, app, token, gzip))
-}
-async fn send_value(
-    tx: &mut futures_util::stream::SplitSink<WebSocket, Message>,
-    value: &impl Serialize,
-    gzip: bool,
-) -> bool {
-    let Ok(encoded) = serde_json::to_string(value) else {
-        return false;
-    };
-    let Ok(message) = socket_message(encoded, gzip) else {
-        return false;
-    };
-    matches!(
-        tokio::time::timeout(Duration::from_secs(10), tx.send(message)).await,
-        Ok(Ok(()))
-    )
-}
 // The fence is server-local. A snapshot supersedes queued events up to this sequence.
 async fn snapshot(app: &App, session_id: Option<&str>) -> Option<(u64, ServerEvent)> {
     let started = std::time::Instant::now();
@@ -744,73 +835,6 @@ async fn snapshot(app: &App, session_id: Option<&str>) -> Option<(u64, ServerEve
     }
     None
 }
-async fn events(socket: WebSocket, app: App, token: String, gzip: bool) {
-    let mut receiver = app.bus.subscribe();
-    let (mut tx, mut rx) = socket.split();
-    let mut sessions = HashMap::<String, u64>::new();
-    let Some((host_fence, initial)) = snapshot(&app, None).await else {
-        return;
-    };
-    if !send_value(&mut tx, &initial, gzip).await {
-        return;
-    }
-    let mut ticker = tokio::time::interval(Duration::from_secs(25));
-    let mut last_seen = tokio::time::Instant::now();
-    loop {
-        tokio::select! {
-            event=receiver.recv()=>{
-                let (sequence, event) = match event { Ok(Event::Update { sequence, event }) => (sequence, event), _ => break };
-                let Some(id) = event.session_id() else {continue};
-                let fence = if event.updates_host() { Some(host_fence) } else { sessions.get(id).copied() };
-                if fence.is_none_or(|f| sequence <= f) || sessions.get(id).is_some_and(|f| sequence <= *f) {continue}
-                if !send_value(&mut tx,event.as_ref(),gzip).await {break}
-            }
-            _=ticker.tick()=>{
-                let check_token = token.clone();
-                if !app.store.run(move |store| Ok(store.authenticate(&check_token))).await.unwrap_or(false) || last_seen.elapsed()>Duration::from_secs(70){break}
-                if !matches!(tokio::time::timeout(Duration::from_secs(10),tx.send(Message::Ping(vec![].into()))).await,Ok(Ok(()))){break}
-            }
-            message=rx.next()=>{
-                match message {
-                    Some(Ok(Message::Pong(_)))=>last_seen=tokio::time::Instant::now(),
-                    Some(Ok(Message::Ping(value)))=>{
-                        last_seen=tokio::time::Instant::now();
-                        if !matches!(tokio::time::timeout(Duration::from_secs(10),tx.send(Message::Pong(value))).await,Ok(Ok(()))){break}
-                    }
-                    Some(Ok(Message::Text(raw)))=>{
-                        let Ok(command)=serde_json::from_str::<Value>(&raw) else {break};
-                        let id=command["sessionId"].as_str().unwrap_or_default();
-                        if id.is_empty() || id.len()>128 {break}
-                        if command["type"]=="subscribe" {
-                            let Some((fence, mut value))=snapshot(&app,Some(id)).await else {break};
-                            // Bound optional history work; errors/slow transcripts fall back to REST.
-                            if let Some(limit) = command["historyLimit"].as_u64().filter(|n| (1..=100).contains(n))
-                                && let ServerEvent::SessionSnapshot { snapshot, .. } = &mut value
-                                && snapshot.has_history
-                            {
-                                let query = ApiHistoryQuery { cursor: None, limit: Some(limit as usize) };
-                                if let Ok(Ok(page)) = tokio::time::timeout(Duration::from_secs(1), read_history(&app, id, &query)).await {
-                                    // Large tool output remains paged over REST.
-                                    if serde_json::to_vec(&page).is_ok_and(|bytes| bytes.len() <= 256 * 1024) {
-                                        snapshot.history = Some(page);
-                                    }
-                                }
-                            }
-                            sessions.insert(id.into(),fence);
-                            if !send_value(&mut tx,&value,gzip).await {break}
-                        } else if command["type"]=="unsubscribe" {
-                            sessions.remove(id);
-                        } else {break}
-                    }
-                    Some(Ok(Message::Close(_)))|None|Some(Err(_))=>break,
-                    _=>{},
-                }
-            }
-        }
-    }
-    let _ = tokio::time::timeout(Duration::from_secs(2), tx.send(Message::Close(None))).await;
-}
-
 async fn api_usage(
     axum::Extension(usage): axum::Extension<Arc<crate::usage::UsageService>>,
 ) -> Result<Json<crate::usage::UsageSnapshot>, ApiError> {

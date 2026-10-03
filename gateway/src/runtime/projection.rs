@@ -127,28 +127,38 @@ impl SessionController {
                     });
                 }
             }
-            "tool_execution_start" | "tool_execution_end" => {
+            "tool_execution_start" | "tool_execution_update" | "tool_execution_end" => {
                 let call_id = omp::string(&frame, "toolCallId");
                 if !call_id.is_empty() {
-                    let item_id = format!("{generation}:{call_id}");
+                    let item_id = call_id.to_owned();
+                    if kind == "tool_execution_update"
+                        && state.messages.iter().any(|entry| {
+                            entry.id == item_id
+                                && entry.tool.as_ref().is_some_and(|tool| tool.completed)
+                        })
+                    {
+                        return;
+                    }
                     let name = omp::string(&frame, "toolName");
                     let item = if kind == "tool_execution_start" {
                         let args = frame.get("args").cloned().unwrap_or(Value::Null);
-                        let args = if serde_json::to_vec(&args)
-                            .is_ok_and(|bytes| bytes.len() <= LIVE_TEXT_LIMIT)
-                        {
-                            args
-                        } else {
-                            json!({"previewTruncated":true})
-                        };
                         TimelineItem::tool_started(item_id.clone(), name, args, Utc::now())
+                    } else if kind == "tool_execution_update" {
+                        let mut item = TimelineItem::tool_started(
+                            item_id.clone(),
+                            name,
+                            frame.get("args").cloned().unwrap_or(Value::Null),
+                            Utc::now(),
+                        );
+                        item.tool.as_mut().unwrap().result =
+                            omp::text_content(&frame["partialResult"]);
+                        item
                     } else {
                         let result = omp::text_content(&frame["result"]);
-                        let (preview, _) = live_preview(&result);
                         TimelineItem::tool_completed(
                             item_id.clone(),
                             name,
-                            preview,
+                            result,
                             frame["isError"] == true,
                             Utc::now(),
                         )
@@ -164,6 +174,24 @@ impl SessionController {
                     changed_item = Some(item_id);
                 }
             }
+            "message_start" if frame["message"]["role"] == "assistant" => {
+                let engine_id = omp::string(&frame, "messageId");
+                if !engine_id.is_empty() {
+                    let id = format!("{generation}:{engine_id}");
+                    if !state.messages.iter().any(|item| item.id == id) {
+                        state.messages.push(TimelineItem {
+                            id,
+                            source_id: None,
+                            message_key: crate::tool_details::message_key(&frame["message"]),
+                            kind: "assistant".into(),
+                            text: String::new(),
+                            detail: "streaming".into(),
+                            tool: None,
+                            timestamp: Utc::now(),
+                        });
+                    }
+                }
+            }
             "message_update" if frame["assistantMessageEvent"]["type"] == "text_delta" => {
                 let engine_id = omp::string(&frame, "messageId");
                 if !engine_id.is_empty() {
@@ -174,25 +202,15 @@ impl SessionController {
                         if let Some(item) =
                             state.messages.iter_mut().find(|item| item.id == message_id)
                         {
-                            if item.detail != "preview_truncated" {
-                                let (preview, truncated) =
-                                    live_preview(&format!("{}{}", item.text, delta));
-                                item.text = preview;
-                                if truncated {
-                                    item.detail = "preview_truncated".into();
-                                }
-                            }
+                            item.text.push_str(delta);
                         } else {
-                            let (preview, truncated) = live_preview(delta);
                             state.messages.push(TimelineItem {
                                 id: message_id,
+                                source_id: None,
+                                message_key: crate::tool_details::message_key(&frame["message"]),
                                 kind: "assistant".into(),
-                                text: preview,
-                                detail: if truncated {
-                                    "preview_truncated".into()
-                                } else {
-                                    String::new()
-                                },
+                                text: delta.into(),
+                                detail: "streaming".into(),
                                 tool: None,
                                 timestamp: Utc::now(),
                             });
@@ -212,26 +230,25 @@ impl SessionController {
                     state.finalized_messages.insert(message_id.clone());
                     if !text.is_empty() {
                         changed_item = Some(message_id.clone());
-                        let (preview, truncated) = live_preview(&text);
+                        let source_id = Some(crate::tool_details::message_source(
+                            &frame["message"],
+                            engine_id,
+                        ));
                         if let Some(item) =
                             state.messages.iter_mut().find(|item| item.id == message_id)
                         {
-                            item.text = preview;
-                            item.detail = if truncated {
-                                "preview_truncated".into()
-                            } else {
-                                String::new()
-                            };
+                            item.text = text;
+                            item.source_id = source_id;
+                            item.message_key = crate::tool_details::message_key(&frame["message"]);
+                            item.detail.clear();
                         } else {
                             state.messages.push(TimelineItem {
                                 id: message_id,
+                                source_id,
+                                message_key: crate::tool_details::message_key(&frame["message"]),
                                 kind: kind.into(),
-                                text: preview,
-                                detail: if truncated {
-                                    "preview_truncated".into()
-                                } else {
-                                    String::new()
-                                },
+                                text,
+                                detail: String::new(),
                                 tool: None,
                                 timestamp: Utc::now(),
                             });
@@ -251,6 +268,7 @@ impl SessionController {
             for id in removed {
                 state.finalized_messages.remove(&id);
                 state.dirty_messages.remove(&id);
+                state.published_messages.remove(&id);
                 state.removed_messages.push(id);
             }
         }
@@ -296,10 +314,39 @@ impl SessionController {
                 .messages
                 .iter()
                 .filter(|item| dirty.contains(&item.id))
-                .cloned()
+                .map(TimelineItem::summary)
                 .collect::<Vec<_>>();
             (state.session.id.clone(), items, removed)
         };
+        let mut replacements = Vec::new();
+        for item in items {
+            let previous = state
+                .published_messages
+                .insert(item.id.clone(), item.clone());
+            if let Some(previous) = previous {
+                if serde_json::to_value(&previous).ok() == serde_json::to_value(&item).ok() {
+                    continue;
+                }
+                if item.tool.is_none() && item.text.starts_with(&previous.text) {
+                    let mut metadata = item.clone();
+                    metadata.text.clear();
+                    let mut old_metadata = previous.clone();
+                    old_metadata.text.clear();
+                    self.bus.publish(ServerEvent::MessagePatch {
+                        session_id: session_id.clone(),
+                        id: item.id.clone(),
+                        base_hash: hex::encode(Sha256::digest(previous.text.as_bytes())),
+                        hash: hex::encode(Sha256::digest(item.text.as_bytes())),
+                        append: item.text[previous.text.len()..].into(),
+                        metadata: (serde_json::to_value(&metadata).ok()
+                            != serde_json::to_value(&old_metadata).ok())
+                        .then_some(metadata),
+                    });
+                    continue;
+                }
+            }
+            replacements.push(item);
+        }
         if !removed.is_empty() {
             self.bus.publish(ServerEvent::Timeline {
                 session_id: session_id.clone(),
@@ -310,7 +357,7 @@ impl SessionController {
         }
         let mut chunk = Vec::new();
         let mut bytes = 0;
-        for item in items {
+        for item in replacements {
             let item_bytes = serde_json::to_vec(&item).map_or(LIVE_PATCH_LIMIT, |v| v.len());
             if bytes + item_bytes > LIVE_PATCH_LIMIT && !chunk.is_empty() {
                 self.bus.publish(ServerEvent::Timeline {
@@ -351,6 +398,7 @@ impl SessionController {
             state.finalized_messages.clear();
             state.pending_prompt_results.clear();
             state.dirty_messages.clear();
+            state.published_messages.clear();
             state.removed_messages.clear();
             state.display_flush_scheduled = false;
             self.publish_state(&mut state);

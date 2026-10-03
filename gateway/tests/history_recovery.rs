@@ -8,7 +8,7 @@ async fn fresh_session_without_transcript_has_empty_history_before_and_after_sto
     let h = Harness::new(1, vec!["--lazy-history".into()]).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let sessions = format!("{}/api/v3/sessions", h.url);
+    let sessions = format!("{}/api/v4/sessions", h.url);
     let cwd = h.cwd("empty-history");
     let record: Value = client
         .post(&sessions)
@@ -145,7 +145,7 @@ async fn aborted_prompt_with_missing_transcript_does_not_lose_history_mapping() 
     let client = reqwest::Client::new();
     let credential = h.pair().await;
     let cwd = h.cwd("aborted-history");
-    let sessions = format!("{}/api/v3/sessions", h.url);
+    let sessions = format!("{}/api/v4/sessions", h.url);
     let record: Value = client
         .post(&sessions)
         .bearer_auth(&credential)

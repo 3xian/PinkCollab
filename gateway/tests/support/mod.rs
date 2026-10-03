@@ -70,14 +70,14 @@ impl Harness {
     pub(crate) async fn pair(&self) -> String {
         let token = self.store.new_pairing().unwrap();
         let response = reqwest::Client::new()
-            .post(format!("{}/api/v3/pair", self.url))
+            .post(format!("{}/api/v4/pair", self.url))
             .json(&json!({"token":token,"name":"phone"}))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), 201);
         let body: Value = response.json().await.unwrap();
-        assert_eq!(body["protocolVersion"], 3);
+        assert_eq!(body["protocolVersion"], 4);
         assert_eq!(body["host"]["id"], self.host.id);
         body["credential"].as_str().unwrap().into()
     }
@@ -95,7 +95,7 @@ pub(crate) async fn create_session(
     credential: &str,
     cwd: &str,
 ) -> String {
-    let sessions = format!("{}/api/v3/sessions", harness.url);
+    let sessions = format!("{}/api/v4/sessions", harness.url);
     let response = client
         .post(&sessions)
         .bearer_auth(credential)

@@ -112,6 +112,7 @@ internal data class SessionListState(
         loadState == other.loadState && emptyState == other.emptyState && hosts.keys == other.hosts.keys && hosts.all { (id, host) ->
             val next = other.hosts.getValue(id)
             host.sessions == next.sessions && host.connection == next.connection &&
+                host.totalSessions == next.totalSessions && host.nextSessionsCursor == next.nextSessionsCursor &&
                 host.snapshotToken == next.snapshotToken && host.initialSync == next.initialSync &&
                 (host.connectionProgress != null) == (next.connectionProgress != null)
         }

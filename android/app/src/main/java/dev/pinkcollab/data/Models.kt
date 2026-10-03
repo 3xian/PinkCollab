@@ -87,8 +87,13 @@ data class ToolArguments(
             runCatching { from(JSONObject(raw)) }.getOrElse { ToolArguments() }
     }
 }
-data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean, val todoPhases: List<TodoPhase>? = null)
-data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null)
+data class ToolSummary(val action: String, val target: String, val files: List<String>, val error: String)
+data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean, val todoPhases: List<TodoPhase>? = null,
+    val summary: ToolSummary? = null, val detailsVersion: String = "", val detailsAvailable: Boolean = false)
+data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null, val sourceId: String? = null, val messageKey: String? = null)
+data class ToolDetailPage(val text: String, val version: String, val nextCursor: String?, val completed: Boolean,
+    val resumeCursor: String? = nextCursor, val hasMore: Boolean = nextCursor != null)
+data class HistoryConfirmation(val id: String, val item: TimelineItem, val textHash: String)
 sealed interface OperationStatus {
     data object Pending : OperationStatus
     data object Succeeded : OperationStatus
@@ -131,6 +136,11 @@ sealed interface SavedHistory {
         override val sourceId: String?,
         override val items: List<TimelineItem>,
         override val nextCursor: String?,
+        val branchLeaf: String? = null,
+        val continues: Boolean = false,
+        val syncCursor: String? = null,
+        val confirmed: List<HistoryConfirmation> = emptyList(),
+        val order: List<String> = emptyList(),
     ) : SavedHistory
     data object Failed : SavedHistory
 }
@@ -145,6 +155,8 @@ data class SessionDetail(
     val savedHistory: SavedHistory = SavedHistory.None,
     val liveItems: List<TimelineItem> = emptyList(),
     val historyEpoch: Long = 0,
+    val serverEpoch: String? = null,
+    val wireSequence: Long = 0,
 )
 data class Workspace(val name: String, val path: String)
 data class Listing(val path: String, val parent: String?, val directories: List<Workspace>)
@@ -176,6 +188,12 @@ data class HostState(
     val lastSyncedAtEpochMillis: Long? = null,
     val initialSync: InitialSyncState = InitialSyncState.Pending,
     val connectionProgress: ConnectionProgress? = null,
+    val serverEpoch: String? = null,
+    val wireSequence: Long = 0,
+    val todoPlans: Map<String, List<TodoPhase>> = emptyMap(),
+    val totalSessions: Int? = null,
+    val catalogVersion: String? = null,
+    val nextSessionsCursor: String? = null,
 ) {
     val connected: Boolean get() = connection is ConnectionState.Online
 
@@ -237,7 +255,7 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
         SessionStatus.NeedsInput -> "Waiting for input"
         SessionStatus.Idle -> if (optString("origin") == "discovered") "History on host" else "Ready to continue"
     }
-    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() },
+    return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null || (runtime?.optInt("pendingInputCount") ?: 0) > 0, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() },
         runtime?.optJSONObject("workTiming")?.takeIf { it.has("elapsedMs") }?.let {
             WorkTiming(it.optLong("elapsedMs").coerceAtLeast(0), it.optBoolean("running"), it.optBoolean("completed"))
         }, when (optString("origin", "managed")) {
@@ -249,7 +267,7 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
 fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))
 fun JSONObject.receipt() = OperationReceipt(getString("id"), OperationStatus.fromWire(getString("state")), getString("kind"),
     optJSONObject("error")?.optString("code"), optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() })
-fun JSONObject.item(): TimelineItem {
+fun JSONObject.item(todoPlans: Map<String, List<TodoPhase>> = emptyMap()): TimelineItem {
     val tool = optJSONObject("tool")?.let {
         val arguments = when (val value = it.opt("arguments")) {
             is JSONObject -> ToolArguments.from(value)
@@ -263,10 +281,17 @@ fun JSONObject.item(): TimelineItem {
             result = it.optString("result"),
             isError = it.optBoolean("isError"),
             completed = it.optBoolean("completed"),
-            todoPhases = it.optJSONArray("todoPhases")?.let(::parseTodoPhases),
+            todoPhases = it.optString("todoRef").takeIf(String::isNotBlank)?.let { ref ->
+                todoPlans[ref] ?: error("Missing Todo payload: $ref")
+            } ?: it.optJSONArray("todoPhases")?.let(::parseTodoPhases),
+            summary = it.optJSONObject("summary")?.let { summary -> ToolSummary(
+                summary.getString("action"), summary.getString("target"), summary.getJSONArray("files").strings(), summary.getString("error")) },
+            detailsVersion = it.optString("detailsVersion"),
+            detailsAvailable = it.optBoolean("detailsAvailable"),
         )
     }
-    return TimelineItem(getString("id"), getString("kind"), getString("text"), optString("detail"), getString("timestamp"), tool)
+    return TimelineItem(getString("id"), getString("kind"), getString("text"), optString("detail"), getString("timestamp"), tool,
+        (opt("sourceId") as? String)?.takeIf(String::isNotBlank), (opt("messageKey") as? String)?.takeIf(String::isNotBlank))
 }
 fun JSONObject.modelInfo() = ModelInfo(
     provider = getString("provider"),

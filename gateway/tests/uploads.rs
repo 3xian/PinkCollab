@@ -10,7 +10,7 @@ async fn uploaded_files_reach_the_matching_omp_session() {
     let h = Harness::new(1, vec!["--record-prompt-frame".into()]).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let sessions = format!("{}/api/v3/sessions", h.url);
+    let sessions = format!("{}/api/v4/sessions", h.url);
     let record: Value = client
         .post(&sessions)
         .bearer_auth(&credential)
@@ -244,7 +244,7 @@ async fn queued_image_over_frame_limit_fails_instead_of_disappearing() {
     let client = reqwest::Client::new();
     let credential = h.pair().await;
     let session: Value = client
-        .post(format!("{}/api/v3/sessions", h.url))
+        .post(format!("{}/api/v4/sessions", h.url))
         .bearer_auth(&credential)
         .json(&json!({"commandId":"create-frame-limit","hostId":h.host.id,"cwd":h.cwd("frame-limit")}))
         .send()
@@ -254,7 +254,7 @@ async fn queued_image_over_frame_limit_fails_instead_of_disappearing() {
         .await
         .unwrap();
     let session_url = format!(
-        "{}/api/v3/sessions/{}",
+        "{}/api/v4/sessions/{}",
         h.url,
         session["id"].as_str().unwrap()
     );

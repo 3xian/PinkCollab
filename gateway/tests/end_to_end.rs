@@ -12,7 +12,7 @@ async fn interrupt_is_admitted_after_an_accepted_prompt_reaches_omp() {
     let client = reqwest::Client::new();
     let credential = h.pair().await;
     let cwd = h.cwd("interrupt-order");
-    let sessions = format!("{}/api/v3/sessions", h.url);
+    let sessions = format!("{}/api/v4/sessions", h.url);
     let record: Value = client
         .post(&sessions)
         .bearer_auth(&credential)
@@ -76,7 +76,7 @@ async fn response_reaches_omp_while_prompt_ack_is_pending() {
     let h = Harness::new(1, vec![]).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let sessions = format!("{}/api/v3/sessions", h.url);
+    let sessions = format!("{}/api/v4/sessions", h.url);
     let record: Value = client
         .post(&sessions)
         .bearer_auth(&credential)
@@ -151,7 +151,7 @@ async fn stopping_runtime_rejects_new_work_until_exit_is_confirmed() {
     let h = Harness::new(1, vec!["--linger-on-eof".into()]).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let sessions = format!("{}/api/v3/sessions", h.url);
+    let sessions = format!("{}/api/v4/sessions", h.url);
     let record: Value = client
         .post(&sessions)
         .bearer_auth(&credential)
@@ -250,7 +250,7 @@ async fn protocol_session_list_pages_by_stable_creation_order() {
     let h = Harness::new(1, vec![]).await;
     let client = reqwest::Client::new();
     let credential = h.pair().await;
-    let endpoint = format!("{}/api/v3/sessions", h.url);
+    let endpoint = format!("{}/api/v4/sessions", h.url);
     for number in 0..3 {
         let response = client
             .post(&endpoint)
@@ -302,7 +302,7 @@ async fn protocol_lazy_session_prompt_receipt_and_generation_bound_stop() {
     let credential = h.pair().await;
     let cwd = h.cwd("v2-task");
     let create = json!({"commandId":"create-one","hostId":h.host.id,"cwd":cwd});
-    let endpoint = format!("{}/api/v3/sessions", h.url);
+    let endpoint = format!("{}/api/v4/sessions", h.url);
     let response = client
         .post(&endpoint)
         .bearer_auth(&credential)
@@ -420,8 +420,22 @@ async fn protocol_lazy_session_prompt_receipt_and_generation_bound_stop() {
         .find(|item| item["kind"] == "tool")
         .expect("live tool result");
     assert_eq!(tool["tool"]["name"], "bash");
-    assert_eq!(tool["tool"]["arguments"]["command"], "cargo test");
-    assert_eq!(tool["tool"]["result"], "tests passed");
+    assert!(tool["tool"]["arguments"].is_null());
+    assert!(tool["tool"]["result"].is_null());
+    assert_eq!(tool["tool"]["summary"]["target"], "cargo test");
+    let details: Value = client
+        .get(format!(
+            "{endpoint}/{id}/tools/{}",
+            tool["tool"]["callId"].as_str().unwrap()
+        ))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(details["text"].as_str().unwrap().contains("tests passed"));
     let early_settled = json!({"commandId":"prompt-settled-first","type":"prompt","message":"settle before ack","generation":generation});
     assert_eq!(
         client
@@ -534,7 +548,7 @@ async fn protocol_websocket_snapshot_precedes_ordered_events() {
     }
     let h = Harness::new(1, vec![]).await;
     let credential = h.pair().await;
-    let mut request = format!("{}/api/v3/events", h.url.replace("http://", "ws://"))
+    let mut request = format!("{}/api/v4/events", h.url.replace("http://", "ws://"))
         .into_client_request()
         .unwrap();
     request.headers_mut().insert(
@@ -544,10 +558,10 @@ async fn protocol_websocket_snapshot_precedes_ordered_events() {
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
     let first = next_json(&mut socket).await;
     assert_eq!(first["type"], "host_snapshot");
-    assert_eq!(first["protocolVersion"], 3);
+    assert_eq!(first["protocolVersion"], 4);
     let client = reqwest::Client::new();
     let response: Value = client
-        .post(format!("{}/api/v3/sessions", h.url))
+        .post(format!("{}/api/v4/sessions", h.url))
         .bearer_auth(&credential)
         .json(&json!({"commandId":"create-ws","hostId":h.host.id,"cwd":h.cwd("ws")}))
         .send()
@@ -574,7 +588,7 @@ async fn protocol_websocket_snapshot_precedes_ordered_events() {
     assert!(detail["runtime"].is_null());
     assert_eq!(
         client
-            .post(format!("{}/api/v3/sessions/{id}/commands", h.url))
+            .post(format!("{}/api/v4/sessions/{id}/commands", h.url))
             .bearer_auth(&credential)
             .json(&json!({"commandId":"prompt-ws","type":"prompt","message":"hello"}))
             .send()
@@ -610,7 +624,7 @@ async fn protocol_resume_keeps_transcript_and_uses_new_generation() {
     let credential = h.pair().await;
     let client = reqwest::Client::new();
     let create: Value = client
-        .post(format!("{}/api/v3/sessions", h.url))
+        .post(format!("{}/api/v4/sessions", h.url))
         .bearer_auth(&credential)
         .json(&json!({"commandId":"create-resume","hostId":h.host.id,"cwd":h.cwd("resume")}))
         .send()
@@ -620,7 +634,7 @@ async fn protocol_resume_keeps_transcript_and_uses_new_generation() {
         .await
         .unwrap();
     let id = create["id"].as_str().unwrap();
-    let session_url = format!("{}/api/v3/sessions/{id}", h.url);
+    let session_url = format!("{}/api/v4/sessions/{id}", h.url);
     let commands = format!("{session_url}/commands");
     assert_eq!(
         client
@@ -854,8 +868,13 @@ async fn protocol_resume_keeps_transcript_and_uses_new_generation() {
         .send()
         .await
         .unwrap();
-    assert_eq!(stale.status(), 409);
-    assert_eq!(stale.json::<Value>().await.unwrap()["code"], "stale_cursor");
+    assert_eq!(stale.status(), 200);
+    assert!(
+        !stale.json::<Value>().await.unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -871,65 +890,4 @@ async fn v1_routes_explain_the_breaking_upgrade() {
         response.json::<Value>().await.unwrap()["code"],
         "protocol_upgrade_required"
     );
-}
-
-#[tokio::test]
-async fn live_todo_snapshot_survives_result_preview_truncation() {
-    let h = Harness::new(1, vec![]).await;
-    let client = reqwest::Client::new();
-    let credential = h.pair().await;
-    let sessions = format!("{}/api/v3/sessions", h.url);
-    let record: Value = client
-        .post(&sessions)
-        .bearer_auth(&credential)
-        .json(&json!({"commandId":"create","hostId":h.host.id,"cwd":h.cwd("todo-snapshot")}))
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let session = format!("{sessions}/{}", record["id"].as_str().unwrap());
-    let response = client
-        .post(format!("{session}/commands"))
-        .bearer_auth(&credential)
-        .json(&json!({"commandId":"prompt","type":"prompt","message":"todo snapshot"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 202);
-    wait_operation(
-        &client,
-        &format!("{session}/operations/prompt"),
-        &credential,
-        "succeeded",
-    )
-    .await;
-    let view: Value = client
-        .get(&session)
-        .bearer_auth(&credential)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    let trace = &view["timeline"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["tool"]["name"] == "todo")
-        .expect("live Todo result")["tool"];
-    assert!(
-        trace["result"]
-            .as_str()
-            .unwrap()
-            .contains("Live preview truncated")
-    );
-    assert_eq!(
-        trace["todoPhases"][0]["tasks"][0]["content"],
-        "Verify (dropped)"
-    );
-    assert_eq!(trace["todoPhases"][0]["tasks"][0]["status"], "pending");
-    assert_eq!(trace["arguments"]["op"], "init");
 }

@@ -155,8 +155,11 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                     scope.launch { snackbar.showSnackbar("Current version: v${BuildConfig.VERSION_NAME}") }
                                 },
                                 session = vm::onSessionAction,
+                                loadToolDetails = vm::loadToolDetails,
                                 applyModelSettings = vm::applyModelSettings,
                                 retryHost = vm::refreshHost,
+                                loadMoreSessions = vm::loadMoreSessions,
+                                ensureSessionListed = vm::ensureSessionListed,
                             ),
                         )
 

@@ -1,6 +1,6 @@
 {
   "name": "@pinkcollab/gateway-win32-x64",
-  "version": "2.4.3",
+  "version": "3.0.0",
   "description": "PinkCollab Gateway binary for Windows x64",
   "license": "MIT",
   "repository": {

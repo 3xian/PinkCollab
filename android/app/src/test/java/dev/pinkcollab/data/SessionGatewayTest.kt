@@ -48,6 +48,24 @@ class SessionGatewayTest {
         { _, _ -> },
     )
 
+    @Test fun append_refresh_retains_loaded_history_but_branch_change_replaces_it() = runTest {
+        val key = SessionKey("host", "session")
+        val old = TimelineItem("old", "user", "older loaded page", "", "")
+        val tail = TimelineItem("tail", "assistant", "recent reply", "", "", sourceId = "tail-source")
+        val ready = loadingDetail().copy(savedHistory = SavedHistory.Ready("old-source", listOf(old), "old-cursor", branchLeaf = "old-leaf"), liveItems = listOf(tail))
+        val state = MutableStateFlow(AppState(details = mapOf(key to ready)))
+        var continues = true
+        val gateway = gatewayWith(state, HistoryTransport {
+            """{"source":{"id":"new-source","branchLeaf":"new-leaf","continues":$continues},"items":[{"id":"entry-tail","sourceId":"tail-source","kind":"assistant","text":"recent reply","detail":"","timestamp":""}],"nextCursor":"new-cursor"}"""
+        })
+        gateway.loadHistory("host", "session", "sub")
+        assertEquals(listOf("old", "tail"), state.value.details.getValue(key).savedHistory.items.map { it.id })
+        assertEquals("new-cursor", state.value.details.getValue(key).savedHistory.nextCursor)
+        continues = false
+        gateway.loadHistory("host", "session", "sub")
+        assertEquals(listOf("entry-tail"), state.value.details.getValue(key).savedHistory.items.map { it.id })
+    }
+
     @Test fun discovered_history_load_and_recoverable_error() = runTest {
         val key = SessionKey("host", "session")
         val initial = loadingDetail().let { it.copy(session = it.session.copy(origin = SessionOrigin.Discovered)) }
@@ -86,7 +104,7 @@ class SessionGatewayTest {
         yield()
         assertFalse(pending.isCompleted)
         assertEquals(SavedHistory.Loading, state.value.details.getValue(key).savedHistory)
-        state.update { it.copy(details = mapOf(key to running.copy(session = running.session.copy(
+        state.update { it.copy(details = mapOf(key to it.details.getValue(key).copy(session = running.session.copy(
             status = SessionStatus.Idle)))) }
         pending.await()
         assertEquals(2, requests)
@@ -276,5 +294,25 @@ class SessionGatewayTest {
         assertTrue(focused)
         assertEquals("new", state.value.details[first]?.snapshotToken)
         assertEquals("other", state.value.details[second]?.snapshotToken)
+    }
+
+    @Test fun history_confirmation_preserves_body_and_ui_identity_and_changed_tools_keep_their_position() = runTest {
+        val key = SessionKey("host", "session")
+        val oldTool = TimelineItem("tool-ui", "tool", "", "", "", ToolTrace("call", "bash", ToolArguments(), "", false, completed = false, detailsVersion = "v1"), sourceId = "tool:call")
+        val oldMessage = TimelineItem("old-ui", "assistant", "older", "", "", sourceId = "old")
+        val live = TimelineItem("live-ui", "assistant", "complete reply", "", "", sourceId = "final")
+        val detail = loadingDetail().copy(session = loadingDetail().session.copy(runtimeAttached = true),
+            savedHistory = SavedHistory.Ready("old", listOf(oldTool, oldMessage), null, branchLeaf = "leaf"), liveItems = listOf(live))
+        val state = MutableStateFlow(AppState(details = mapOf(key to detail)))
+        val response = JSONObject().put("source", JSONObject().put("id", "next").put("branchLeaf", "next").put("continues", true))
+            .put("items", org.json.JSONArray().put(JSONObject("""{"id":"call","sourceId":"tool:call","kind":"tool","text":"","timestamp":"","tool":{"callId":"call","name":"bash","completed":true,"detailsVersion":"v2"}}""")))
+            .put("confirmed", org.json.JSONArray().put(JSONObject().put("id", "live-ui").put("textHash", textHash(live.text))
+                .put("item", JSONObject("""{"id":"saved-final","sourceId":"final","kind":"assistant","text":"","timestamp":""}"""))))
+            .put("order", org.json.JSONArray(listOf("tool:call", "final")))
+        gatewayWith(state, HistoryTransport { response.toString() }).loadHistory("host", "session", "sub")
+        val saved = state.value.details.getValue(key).savedHistory.items
+        assertEquals(listOf("tool-ui", "old-ui", "live-ui"), saved.map { it.id })
+        assertTrue(saved.first().tool!!.completed)
+        assertEquals("complete reply", saved.last().text)
     }
 }

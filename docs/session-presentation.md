@@ -70,7 +70,7 @@ flowchart TD
 
 ### Protocol 3 boundary
 
-Android consumes the flat protocol 3 events through `ProtocolReducer`; OMP frame names in section 3.2 describe Gateway inputs, not Android wire events.
+Android consumes the flat protocol 4 events through `ProtocolReducer`; OMP frame names in section 3.2 describe Gateway inputs, not Android wire events.
 
 | Wire input | Presentation update |
 | --- | --- |
@@ -93,13 +93,13 @@ The switcher uses the existing theme palette for status dots and labels: Ready i
 
 ### 2.1 Ordering and source boundaries
 
-- The page renders saved history first, then attached-runtime live items. When both sections are present, a divider warns that saved messages may repeat in live updates.
-- These are separate reads without cross-source atomicity. Do not deduplicate them by matching text or guessed ID relationships.
-- Live IDs are runtime-generation scoped. A reset clears the live tail; patches replace matching IDs, append new IDs, and remove explicitly removed IDs.
+- The page renders one conversation timeline. History defines branch order; live items replace shared identities and extend that timeline. There is no separate live section or duplicate-message warning.
+- Gateway supplies `sourceId` for final messages, derived from the message's role, original timestamp and complete text. RPC process-local IDs and JSONL entry IDs are not interchangeable. `messageKey` bridges persistence-before-message-end races only when the lifecycle timestamp is unambiguous in both sources. Never deduplicate by text alone.
+- RPC message IDs remain runtime-generation scoped; tool call IDs are shared with history. Patches replace IDs and remove live-window entries. Completed entries leaving that window are retained in the loaded conversation until authoritative history replaces them. Final history retains the live item's UI key during handoff.
 - A tool result updates its existing call rather than creating a second operation. Gateway merging retains the call's original position and timestamp, fills missing metadata, and does not undo completion or error flags.
 - Assistant text deltas update an assistant item. The final message replaces the matching draft; late deltas cannot extend a finalized message.
 - Timestamps are display metadata, not a reason to reorder items. Message labels use local time, adding a date for older messages; invalid timestamps have no label.
-- Live previews can be bounded or truncated. History remains the source for durable content; the phone's preview is not a second transcript authority.
+- User and assistant text is complete, including long streaming replies and final messages. The live window is bounded by item count, not an 8 KiB text preview. History remains the durable authority. Turn settlement refreshes history without clearing the visible conversation. An `anchor` branch leaf lets Gateway prove append continuity before retaining previously loaded pages; changing branches replaces their content.
 
 ## 3. Source type catalog
 
@@ -107,7 +107,7 @@ The switcher uses the existing theme palette for status dots and labels: Ready i
 
 `TimelineItem` contains `id`, `kind`, `text`, `detail`, `timestamp`, and an optional `tool` payload.
 
-A structured `ToolTrace` contains `callId`, `name`, `arguments`, `result`, `isError`, and `completed`. Structured fields, not phrases in `text`, determine tool state. Android retains raw argument JSON and extracts string and string-list fields for summaries.
+A timeline `ToolTrace` contains `callId`, `name`, `isError`, `completed`, `summary`, `detailsAvailable`, `detailsVersion`, and optional `todoPhases`. `arguments` is null and `result` is empty in every snapshot, live patch and history page. Gateway extracts bounded summary action, target, affected files and error text. Structured flags, not display phrases, determine tool state.
 
 | `kind` / condition | Current producer | Concise presentation | Boundary / update behavior |
 | --- | --- | --- | --- |
@@ -168,7 +168,7 @@ Stages control grouping and specialized change details. They do not prove what a
 1. Consecutive structured tool items with the same stage join one group.
 2. A stage change, nonblank user/assistant message, standalone error, or unstructured tool item flushes the group.
 3. Ignored items do not split a group. End of input flushes the remaining group.
-4. Saved history and live items are projected separately; groups never cross that source boundary.
+4. Saved history and live items are merged before projection; source handoff does not split a group.
 5. The focus operation is the last running operation, otherwise the last failed operation, otherwise the last operation.
 6. The group summary uses the focus target, falling back to the group's extracted changed-file paths. All operations remain available on expansion.
 
@@ -183,13 +183,13 @@ Stages control grouping and specialized change details. They do not prove what a
 | Group | No operation running, any failed | Failed tint |
 | Group | All operations succeeded | Completed tint |
 
-A running structured activity animates only when it belongs to the live section, the host is connected, and runtime execution is active. Otherwise it uses an hourglass and `Last seen running`. This changes presentation, not the stored tool result.
+A running structured activity animates only when its call ID is still an incomplete live operation, the host is connected, and runtime execution is active. Otherwise it uses an hourglass and `Last seen running`. This changes presentation, not the stored tool result.
 
 Activity cards toggle expansion when tapped anywhere on the card, except where an operation's independent detail control or a selection/scroll gesture handles the input. A decorative chevron sits in a dedicated header row with a 20dp right inset matching the title's 20dp left inset; there is no Details/status-label row. The chevron stays beside the header when expanded, and operation details below it use the full content width. Accessibility exposes the card's expand/collapse action and expanded state. Below the summary, one horizontal icon per operation shows its actual status, with accessible action/status labels. Adjacent 18dp icons overlap by 4dp. The row scrolls without a count cap. On first appearance, icons fade in from left to right, staggered by 70ms with a 280ms fade per icon and no scaling. Each newly appended batch gets the same left-to-right entrance and scrolls into view; previously displayed icons do not replay on status updates, expansion, or horizontal scrolling back.
 
 Entrance batches use absolute monotonic completion deadlines. An icon first composed after its deadline is immediately opaque; an icon composed earlier consumes only the remaining delay and fade. Lazy scrolling never restarts an expired entrance.
 
-**Current limitation:** that timeline qualification is section-wide. Unlike the work-status strip, it does not filter individual groups to the newest user turn. Do not interpret every retained unfinished live tool as independent proof of current execution.
+**Current limitation:** unlike the work-status strip, timeline qualification does not filter individual groups to the newest user turn. Do not interpret every retained unfinished live tool as independent proof of current execution.
 
 ### 5.4 Action and target extraction
 
@@ -205,19 +205,11 @@ Argument intent is supplied descriptive text, not a verified conclusion. Long su
 
 ### 5.5 Detail types
 
-Each `ActivityOperation` has its own optional `ActivityDetailKind`. No detail kind is assigned when its detail text is blank.
+Each tool operation with `detailsAvailable` has an independent detail control. Expanding a group shows operation summaries; expanding an operation requests its details. A single-operation group's automatic detail expansion also initiates that read. The debug/raw renderer uses the same loader.
 
-| Detail kind | Selection / source | Expansion label |
-| --- | --- | --- |
-| `Diff` | Change tool with a nonblank patch/diff, or a path plus old/new strings | View diff |
-| `Content` | Change tool with content, optionally preceded by a path | View content |
-| `Changes` | Change tool with nonblank result and no richer change representation | View changes |
-| `Error` | Nonblank details with an error flag and no selected change detail kind | View error |
-| `Operation` | Remaining nonblank argument/output details | View arguments & output |
+Details come from authenticated `GET /api/v4/sessions/:id/tools/:callId?cursor=...`: current calls use Gateway memory and retired calls use the active OMP history branch. Each page carries complete UTF-8 text up to 32 KiB, an opaque prefix-hash/byte-offset cursor and a content version. Android caches by session, runtime generation, call ID and version, deduplicates requests, limits refreshes to two per second per call, and retains opened panels while evicting idle cached content over 4 MiB. In-flight failures appear locally with Retry. Load more and running-tail polling append only after the server validates the received prefix; a rewritten prefix reloads the first page. Completion reuses the resume cursor without duplicating arguments. Ordinary output progress keeps the summary version stable; start/availability changes and final status update summaries without folded payloads. Expanded running tails poll at 500 ms intervals; collapse or disposal stops polling.
 
-Change-detail precedence is patch/diff, old/new with path, content, then result. A synthesized old/new diff is a display of supplied strings, not a verified repository diff. File extraction accepts direct/list arguments and recognized unified or patch-header paths; it is not a filesystem audit.
-
-Generic details show raw argument JSON, falling back to extracted fields. A separate output section is added when nonblank and not identical to the selected change detail. Change-specific details replace the generic argument section.
+The expanded detail stream shows pretty-printed argument JSON followed by full output. Patch and file content remain lossless within their arguments. Summary file extraction accepts direct/list arguments and recognized unified or patch-header paths; it is not a filesystem audit.
 
 Groups start collapsed. Opening a single-operation group opens that operation's output; multi-operation groups expose per-operation expanders. Expanded output is selectable and vertically scrollable within a bounded height.
 
@@ -299,7 +291,7 @@ Attention requests use an inset, neutral card with proportional reading text and
 
 Only the last receipt is considered for the page's notice:
 
-| Protocol 3 receipt state (Android status) | Presentation |
+| Protocol 4 receipt state (Android status) | Presentation |
 | --- | --- |
 | `unknown` (`OutcomeUnknown`) or unrecognized status | Result cannot be confirmed; inspect the conversation before trying again |
 | `failed` (`Failed`), prompt command | Message could not be sent |
@@ -370,7 +362,7 @@ These are behavior checks, not requirements to pin exact wording in tests.
 | Load history containing incomplete tools | Historical tools use static hourglasses and do not drive current work; entrance fades are presentation-only |
 | Lose history connectivity after showing messages | Keep retained content and expose recovery, not false emptiness |
 | Scroll back while new work arrives | Reading position is respected; current-work strip remains visible |
-| Receive assistant text deltas through protocol 3 | Existing assistant content updates; no duplicate final message or invented streaming event |
+| Receive assistant text deltas through protocol 4 | Existing assistant content updates; no duplicate final message or invented streaming event |
 
 ## 10. Extension checklist and implementation map
 

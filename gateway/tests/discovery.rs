@@ -112,7 +112,7 @@ async fn external_history_first_prompt_adopts_once_and_resumes_original_transcri
     let before = std::fs::read(&path).unwrap();
     let client = reqwest::Client::new();
     let token = h.pair().await;
-    let list_url = format!("{}/api/v3/sessions", h.url);
+    let list_url = format!("{}/api/v4/sessions", h.url);
     let list = get(&client, &list_url, &token).await;
     let discovered = &list["sessions"][0];
     assert_eq!(discovered["session"]["origin"], "discovered");
@@ -226,7 +226,7 @@ async fn corrupt_and_deleted_sources_fail_without_creating_empty_sessions() {
     std::fs::write(files.path().join("bad-header.jsonl"), "bad").unwrap();
     let client = reqwest::Client::new();
     let token = h.pair().await;
-    let list_url = format!("{}/api/v3/sessions", h.url);
+    let list_url = format!("{}/api/v4/sessions", h.url);
     let list = get(&client, &list_url, &token).await;
     assert_eq!(list["sessions"].as_array().unwrap().len(), 1);
     let id = list["sessions"][0]["session"]["id"].as_str().unwrap();

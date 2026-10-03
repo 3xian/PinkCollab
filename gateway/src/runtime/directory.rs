@@ -58,6 +58,7 @@ impl SessionDirectory {
                 pending_prompt_results: HashMap::new(),
                 settled_revision: 0,
                 dirty_messages: HashSet::new(),
+                published_messages: HashMap::new(),
                 removed_messages: Vec::new(),
                 display_flush_scheduled: false,
             }),
@@ -146,6 +147,17 @@ impl SessionDirectory {
             }
         }
         Ok(view)
+    }
+
+    pub async fn live_tool(&self, id: &str, call_id: &str) -> Option<crate::model::ToolTrace> {
+        let controller = self.active_controller(id).await?;
+        let state = controller.state.lock().await;
+        state
+            .messages
+            .iter()
+            .filter_map(|item| item.tool.as_ref())
+            .find(|tool| tool.call_id == call_id)
+            .cloned()
     }
     async fn discoveries(&self) -> Result<Vec<crate::discovery::OmpDiscoveredSession>> {
         let mut discovery = self.discovery.clone().lock_owned().await;

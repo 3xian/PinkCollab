@@ -128,12 +128,12 @@ private fun Modifier.userMessageBand(
 
 
 @Composable
-internal fun DisplayItem(item: SessionDisplayItem, renderer: SessionMarkdownRenderer, liveActivity: Boolean = false) {
+internal fun DisplayItem(item: SessionDisplayItem, renderer: SessionMarkdownRenderer, liveActivity: Boolean = false, toolDetails: ToolDetailsController? = null) {
     when (item) {
         is SessionDisplayItem.Message -> MessageCard(item, renderer)
-        is SessionDisplayItem.ActivityGroup -> ActivityGroupCard(item, liveActivity)
+        is SessionDisplayItem.ActivityGroup -> ActivityGroupCard(item, liveActivity, toolDetails)
         is SessionDisplayItem.Error -> ErrorCard(item)
-        is SessionDisplayItem.Raw -> RawTimelineCard(item.item, renderer)
+        is SessionDisplayItem.Raw -> RawTimelineCard(item.item, renderer, toolDetails)
     }
 }
 
@@ -316,7 +316,7 @@ private fun MarkdownBody(messageId: String, markdown: String, color: Color, rend
 }
 
 @Composable
-private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean) {
+private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean, toolDetails: ToolDetailsController?) {
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
     val activityTint = activityColor(group.status)
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(260), label = "activityArrow")
@@ -366,7 +366,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
         }
         if (expanded) {
             group.operations.forEach { operation ->
-                key(operation.id) { ActivityOperationDetails(operation, initiallyExpanded = group.operationCount == 1, liveActivity = liveActivity) }
+                key(operation.id) { ActivityOperationDetails(operation, initiallyExpanded = group.operationCount == 1, liveActivity = liveActivity, toolDetails = toolDetails) }
             }
         }
     }
@@ -429,7 +429,7 @@ private fun ActivityOperationIcons(group: SessionDisplayItem.ActivityGroup, live
 }
 
 @Composable
-private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpanded: Boolean, liveActivity: Boolean) {
+private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpanded: Boolean, liveActivity: Boolean, toolDetails: ToolDetailsController?) {
     var expanded by rememberSaveable(operation.id) { mutableStateOf(initiallyExpanded) }
     Column(
         Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.025f), RoundedCornerShape(8.dp)).padding(10.dp),
@@ -443,7 +443,9 @@ private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpa
         operation.detailKind?.let { kind ->
             DetailToggle(kind.action, expanded, onClick = { expanded = !expanded })
             if (expanded) {
-                SelectionContainer {
+                if (operation.detailsAvailable && toolDetails != null) {
+                    ToolDetailPanel(operation.callId, operation.detailsVersion, toolDetails)
+                } else SelectionContainer {
                     Text(
                         operation.details,
                         modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
@@ -529,7 +531,7 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
 }
 
 @Composable
-private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRenderer) {
+private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRenderer, toolDetails: ToolDetailsController?) {
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
     val isUser = item.kind == "user"
     val colors = MaterialTheme.colorScheme
@@ -589,10 +591,12 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
                 )
             }
         }
-        if (isDetail && detail.isNotBlank()) {
+        if (isDetail && (detail.isNotBlank() || item.tool?.detailsAvailable == true)) {
             DetailToggle("Details", expanded, onClick = { expanded = !expanded })
             if (expanded) {
-                Text(
+                if (item.tool?.detailsAvailable == true && toolDetails != null) {
+                    ToolDetailPanel(item.tool.callId, item.tool.detailsVersion, toolDetails)
+                } else Text(
                     detail,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMid,

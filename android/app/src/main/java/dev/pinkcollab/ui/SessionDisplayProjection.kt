@@ -19,6 +19,9 @@ data class ActivityOperation(
     val status: ActivityStatus,
     val details: String,
     val detailKind: ActivityDetailKind?,
+    val callId: String = id,
+    val detailsVersion: String = "",
+    val detailsAvailable: Boolean = false,
 )
 
 sealed interface SessionDisplayItem {
@@ -61,8 +64,8 @@ fun projectSessionTimeline(
     mode: SessionDisplayMode = SessionDisplayMode.Concise,
 ): List<SessionDisplayItem> {
     if (mode == SessionDisplayMode.Debug) {
-        return timeline.mapIndexed { index, item ->
-            SessionDisplayItem.Raw("raw:${item.id}:$index", item)
+        return timeline.map { item ->
+            SessionDisplayItem.Raw("raw:${item.id}", item)
         }
     }
 
@@ -74,24 +77,24 @@ fun projectSessionTimeline(
         group = null
     }
 
-    timeline.forEachIndexed { index, item ->
+    timeline.forEach { item ->
         if (item.kind == "tool") {
             val trace = item.tool
             if (trace != null) {
                 // Structured plans belong to the pinned panel and do not split activity groups.
-                if (trace.isTodoSnapshot() && trace.todoPhases != null) return@forEachIndexed
+                if (trace.isTodoSnapshot() && trace.todoPhases != null) return@forEach
                 val stage = toolIdentity(trace.name).activityStage
                 if (group?.stage != stage) {
                     flushGroup()
-                    group = MutableActivityGroup(stage, "activity:${item.id}:$index")
+                    group = MutableActivityGroup(stage, "activity:${item.id}")
                 }
                 group?.add(trace)
             } else {
                 // Older or partial tool events still belong in the timeline; do not invent status.
                 flushGroup()
-                output += SessionDisplayItem.Raw("tool:${item.id}:$index", item)
+                output += SessionDisplayItem.Raw("tool:${item.id}", item)
             }
-            return@forEachIndexed
+            return@forEach
         }
 
         when (item.kind) {
@@ -127,18 +130,21 @@ private class MutableActivityGroup(
             trace to if (stage == ActivityStage.Change) extractFiles(trace) else emptyList()
         }
         val files = scanned.flatMap { it.second }.distinct()
-        val operations = scanned.mapIndexed { index, (trace, paths) ->
+        val operations = scanned.map { (trace, paths) ->
             val change = if (stage == ActivityStage.Change) changeDetail(trace, paths) else null
             val details = operationDetails(trace, change)
             ActivityOperation(
-                id = "${trace.callId}:$index",
+                id = trace.callId,
                 name = trace.name,
                 action = operationAction(trace),
                 target = operationTarget(trace),
                 status = operationStatus(trace),
                 details = details,
-                detailKind = if (details.isBlank()) null else change?.kind
+                detailKind = if (trace.detailsAvailable) ActivityDetailKind.Operation else if (details.isBlank()) null else change?.kind
                     ?: if (trace.isError) ActivityDetailKind.Error else ActivityDetailKind.Operation,
+                callId = trace.callId,
+                detailsVersion = trace.detailsVersion,
+                detailsAvailable = trace.detailsAvailable,
             )
         }
         val status = when {
@@ -170,7 +176,7 @@ private fun operationStatus(trace: ToolTrace): ActivityStatus = when {
 }
 
 private fun operationAction(trace: ToolTrace): String =
-    listOf("i", "description", "title").firstNotNullOfOrNull { key ->
+    trace.summary?.action?.takeIf(String::isNotBlank) ?: listOf("i", "description", "title").firstNotNullOfOrNull { key ->
         trace.arguments.strings[key]?.takeIf(String::isNotBlank)
     } ?: when (toolIdentity(trace.name).family) {
         ToolFamily.Read -> "Read"
@@ -185,6 +191,7 @@ private fun operationAction(trace: ToolTrace): String =
     }
 
 private fun operationTarget(trace: ToolTrace): String {
+    trace.summary?.let { return listOf(it.target, it.error).filter(String::isNotBlank).joinToString(" · ") }
     val args = trace.arguments
     val target = listOf("path", "file", "filePath", "file_path", "filename", "url", "uri", "cwd")
         .firstNotNullOfOrNull { args.strings[it]?.takeIf(String::isNotBlank) }
@@ -197,6 +204,7 @@ private fun operationTarget(trace: ToolTrace): String {
 private val patchPath = Regex("""(?m)^(?:\+\+\+\s+b/|---\s+a/|\*\*\* (?:Update|Add|Delete) File:\s*)([^\r\n]+)""")
 
 private fun extractFiles(trace: ToolTrace): List<String> {
+    trace.summary?.let { return it.files }
     val arguments = trace.arguments
     val direct = listOf("path", "file", "filePath", "file_path", "filename")
         .mapNotNull(arguments.strings::get)

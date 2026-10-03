@@ -6,7 +6,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-pub const GATEWAY_PROTOCOL_VERSION: u32 = 3;
+pub const GATEWAY_PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -128,7 +128,7 @@ pub struct SessionSnapshot {
     pub timeline: Vec<TimelineItem>,
     pub operations: Vec<OperationDto>,
     pub has_history: bool,
-    /// Optional first page requested by subscribe; older clients keep using REST.
+    /// Optional bounded first history page requested by subscribe.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history: Option<serde_json::Value>,
 }
@@ -142,7 +142,20 @@ impl SessionView {
                 },
                 runtime: self.runtime.as_ref().map(RuntimeDto::from),
             },
-            timeline: self.messages.clone(),
+            timeline: {
+                let mut bytes = 0;
+                let mut recent = Vec::new();
+                for item in self.messages.iter().rev().map(TimelineItem::summary) {
+                    let size = serde_json::to_vec(&item).map_or(usize::MAX, |v| v.len());
+                    if !recent.is_empty() && bytes + size > 4 * 1024 * 1024 {
+                        break;
+                    }
+                    bytes = bytes.saturating_add(size);
+                    recent.push(item);
+                }
+                recent.reverse();
+                recent
+            },
             operations: self
                 .recent_operations
                 .iter()
@@ -189,6 +202,15 @@ pub enum ServerEvent {
         remove: Vec<String>,
         reset: bool,
     },
+    MessagePatch {
+        session_id: String,
+        id: String,
+        base_hash: String,
+        hash: String,
+        append: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        metadata: Option<TimelineItem>,
+    },
     Operation {
         session_id: String,
         operation: OperationDto,
@@ -202,6 +224,7 @@ impl ServerEvent {
             | Self::SessionUpsert { session_id, .. }
             | Self::SessionState { session_id, .. }
             | Self::Timeline { session_id, .. }
+            | Self::MessagePatch { session_id, .. }
             | Self::Operation { session_id, .. } => Some(session_id),
         }
     }

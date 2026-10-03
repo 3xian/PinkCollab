@@ -29,7 +29,7 @@ internal class AttachmentUploader(
         require(bytes.isNotEmpty()) { "Empty files cannot be sent" }
         val host = paired(hostId)
         val response = try {
-            api.upload(host.url, host.credential, "/api/v3/sessions/$sessionId/files/$fileId", name, bytes)
+            api.upload(host.url, host.credential, "/api/v4/sessions/$sessionId/files/$fileId", name, bytes)
         } catch (error: GatewayHttpException) {
             if (error.statusCode == 404 && error.errorCode.isNullOrBlank()) throw IOException("Update the Gateway to send files", error)
             throw error

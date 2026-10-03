@@ -149,8 +149,8 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
             ToolFamily.Command -> "Running command"
             else -> tool.name.takeIf(String::isNotBlank)?.let { "Using $it" } ?: "Running tool"
         }
-        val intent = tool.arguments.firstString("i", "description") ?: label
-        val target = when (family) {
+        val intent = tool.summary?.action?.takeIf(String::isNotBlank) ?: tool.arguments.firstString("i", "description") ?: label
+        val target = tool.summary?.target ?: when (family) {
             ToolFamily.Search -> joinWorkDetail(
                 tool.arguments.firstString("query", "pattern"),
                 tool.arguments.firstString("path", "url", "cwd"),

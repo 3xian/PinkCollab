@@ -20,22 +20,7 @@ use std::{
 use tokio::sync::{Mutex, OwnedMutexGuard, OwnedSemaphorePermit, Semaphore};
 
 const LIVE_ITEM_LIMIT: usize = 64;
-const LIVE_TEXT_LIMIT: usize = 8 * 1024;
 const LIVE_PATCH_LIMIT: usize = 128 * 1024;
-const PREVIEW_NOTICE: &str = "\n\n[Live preview truncated; full message remains in OMP history]";
-
-fn live_preview(value: &str) -> (String, bool) {
-    if value.len() <= LIVE_TEXT_LIMIT {
-        return (value.into(), false);
-    }
-    let end = value
-        .char_indices()
-        .map(|(index, _)| index)
-        .take_while(|index| *index <= LIVE_TEXT_LIMIT)
-        .last()
-        .unwrap_or(0);
-    (format!("{}{}", &value[..end], PREVIEW_NOTICE), true)
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
@@ -179,6 +164,7 @@ struct ControllerState {
     pending_prompt_results: HashMap<String, (String, String)>,
     settled_revision: u64,
     dirty_messages: HashSet<String>,
+    published_messages: HashMap<String, TimelineItem>,
     removed_messages: Vec<String>,
     display_flush_scheduled: bool,
 }

@@ -102,6 +102,7 @@ mod tests {
                 pending_prompt_results: HashMap::new(),
                 settled_revision: 0,
                 dirty_messages: HashSet::new(),
+                published_messages: HashMap::new(),
                 removed_messages: Vec::new(),
                 display_flush_scheduled: false,
             }),

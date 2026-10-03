@@ -32,8 +32,7 @@ fn spawn_lingering_child(cwd: &std::path::Path) {
 }
 fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
     let id = pinkcollab_gateway::storage::id("message_");
-    let message =
-        json!({"role":"assistant","content":[{"type":"text","text":text}],"stopReason":"stop"});
+    let message = json!({"role":"assistant","timestamp":chrono::Utc::now().timestamp_millis(),"content":[{"type":"text","text":text}],"stopReason":"stop"});
     let entry = json!({"id":id,"parentId":parent,"type":"message","timestamp":chrono::Utc::now(),"message":message});
     writeln!(
         std::fs::OpenOptions::new()
@@ -45,10 +44,20 @@ fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
     )
     .unwrap();
     *parent = id.clone();
-    emit(
-        json!({"type":"message_update","messageId":id,"assistantMessageEvent":{"type":"text_delta","delta":text}}),
-    );
-    emit(json!({"type":"message_end","messageId":id,"message":message}));
+    emit(json!({"type":"message_start","messageId":format!("rpc-{id}"),"message":message}));
+    if text.starts_with("stream-fixture:") {
+        for chunk in text.as_bytes().chunks(2048) {
+            emit(
+                json!({"type":"message_update","messageId":format!("rpc-{id}"),"assistantMessageEvent":{"type":"text_delta","delta":std::str::from_utf8(chunk).unwrap()}}),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(75));
+        }
+    } else {
+        emit(
+            json!({"type":"message_update","messageId":format!("rpc-{id}"),"assistantMessageEvent":{"type":"text_delta","delta":text}}),
+        );
+    }
+    emit(json!({"type":"message_end","messageId":format!("rpc-{id}"),"message":message}));
     emit(json!({"type":"agent_end"}));
 }
 fn save_title(log: &std::path::Path, title: &str) {
@@ -71,6 +80,18 @@ fn save_title(log: &std::path::Path, title: &str) {
         format!("{}\n{body}", json!({"type":"title","v":1,"title":title})),
     )
     .unwrap();
+}
+
+fn save_tool(log: &std::path::Path, parent: &mut String, call_id: &str) {
+    for message in [
+        json!({"role":"assistant","content":[{"type":"toolCall","id":call_id,"name":"bash","arguments":{"command":"cargo test"}}]}),
+        json!({"role":"toolResult","toolCallId":call_id,"toolName":"bash","content":[{"type":"text","text":"tests passed"}]}),
+    ] {
+        let id = pinkcollab_gateway::storage::id("message_");
+        writeln!(std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap(), "{}",
+            json!({"id":id,"parentId":parent,"type":"message","timestamp":chrono::Utc::now(),"message":message})).unwrap();
+        *parent = id;
+    }
 }
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
@@ -318,12 +339,17 @@ fn main() {
                         pending_prompt_id = None;
                     }
                 } else {
+                    let call_id = format!("{id}-tool");
                     emit(
-                        json!({"type":"tool_execution_start","toolCallId":"tool-1","toolName":"bash","args":{"command":"cargo test"}}),
+                        json!({"type":"tool_execution_start","toolCallId":call_id,"toolName":"bash","args":{"command":"cargo test"}}),
                     );
                     emit(
-                        json!({"type":"tool_execution_end","toolCallId":"tool-1","toolName":"bash","result":{"content":[{"type":"text","text":"tests passed"}]}}),
+                        json!({"type":"tool_execution_update","toolCallId":call_id,"toolName":"bash","args":{"command":"cargo test"},"partialResult":{"content":[{"type":"text","text":"running tests"}]}}),
                     );
+                    emit(
+                        json!({"type":"tool_execution_end","toolCallId":call_id,"toolName":"bash","result":{"content":[{"type":"text","text":"tests passed"}]}}),
+                    );
+                    save_tool(&log, &mut parent, &call_id);
                     if message == "todo snapshot" {
                         emit(
                             json!({"type":"tool_execution_start","toolCallId":"todo-1","toolName":"todo","args":{"op":"init"}}),
@@ -335,7 +361,14 @@ fn main() {
                             }}),
                         );
                     }
-                    finish("Task complete", &log, &mut parent);
+                    let reply = if message == "stream reply" {
+                        format!("stream-fixture:{}", "abcdef0123456789".repeat(8192))
+                    } else if message == "long reply" {
+                        "完整回复。".repeat(20_000)
+                    } else {
+                        "Task complete".into()
+                    };
+                    finish(&reply, &log, &mut parent);
                     emit(
                         json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),
                     );

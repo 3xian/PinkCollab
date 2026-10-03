@@ -197,7 +197,7 @@ async fn oversized_resource_change_requests_resynchronization() {
     bus.publish(ServerEvent::Timeline {
         session_id: "example".into(),
         upsert: vec![],
-        remove: vec!["x".repeat(300 * 1024)],
+        remove: vec!["x".repeat(9 * 1024 * 1024)],
         reset: false,
     });
     let event = client.recv().await.unwrap();

@@ -4,7 +4,7 @@ use serde_json::Value;
 async fn usage_requires_auth_and_does_not_need_a_session() {
     let h = Harness::new(1, vec![]).await;
     let client = reqwest::Client::new();
-    let url = format!("{}/api/v3/usage", h.url);
+    let url = format!("{}/api/v4/usage", h.url);
     assert_eq!(client.get(&url).send().await.unwrap().status(), 401);
     let token = h.pair().await;
     let response = client.get(&url).bearer_auth(&token).send().await.unwrap();

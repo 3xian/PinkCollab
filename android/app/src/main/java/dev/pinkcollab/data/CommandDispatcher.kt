@@ -120,7 +120,7 @@ internal class CommandDispatcher(
     }
 
     private fun commandTransport(host: PairedHost, sessionId: String) = CommandTransport(
-        post = { body -> JSONObject(api.request(host.url, host.credential, "/api/v3/sessions/$sessionId/commands", "POST", body)) },
-        lookup = { commandId -> JSONObject(api.request(host.url, host.credential, "/api/v3/sessions/$sessionId/operations/$commandId")) },
+        post = { body -> JSONObject(api.request(host.url, host.credential, "/api/v4/sessions/$sessionId/commands", "POST", body)) },
+        lookup = { commandId -> JSONObject(api.request(host.url, host.credential, "/api/v4/sessions/$sessionId/operations/$commandId")) },
     )
 }

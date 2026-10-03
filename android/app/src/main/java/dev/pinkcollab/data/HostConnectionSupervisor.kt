@@ -10,6 +10,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -26,6 +27,8 @@ internal class HostConnectionSupervisor(
     private val onState: (String, ConnectionState, ConnectionProgress?) -> Unit,
     private val onFrame: (String, JSONObject) -> Unit,
     private val onSubscriptionEnded: (String, String) -> Unit,
+    private val cachedHost: (String) -> HostState? = { null },
+    private val cachedSession: (String, String) -> SessionDetail? = { _, _ -> null },
 ) {
     private val lock = Any()
     private val connections = mutableMapOf<String, HostConnection>()
@@ -78,6 +81,13 @@ internal class HostConnectionSupervisor(
         }
     }
 
+    fun resync(hostId: String, sessionId: String) {
+        synchronized(lock) {
+            onSubscriptionEnded(hostId, sessionId)
+            connections[hostId]?.subscribe(sessionId, fresh = true)
+        }
+    }
+
     fun networkUnavailable(hostIds: Collection<String>) {
         synchronized(lock) {
             hostIds.forEach {
@@ -96,9 +106,12 @@ internal class HostConnectionSupervisor(
         private var job: Job? = null
         private var socket: WebSocket? = null
 
-        fun subscribe(sessionId: String) {
-            socket?.send(JSONObject().put("type", "subscribe").put("sessionId", sessionId)
-                .put("historyLimit", InitialHistoryPageSize).toString())
+        fun subscribe(sessionId: String, fresh: Boolean = false) {
+            val cached = cachedSession(paired.host.id, sessionId)
+            val command = JSONObject().put("type", "subscribe").put("sessionId", sessionId)
+                .put("historyLimit", InitialHistoryPageSize).put("hasCachedHistory", cached?.savedHistory is SavedHistory.Ready)
+            if (!fresh && cached?.serverEpoch != null) command.put("epoch", cached.serverEpoch).put("sequence", cached.wireSequence)
+            socket?.send(command.toString())
         }
 
         fun unsubscribe(sessionId: String) {
@@ -171,7 +184,7 @@ internal class HostConnectionSupervisor(
             synchronized(lock) {
                 if (connectionGeneration.get() == generation && connections[paired.host.id] === this) {
                     val sessionId = frame.optString("sessionId")
-                    if (frame.optString("type") in setOf("session_snapshot", "timeline", "operation") &&
+                    if (frame.optString("type") in setOf("session_snapshot", "session_resume", "session_sync", "timeline", "message_patch", "operation") &&
                         desiredSessions[paired.host.id]?.contains(sessionId) != true) return
                     onFrame(paired.host.id, frame)
                 }
@@ -181,9 +194,15 @@ internal class HostConnectionSupervisor(
         private suspend fun awaitSocket(generation: Long, progress: ConnectionProgress): Disconnect =
             suspendCancellableCoroutine { continuation ->
                 val hadSnapshot = AtomicBoolean()
+                val known = cachedHost(paired.host.id)
+                val endpoint = (paired.url + "/api/v4/events").toHttpUrl().newBuilder().apply {
+                    synchronized(lock) { desiredSessions[paired.host.id]?.firstOrNull() }?.let { addQueryParameter("focus", it) }
+                    known?.catalogVersion?.let { addQueryParameter("catalog", it) }
+                    if (known?.serverEpoch != null) addQueryParameter("epoch", known.serverEpoch).addQueryParameter("sequence", known.wireSequence.toString())
+                }.build()
                 val socket = api.client.newWebSocket(
                     Request.Builder()
-                        .url(paired.url + "/api/v3/events")
+                        .url(endpoint)
                         .header("Authorization", "Bearer ${paired.credential}")
                         .header("Sec-WebSocket-Protocol", GzipSocketProtocol)
                         .build(),
@@ -216,7 +235,7 @@ internal class HostConnectionSupervisor(
                             runCatching {
                                 val frame = JSONObject(text)
                                 handleFrame(generation, frame)
-                                if (frame.getString("type") == "host_snapshot") hadSnapshot.set(true)
+                                if (frame.getString("type") in setOf("host_snapshot", "host_sync")) hadSnapshot.set(true)
                             }.onFailure { webSocket.close(1002, "Invalid protocol frame") }
                         }
 

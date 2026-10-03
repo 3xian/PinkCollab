@@ -15,7 +15,7 @@ class SessionRecoveryTest {
     private val actions = TasksScreenActions({}, {}, { paired++ }, { updated++ }, {},
         { _, _ -> }, { _, _ -> true }, { retried.add(it) })
 
-    @Test fun retry_executes_only_failed_hosts_and_leaves_pending_and_ready_hosts_alone() {
+    @Test fun retry_executes_failed_and_pending_hosts_and_leaves_ready_hosts_alone() {
         val button = recoveryPrimaryAction(listOf(
             host(ConnectionState.Offline(), id = "offline"),
             host(ConnectionState.Online(1), id = "failed-sync"),
@@ -28,14 +28,24 @@ class SessionRecoveryTest {
         assertEquals("Try again", button.label)
         assertTrue(button.enabled)
         button.onClick()
-        assertEquals(listOf("offline", "failed-sync"), retried)
+        assertEquals(listOf("offline", "failed-sync", "connecting", "syncing"), retried)
         assertEquals(0, paired)
         assertEquals(0, updated)
     }
 
-    @Test fun pending_or_successful_empty_hosts_have_no_retry_action() {
-        for (hosts in listOf(emptyList(), listOf(host(ConnectionState.Connecting)),
-            listOf(host(ConnectionState.Synchronizing)),
+    @Test fun pending_hosts_can_be_retried_repeatedly() {
+        for (connection in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing)) {
+            val button = recoveryPrimaryAction(listOf(host(connection)), actions)
+            assertEquals("Try again", button.label)
+            assertTrue(button.enabled)
+            button.onClick()
+            button.onClick()
+        }
+        assertEquals(listOf("host", "host", "host", "host"), retried)
+    }
+
+    @Test fun successful_empty_hosts_have_no_retry_action() {
+        for (hosts in listOf(emptyList(),
             listOf(host(ConnectionState.Online(1), InitialSyncState.Ready)))) {
             val button = recoveryPrimaryAction(hosts, actions)
             assertFalse(button.enabled)

@@ -1,37 +1,38 @@
-# PinkCollab protocol 3
+# PinkCollab protocol 4
 
 ## Overview and pairing
 
-The sole client API is `/api/v3`. Pairing and host snapshots declare `protocolVersion:3`; older API routes return HTTP 426 (`protocol_upgrade_required`). Upgrade Android and Gateway together. OMP's local RPC version and the database schema version are independent.
+The sole client API is `/api/v4`. Pairing and host snapshots declare `protocolVersion:4`; older API routes return HTTP 426 (`protocol_upgrade_required`). Upgrade Android and Gateway together. OMP's local RPC version and the database schema version are independent.
 
 `POST /pair` accepts `{token,name}` and returns `{clientId,credential,host,protocolVersion}`. A pairing token expires after five minutes and is single use. All other routes, including WebSocket upgrade, require `Authorization: Bearer <credential>`. Credentials never appear in URLs. Browser `Origin` headers are rejected; host-side revocation terminates access.
 
-Paths below are relative to `/api/v3`. JSON fields use camelCase.
+Paths below are relative to `/api/v4`. JSON fields use camelCase.
 
 ## Core models
 
-- **Session**: `{id,hostId,cwd,title,createdAt,updatedAt,origin}`. `origin` is `managed` or `discovered`; clients must use this field rather than infer origin from ID/title/runtime. Missing origin from older Gateway builds is interpreted as managed. Managed records are persistent conversation metadata, independent of the process. Titles default to `New session`; an accepted prompt replaces the title with its normalized first 80 characters. Attachment-only prompts retain the title.
+- **Session**: `{id,hostId,cwd,title,createdAt,updatedAt,origin}`. `origin` is `managed` or `discovered`; clients must use this field rather than infer origin from ID/title/runtime. Managed records are persistent conversation metadata, independent of the process. Titles default to `New session`; an accepted prompt replaces the title with its normalized first 80 characters. Attachment-only prompts retain the title.
 - **Runtime**: `null`, or `{generation,state,activity,model,pendingInputs,workTiming}`. `state` is `starting`, `idle`, `running`, `waiting_input`, or `stopping`. Completing a prompt can leave an idle runtime attached. `model` contains `{provider,id,name,thinkingLevel,thinkingLevels,fastModeEnabled?,fastModeActive?}`; unavailable values can be null. Fast fields are omitted when OMP does not report them. `fastModeEnabled` is the preference for the active model family; `fastModeActive` indicates whether it is currently effective. Input requests contain `{id,type,text,options}`.
 - **Operation**: `{id,kind,state,error}`. `id` is the submitted commandId; `kind` is its command type. `state` is `pending`, `succeeded`, `failed`, `cancelled`, or `unknown`. `error` is null or `{code,message}`. Persistence fingerprints, dispatch stages and result objects are private.
-- **Timeline item**: `{id,kind,text,detail,timestamp,tool?}`. Tool traces contain `{callId,name,arguments,result,isError,completed}`. Live IDs are generation-scoped; live previews are bounded to 64 items with bounded text. Full text belongs to history.
+- **Timeline item**: `{id,kind,text,detail,timestamp,sourceId?,messageKey?,tool?}`. User and assistant text is complete. Live RPC IDs are generation-scoped, tool call IDs match history, and the live window holds at most 64 items. Final `sourceId` and unambiguous `messageKey` identify corresponding persisted/live messages; timestamps used for display do not determine ordering.
+- **Tool summary**: `{callId,name,arguments:null,result:"",isError,completed,summary:{action,target,files,error},detailsAvailable,detailsVersion,todoPhases?}`. Snapshots, live patches and history pages all omit complete arguments/results. Todo snapshots remain independently available.
 
 `workTiming` is null if the start of work is unknown. Otherwise `{elapsedMs,running,completed}` samples Gateway monotonic work time: pending inputs pause it, settlement freezes it, and a new round resets it. `completed` means settled, not successful. Clients anchor samples to their own monotonic clock and extrapolate only while online. It is display timing, not precision profiling.
 
 ## WebSocket
 
-Connect to `WS /events`. The first frame is:
+Connect to `WS /events`. A fresh connection without a resumable host cursor starts with:
 
 ```json
-{"type":"host_snapshot","protocolVersion":3,"host":{},"sessions":[{"session":{},"runtime":null}],"workspaces":[]}
+{"type":"host_snapshot","protocolVersion":4,"host":{},"sessions":[{"session":{},"runtime":null}],"workspaces":[]}
 ```
 
-The host list receives creation and authoritative state updates without subscribing to details. For the visible session, send `{"type":"subscribe","sessionId":"..."}`; to stop receiving its timeline and operations, send `{"type":"unsubscribe","sessionId":"..."}`. Each subscribe replaces its view with:
+The host list receives creation and authoritative state updates without subscribing to details. For the visible session, send `{"type":"subscribe","sessionId":"..."}`; to stop receiving its timeline and operations, send `{"type":"unsubscribe","sessionId":"..."}`. A fresh session subscription captures:
 
 ```json
 {"type":"session_snapshot","sessionId":"...","session":{},"runtime":null,"timeline":[],"operations":[],"hasHistory":false}
 ```
 
-A subscribe may include `historyLimit` (1–100). Gateway then attempts to include an optional `history` first page using the same `{items,source,nextCursor}` shape and cursors as the history REST endpoint. History is read separately from the snapshot; it is not part of its event fence. If the read fails, takes over one second, or the serialized page exceeds 256 KiB, Gateway omits `history` and the client loads it through REST. Android requests the latest 10 items to minimize first-content transfer and loads earlier pages on demand. Clients that omit `historyLimit`, and older Gateways, retain the REST flow.
+A subscribe may include `historyLimit` (1–100). Gateway then attempts to include an optional `history` first page using the same `{items,source,nextCursor}` shape and cursors as the history REST endpoint. History is read separately from the snapshot; it is not part of its event fence. If the read fails, takes over one second, or the serialized page exceeds 256 KiB, Gateway omits `history` and the client loads it through REST. Android requests the latest 10 items to minimize first-content transfer and loads earlier pages on demand. Clients that omit `historyLimit` load the first page through REST.
 
 `operations` contains up to 20 recent receipts. Use receipt lookup for older pending commands. `hasHistory` indicates a server-side history mapping, not a guarantee that the transcript is already available.
 
@@ -39,14 +40,26 @@ A subscribe may include `historyLimit` (1–100). Gateway then attempts to inclu
 | --- | --- | --- |
 | `session_upsert` | `sessionId`, `session`, `runtime` | Insert/replace a host-list entry |
 | `session_state` | `sessionId`, `session`, `runtime`, `hasHistory` | Replace metadata and runtime in host list and any open detail |
+| `runtime_state` | `sessionId`, `runtime`, `hasHistory` | Update runtime using cached session metadata |
+| `message_patch` | `sessionId`, `id`, `baseHash`, `hash`, `append`, optional `metadata` | Append verified text; update metadata |
 | `timeline` | `sessionId`, `upsert`, `remove`, optional `reset` | If reset, clear live items; remove IDs; then insert/replace items by ID |
 | `operation` | `sessionId`, `operation` | Replace receipt by its ID |
 
 A null runtime clears all runtime facts. There is no separate exit event. Runtime start/exit resets the live tail; history is unaffected. Metadata updates also contain the complete runtime. Unknown frame types are protocol errors.
 
-Clients may offer the optional `pinkcollab.v3.gzip` WebSocket subprotocol. When accepted, Gateway sends JSON frames of at least 1 KiB as gzip-compressed binary messages; smaller frames remain text. Clients decode a binary message only after negotiation and bound decoded messages to 8 MiB. Without negotiation, all frames remain text. Client commands remain text in both cases.
+Clients may offer the optional `pinkcollab.v4.gzip` WebSocket subprotocol. When accepted, Gateway sends JSON frames of at least 1 KiB as gzip-compressed binary messages; smaller frames remain text. Clients decode a binary message only after negotiation and bound decoded messages to 8 MiB. Without negotiation, all frames remain text. Client commands remain text in both cases.
 
-The ordered socket is the event stream. Clients maintain no wire subscription IDs or revision cursors. Gateway registers its receiver before capturing a snapshot and uses private sequence fences to discard superseded queued events. Snapshot validation tracks only mutations represented by that snapshot: timeline/operation changes do not invalidate the host list, and one session cannot invalidate another session’s snapshot. If it cannot capture a stable snapshot, loses broadcast events, encounters an oversized event, or cannot deliver promptly, it closes the connection. Reconnect takes a fresh host snapshot and resubscribes to the visible session; there is no durable event replay. In-flight history responses from a previous local view must be discarded. Host and session snapshots are separate reads, not a global transaction.
+The ordered socket is the event stream. Every frame carries `epoch` (Gateway process identity) and `sequence` (ordered event position). Track the latest applied host sequence separately from each session sequence; unrelated session events do not advance the host cursor. Ignore frames already applied in their scope. Snapshot fences discard queued events superseded by that snapshot. Host and session snapshots are separate reads, not a global transaction.
+
+Reconnect supplies `?epoch=...&sequence=...&catalog=...` for the host and `{type:"subscribe",sessionId,epoch,sequence,hasCachedHistory:true}` for each retained session. Optional URL `focus` keeps the visible session in a fresh host bootstrap. If a scope can resume, Gateway replays only its missing events; `host_sync` confirms host synchronization, while `session_resume` activates the cached detail before replay and `session_sync` confirms its final metadata/runtime/hasHistory. Session sync contains empty timeline/operations; retained messages and receipts stay visible. Events are retained for at most two minutes, 1,024 entries and 8 MiB, with eviction tracked by scope. Epoch changes, expired/evicted scope events or an invalid cursor fall back to a fresh snapshot for that scope. This replay is ephemeral, not durable storage.
+
+Broadcast lag follows the same scoped recovery within the connection. A fresh host snapshot on an already synchronized connection does not invalidate healthy session subscriptions. Transport failures, oversized events and delivery timeouts can still close the socket. In-flight REST reads must match their local subscription token and history request epoch before being applied.
+
+Host bootstrap sends the newest 50 sessions by creation order plus every attached runtime and the focused session, deduplicated. `catalogVersion` fingerprints catalog metadata; a reconnect refreshes the host bootstrap if filesystem discovery changed metadata without replayable events. `totalSessions` reports the complete catalog size; `nextSessionsCursor` pages older sessions through `GET /sessions`. List runtimes omit model and input bodies, exposing `pendingInputCount` instead. Subscribed detail retains full runtime input/model state. `runtime_state` omits unchanged session metadata; resolve it from the list cache. First metadata changes send `session_state`/`session_upsert` in full. Metadata caches reset with host snapshots. Paged list responses are bound to `epoch`, and clients merge previously unseen IDs without overwriting socket state.
+
+Assistant streaming begins with a complete `timeline` item and continues with `message_patch`: `{sessionId,id,baseHash,hash,append,metadata?}`. Hashes are SHA-256 of UTF-8 text. Apply `append` only when current text matches `baseHash`, verify the resulting `hash`, and apply optional metadata with the reconstructed text. A matching target hash is an already-applied patch; any other prefix requires a fresh session snapshot. Corrections use a complete item replacement. Final metadata supplies the persisted `sourceId`/`messageKey` without sending the same body again. Text is never truncated. Fresh live snapshots and REST history pages select fewer whole items around a 4 MiB target; earlier history remains pageable.
+
+Tool summaries omit null arguments and empty results. Identical Todo phases share a content-addressed `todoRef`; `todoPlans` supplies each referenced phase array once per socket connection and once per REST response. Hydrate references before reducing a frame, retaining the socket dictionary across a resumed connection. Publicly unchanged command receipts are coalesced even when internal dispatch/persistence state changes.
 
 ## Commands and generation safety
 
@@ -80,7 +93,11 @@ Android persists encrypted commands before POST, recovers by receipt lookup, and
 
 ## History and files
 
-`GET /sessions/:id/history?limit=50&cursor=...` returns `{items,source,nextCursor}` (limit 1–100). Cursors are opaque and bound to a transcript source/branch; `stale_cursor` restarts pagination. `nextCursor:null` ends pagination. History stays separate from the WebSocket live preview; clients must not guess cross-source deduplication from text.
+`GET /sessions/:id/history?limit=50&cursor=...` returns `{items,source,nextCursor}` (limit 1–100). Pages select fewer complete items when needed to stay within a 4 MiB target, without cutting message text. Cursors are opaque and bound to the session, active branch ancestor and earliest item boundary; normal transcript appends preserve older-page cursors, while a branch switch invalidates them; `stale_cursor` restarts pagination. `nextCursor:null` ends pagination. An optional `anchor` names the previously read branch leaf; `source.continues` proves that leaf is still on the active branch. Optional `oldest` identifies the earliest retained item so the new cursor skips already loaded history. Clients may preserve loaded pages only with this continuity evidence. History and live items form one ordered conversation using Gateway-supplied identities; text equality alone never deduplicates a message.
+
+`POST /sessions/:id/history/sync` accepts `{anchor,oldest,known,cursor?}`. `known` contains at most 512 `{id,sourceId,textHash,version?}` descriptors for retained/live items; `textHash` hashes the UTF-8 body, and tool `version` is `detailsVersion`. A valid branch anchor returns only new items, changed known tools and body-free `confirmed:[{id,textHash,item}]` acknowledgments. `order` gives their source-identity order; preserve the original positions and UI IDs of changed older items. Verify acknowledgment hashes against current text before attaching saved identity. `syncCursor` continues a forward batch; retain the old anchor until the final batch supplies its new leaf. A branch switch returns a fresh page with `source.continues:false`; replace the retained branch. A stale forward cursor restarts synchronization from the original anchor. Ordinary older-page cursors remain valid across appends.
+
+`GET /sessions/:id/tools/:callId?cursor=...` returns `{text,version,completed,nextCursor,resumeCursor,hasMore}`. Details are read only on expansion, with 32 KiB UTF-8-safe pages. Current calls are served from live memory; otherwise Gateway reconstructs only the active history branch. Cursors validate the hash of the already received prefix and its UTF-8 byte offset: appended output and completion preserve them, while rewriting that prefix returns `stale_detail` (409). `resumeCursor` always identifies the received boundary; `hasMore` means an immediately available next page, while a running call keeps `nextCursor` at the tail for polling. Android follows expanded running tails at 500 ms intervals and stops when collapsed/disposed or completed. Backlogs load on demand. `tool_not_found` (404) identifies a call absent from this branch; `tool_detail_unavailable` (503) is retryable. Summary versions hash arguments, final output, status and Todo phases; ordinary progress does not invalidate loaded arguments or resend prior output. Authentication applies to all reads.
 
 Before a prompt can reach OMP, Gateway durably marks its mapped transcript as possibly written. A missing or corrupt transcript then fails explicitly (`history_unavailable`); resume cannot silently replace it, even after an aborted/failed/unknown prompt. Only an unwritten mapping with no file can return empty history (`source:null`) and be safely replaced. Resume always gets a new generation.
 

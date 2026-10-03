@@ -38,6 +38,15 @@ pub struct ModelInfo {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimelineItem {
     pub id: String,
+    /// Identity shared by the final RPC message and its persisted OMP entry.
+    #[serde(default, rename = "sourceId", skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    #[serde(
+        default,
+        rename = "messageKey",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub message_key: Option<String>,
     pub kind: String,
     pub text: String,
     #[serde(default)]
@@ -54,9 +63,9 @@ pub struct TimelineItem {
 pub struct ToolTrace {
     pub call_id: String,
     pub name: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
     pub arguments: serde_json::Value,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub result: String,
     #[serde(default)]
     pub is_error: bool,
@@ -64,6 +73,21 @@ pub struct ToolTrace {
     pub completed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub todo_phases: Option<Vec<TodoPhase>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ToolSummary>,
+    #[serde(default)]
+    pub details_version: String,
+    #[serde(default)]
+    pub details_available: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolSummary {
+    pub action: String,
+    pub target: String,
+    pub files: Vec<String>,
+    pub error: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -104,6 +128,9 @@ impl ToolTrace {
             is_error: false,
             completed: false,
             todo_phases: None,
+            summary: None,
+            details_version: String::new(),
+            details_available: false,
         }
     }
 
@@ -121,6 +148,9 @@ impl ToolTrace {
             is_error,
             completed: true,
             todo_phases: None,
+            summary: None,
+            details_version: String::new(),
+            details_available: false,
         }
     }
 
@@ -198,6 +228,8 @@ impl TimelineItem {
     fn tool(trace: ToolTrace, timestamp: DateTime<Utc>) -> Self {
         Self {
             id: trace.call_id.clone(),
+            source_id: Some(format!("tool:{}", trace.call_id)),
+            message_key: None,
             kind: "tool".into(),
             text: trace.label(),
             detail: String::new(),

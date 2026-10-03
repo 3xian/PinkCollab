@@ -27,7 +27,11 @@ internal class GatewayRepository(
     private val errorChannel = Channel<String>(Channel.BUFFERED)
     val errors = errorChannel.receiveAsFlow()
     private val connections: HostConnectionSupervisor = HostConnectionSupervisor(scope, api, ::connectionState, ::event,
-        { hostId, sessionId -> sessions.invalidateSubscription(hostId, sessionId) })
+        { hostId, sessionId -> sessions.invalidateSubscription(hostId, sessionId) },
+        { hostId -> state.value.hosts[hostId] }, { hostId, sessionId -> state.value.details[SessionKey(hostId, sessionId)] })
+    private val catalog = SessionCatalog(mutable, api)
+    suspend fun loadMoreSessions(hostId: String) = catalog.loadMore(hostId)
+    suspend fun ensureSessionListed(key: SessionKey) = catalog.ensureListed(key)
     private val directories = DirectoryGateway(scope, api, ::paired)
     private val attachments = AttachmentUploader(api, ::paired)
     private val sessions = SessionGateway(mutable, api, ::paired, connections::focus)
@@ -60,13 +64,16 @@ internal class GatewayRepository(
     fun reportError(message: String) { errorChannel.trySend(message) }
     private fun paired(id: String) = state.value.hosts[id]?.paired ?: throw IllegalStateException("Host removed")
 
+    suspend fun toolDetails(session: Session, callId: String, cursor: String?) =
+        sessions.toolDetails(session.hostId, session.id, callId, cursor)
+
     suspend fun uploadFile(context: Context, hostId: String, sessionId: String, fileId: String, name: String, uri: Uri) =
         attachments.upload(context, hostId, sessionId, fileId, name, uri)
 
     suspend fun pair(url: String, token: String) {
         val base = api.validateURL(url)
-        val response = JSONObject(api.request(base, null, "/api/v3/pair", "POST", JSONObject().put("token", token.trim()).put("name", "PinkCollab Android")))
-        require(response.getInt("protocolVersion") == 3) { "Upgrade PinkCollab to connect to this Gateway" }
+        val response = JSONObject(api.request(base, null, "/api/v4/pair", "POST", JSONObject().put("token", token.trim()).put("name", "PinkCollab Android")))
+        require(response.getInt("protocolVersion") == 4) { "Upgrade PinkCollab to connect to this Gateway" }
         val paired = PairedHost(response.getJSONObject("host").host(), base, response.getString("credential"), response.getString("clientId"))
         pairedHosts.pair(paired)
     }
@@ -108,6 +115,7 @@ internal class GatewayRepository(
         }
         reduction.effects.forEach { effect ->
             when (effect) {
+                is GatewayEffect.ResyncSession -> connections.resync(effect.session.hostId, effect.session.sessionId)
                 is GatewayEffect.LoadHistory -> {
                     val snapshotToken = state.value.details[effect.session]?.snapshotToken
                     scope.launch {

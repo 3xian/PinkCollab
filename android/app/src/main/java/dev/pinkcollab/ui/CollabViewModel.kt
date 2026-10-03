@@ -40,6 +40,8 @@ import kotlinx.coroutines.launch
 class CollabViewModel(application: Application, savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
     private val repository = GatewayRepository(viewModelScope, CredentialStore(application), application)
     internal val appState = repository.state
+    internal fun loadMoreSessions(hostId: String) { viewModelScope.launch { runCatching { repository.loadMoreSessions(hostId) }.onFailure { showError(it.message ?: "Sessions unavailable") } } }
+    internal fun ensureSessionListed(key: SessionKey) { viewModelScope.launch { runCatching { repository.ensureSessionListed(key) }.onFailure { showError(it.message ?: "Session unavailable") } } }
     internal val navigationState = appState.map(::navigationState)
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
@@ -181,6 +183,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun applyModelSettings(session: Session, changes: ModelSettingsChanges) =
         sessionCoordinator.applyModelSettings(session, changes)
     internal fun loadEarlierHistory(session: Session) = sessionCoordinator.loadEarlierHistory(session)
+    internal suspend fun loadToolDetails(session: Session, callId: String, cursor: String?) = repository.toolDetails(session, callId, cursor)
 
     internal fun onSessionAction(session: Session, action: SessionAction) {
         val key = SessionKey(session.hostId, session.id)

@@ -16,7 +16,7 @@ use tokio_tungstenite::{
 
 type Socket = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 async fn connect(h: &Harness, credential: &str) -> Socket {
-    let mut request = format!("{}/api/v3/events", h.url.replace("http://", "ws://"))
+    let mut request = format!("{}/api/v4/events", h.url.replace("http://", "ws://"))
         .into_client_request()
         .unwrap();
     request.headers_mut().insert(
@@ -63,7 +63,7 @@ async fn post(client: &reqwest::Client, session: &str, credential: &str, body: V
 }
 async fn create(h: &Harness, client: &reqwest::Client, credential: &str, cwd: &str) -> String {
     let record: Value = client
-        .post(format!("{}/api/v3/sessions", h.url))
+        .post(format!("{}/api/v4/sessions", h.url))
         .bearer_auth(credential)
         .json(&json!({"commandId":"create","hostId":h.host.id,"cwd":cwd}))
         .send()
@@ -86,7 +86,7 @@ async fn socket_lifecycle_receipts_and_reconnect_are_authoritative() {
     assert_eq!(next(&mut socket).await["type"], "host_snapshot");
     let id = create(&h, &client, &credential, &h.cwd("lifecycle")).await;
     assert_eq!(next(&mut socket).await["type"], "session_upsert");
-    let session = format!("{}/api/v3/sessions/{id}", h.url);
+    let session = format!("{}/api/v4/sessions/{id}", h.url);
     socket
         .send(Message::Text(
             json!({"type":"subscribe","sessionId":id})
@@ -154,7 +154,8 @@ async fn socket_lifecycle_receipts_and_reconnect_are_authoritative() {
     .await;
     until(&mut socket, |v| v["runtime"]["state"] == "stopping").await;
     until(&mut socket, |v| {
-        v["type"] == "session_state" && v["runtime"].is_null()
+        matches!(v["type"].as_str(), Some("session_state" | "runtime_state"))
+            && v["runtime"].is_null()
     })
     .await;
     until(&mut socket, |v| {
@@ -197,7 +198,7 @@ async fn prompt_routing_uses_gateway_state_and_missing_generation_cannot_attach(
     let credential = h.pair().await;
     let cwd = h.cwd("routing");
     let id = create(&h, &client, &credential, &cwd).await;
-    let session = format!("{}/api/v3/sessions/{id}", h.url);
+    let session = format!("{}/api/v4/sessions/{id}", h.url);
     post(
         &client,
         &session,
@@ -277,48 +278,66 @@ async fn prompt_routing_uses_gateway_state_and_missing_generation_cannot_attach(
 }
 
 #[tokio::test]
-async fn broadcast_backlog_and_oversized_event_close_socket_then_reconnect() {
+async fn backlog_recovers_without_disconnect_and_oversized_event_closes_socket() {
     let h = Harness::new(1, vec![]).await;
     let credential = h.pair().await;
-    for oversized in [false, true] {
-        let mut socket = connect(&h, &credential).await;
-        assert_eq!(next(&mut socket).await["type"], "host_snapshot");
-        // Current-thread runtime cannot drain the receiver during this synchronous burst.
-        if oversized {
-            h.bus.publish(ServerEvent::Timeline {
-                session_id: "example".into(),
-                upsert: vec![],
-                remove: vec!["x".repeat(300 * 1024)],
-                reset: false,
-            });
-        } else {
-            for _ in 0..100 {
-                h.bus.publish(ServerEvent::Timeline {
-                    session_id: "example".into(),
-                    upsert: vec![],
-                    remove: vec![],
-                    reset: false,
-                });
-            }
-        }
-        tokio::time::timeout(Duration::from_secs(3), async {
-            loop {
-                match socket.next().await {
-                    Some(Ok(Message::Ping(v))) => socket.send(Message::Pong(v)).await.unwrap(),
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
-                    _ => {}
-                }
-            }
-        })
+    let mut socket = connect(&h, &credential).await;
+    next(&mut socket).await;
+    for _ in 0..100 {
+        h.bus.publish(ServerEvent::Timeline {
+            session_id: "unsubscribed".into(),
+            upsert: vec![],
+            remove: vec![],
+            reset: false,
+        });
+    }
+    socket
+        .send(Message::Ping(vec![1, 2, 3].into()))
         .await
         .unwrap();
-    }
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match socket.next().await.unwrap().unwrap() {
+                Message::Pong(data) => {
+                    assert_eq!(data.as_ref(), &[1, 2, 3]);
+                    break;
+                }
+                Message::Ping(data) => socket.send(Message::Pong(data)).await.unwrap(),
+                Message::Close(_) => panic!("backlog disconnected a healthy scope"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
+    h.bus.publish(ServerEvent::Timeline {
+        session_id: "example".into(),
+        upsert: vec![],
+        remove: vec!["x".repeat(9 * 1024 * 1024)],
+        reset: false,
+    });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match socket.next().await {
+                Some(Ok(Message::Ping(v))) => socket.send(Message::Pong(v)).await.unwrap(),
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
 async fn old_clients_receive_explicit_upgrade_error() {
     let h = Harness::new(1, vec![]).await;
-    for path in ["/api/v1/host", "/api/v2/events", "/api/v2/pair"] {
+    for path in [
+        "/api/v1/host",
+        "/api/v2/events",
+        "/api/v2/pair",
+        "/api/v3/events",
+    ] {
         let response = reqwest::Client::new()
             .get(format!("{}{path}", h.url))
             .send()
@@ -339,7 +358,7 @@ async fn prompt_rejects_unknown_execution_after_startup_and_when_attached() {
     let client = reqwest::Client::new();
     let cwd = h.cwd("unknown");
     let id = create(&h, &client, &credential, &cwd).await;
-    let session = format!("{}/api/v3/sessions/{id}", h.url);
+    let session = format!("{}/api/v4/sessions/{id}", h.url);
     for (command, generation) in [("new", None), ("attached", Some(()))] {
         let mut body = json!({"commandId":command,"type":"prompt","message":"must not send"});
         if generation.is_some() {
@@ -374,4 +393,211 @@ async fn prompt_rejects_unknown_execution_after_startup_and_when_attached() {
         "succeeded",
     )
     .await;
+}
+
+#[tokio::test]
+async fn unchanged_reconnect_resumes_host_and_session_without_transcript_or_receipts() {
+    let h = Harness::new(1, vec![]).await;
+    let credential = h.pair().await;
+    let id = create(&h, &reqwest::Client::new(), &credential, &h.cwd("resume")).await;
+    let mut socket = connect(&h, &credential).await;
+    let host = next(&mut socket).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"subscribe","sessionId":id})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    let detail = next(&mut socket).await;
+    socket.close(None).await.unwrap();
+    let mut request = format!(
+        "{}/api/v4/events?epoch={}&sequence={}&catalog={}",
+        h.url.replace("http://", "ws://"),
+        host["epoch"].as_str().unwrap(),
+        host["sequence"],
+        host["catalogVersion"].as_str().unwrap()
+    )
+    .into_client_request()
+    .unwrap();
+    request.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {credential}").parse().unwrap(),
+    );
+    let mut resumed = tokio_tungstenite::connect_async(request).await.unwrap().0;
+    assert_eq!(next(&mut resumed).await["type"], "host_sync");
+    resumed.send(Message::Text(json!({"type":"subscribe","sessionId":id,"epoch":detail["epoch"],"sequence":detail["sequence"],"hasCachedHistory":true}).to_string().into())).await.unwrap();
+    assert_eq!(next(&mut resumed).await["type"], "session_resume");
+    let synced = next(&mut resumed).await;
+    assert_eq!(synced["type"], "session_sync");
+    assert_eq!(synced["timeline"], json!([]));
+    assert_eq!(synced["operations"], json!([]));
+    assert!(synced.get("history").is_none());
+}
+
+#[tokio::test]
+async fn streaming_reply_uses_append_frames_with_linear_wire_bytes() {
+    use sha2::{Digest, Sha256};
+    let h = Harness::new(1, vec![]).await;
+    let credential = h.pair().await;
+    let client = reqwest::Client::new();
+    let id = create(&h, &client, &credential, &h.cwd("stream")).await;
+    let mut socket = connect(&h, &credential).await;
+    next(&mut socket).await;
+    socket
+        .send(Message::Text(
+            json!({"type":"subscribe","sessionId":id})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    next(&mut socket).await;
+    post(
+        &client,
+        &format!("{}/api/v4/sessions/{id}", h.url),
+        &credential,
+        json!({"commandId":"stream","type":"prompt","message":"stream reply"}),
+    )
+    .await;
+    let mut reconstructed = String::new();
+    let mut patches = 0;
+    let mut wire_bytes = 0;
+    let mut cumulative_bytes = 0;
+    loop {
+        let frame = next(&mut socket).await;
+        if frame["type"] == "timeline" {
+            for item in frame["upsert"].as_array().unwrap() {
+                if item["kind"] == "assistant" {
+                    reconstructed = item["text"].as_str().unwrap().into();
+                    wire_bytes += serde_json::to_vec(item).unwrap().len();
+                }
+            }
+        } else if frame["type"] == "message_patch" {
+            assert_eq!(
+                frame["baseHash"],
+                hex::encode(Sha256::digest(reconstructed.as_bytes()))
+            );
+            reconstructed.push_str(frame["append"].as_str().unwrap());
+            assert_eq!(
+                frame["hash"],
+                hex::encode(Sha256::digest(reconstructed.as_bytes()))
+            );
+            wire_bytes += serde_json::to_vec(&frame).unwrap().len();
+            cumulative_bytes += reconstructed.len();
+            patches += 1;
+        }
+        if frame["operation"]["id"] == "stream" && frame["operation"]["state"] == "succeeded" {
+            break;
+        }
+    }
+    let expected = format!("stream-fixture:{}", "abcdef0123456789".repeat(8192));
+    assert_eq!(reconstructed, expected);
+    assert!(patches > 20);
+    assert!(wire_bytes < expected.len() * 2);
+    assert!(wire_bytes * 10 < cumulative_bytes);
+    eprintln!(
+        "stream fixture: {patches} patches, {wire_bytes} JSON bytes vs {cumulative_bytes} cumulative body bytes"
+    );
+}
+
+#[tokio::test]
+async fn catalog_bootstrap_cursor_loads_every_older_session_once() {
+    use pinkcollab_gateway::domain::SessionRecord;
+    let h = Harness::new(1, vec![]).await;
+    let credential = h.pair().await;
+    let now = chrono::Utc::now();
+    for index in 0..70 {
+        h.store
+            .create_v2(
+                "client",
+                &format!("create-{index}"),
+                &format!("fp-{index}"),
+                SessionRecord {
+                    id: format!("s{index}"),
+                    host_id: h.host.id.clone(),
+                    cwd: h.cwd("catalog"),
+                    title: format!("session {index}"),
+                    metadata_revision: 1,
+                    created_at: now - chrono::Duration::seconds(index),
+                    updated_at: now,
+                    archived_at: None,
+                    engine_session_ref: None,
+                },
+            )
+            .unwrap();
+    }
+    let mut socket = connect(&h, &credential).await;
+    let first = next(&mut socket).await;
+    assert_eq!(first["totalSessions"], 70);
+    assert_eq!(first["sessions"].as_array().unwrap().len(), 50);
+    let later: Value = reqwest::Client::new()
+        .get(format!("{}/api/v4/sessions", h.url))
+        .bearer_auth(&credential)
+        .query(&[("cursor", first["nextSessionsCursor"].as_str().unwrap())])
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mut ids = std::collections::HashSet::new();
+    for session in first["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(later["sessions"].as_array().unwrap())
+    {
+        assert!(ids.insert(session["session"]["id"].as_str().unwrap().to_owned()));
+    }
+    assert_eq!(ids.len(), 70);
+    assert!(later["nextCursor"].is_null());
+}
+
+#[tokio::test]
+async fn catalog_change_without_a_bus_event_invalidates_only_host_resume() {
+    use pinkcollab_gateway::domain::SessionRecord;
+    let h = Harness::new(1, vec![]).await;
+    let credential = h.pair().await;
+    let mut socket = connect(&h, &credential).await;
+    let old = next(&mut socket).await;
+    socket.close(None).await.unwrap();
+    let now = chrono::Utc::now();
+    h.store
+        .create_v2(
+            "client",
+            "quiet",
+            "quiet",
+            SessionRecord {
+                id: "quiet".into(),
+                host_id: h.host.id.clone(),
+                cwd: h.cwd("quiet"),
+                title: "newly discovered metadata".into(),
+                metadata_revision: 1,
+                created_at: now,
+                updated_at: now,
+                archived_at: None,
+                engine_session_ref: None,
+            },
+        )
+        .unwrap();
+    let mut request = format!(
+        "{}/api/v4/events?epoch={}&sequence={}&catalog={}",
+        h.url.replace("http://", "ws://"),
+        old["epoch"].as_str().unwrap(),
+        old["sequence"],
+        old["catalogVersion"].as_str().unwrap()
+    )
+    .into_client_request()
+    .unwrap();
+    request.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {credential}").parse().unwrap(),
+    );
+    let mut resumed = tokio_tungstenite::connect_async(request).await.unwrap().0;
+    let fresh = next(&mut resumed).await;
+    assert_eq!(fresh["type"], "host_snapshot");
+    assert_eq!(fresh["totalSessions"], 1);
+    assert_eq!(fresh["sessions"][0]["session"]["id"], "quiet");
 }

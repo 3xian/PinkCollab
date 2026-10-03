@@ -89,6 +89,8 @@ impl SessionController {
             state.messages.clear();
             state.finalized_messages.clear();
             state.dirty_messages.clear();
+            state.published_messages.clear();
+            state.published_messages.clear();
             state.removed_messages.clear();
             state.display_flush_scheduled = false;
         }

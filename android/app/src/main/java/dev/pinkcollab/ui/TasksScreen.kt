@@ -59,6 +59,9 @@ internal data class TasksScreenActions(
     val session: (Session, SessionAction) -> Unit,
     val applyModelSettings: (Session, ModelSettingsChanges) -> Boolean,
     val retryHost: (String) -> Unit = {},
+    val loadMoreSessions: (String) -> Unit = {},
+    val ensureSessionListed: (SessionKey) -> Unit = {},
+    val loadToolDetails: suspend (Session, String, String?) -> ToolDetailPage = { _, _, _ -> error("Tool details unavailable") },
 )
 
 @Composable
@@ -105,6 +108,7 @@ internal fun TasksScreen(
     var pendingSelection by remember(selectedSession) { mutableStateOf(selectedSession) }
     LaunchedEffect(selectedSession, sessionKeys) {
         val target = sessionKeys.indexOf(selectedSession)
+        if (target < 0 && selectedSession != null && hosts[selectedSession.hostId]?.connected == true) actions.ensureSessionListed(selectedSession)
         if (target >= 0) {
             pendingSelection = selectedSession
             if (target != pagerState.currentPage) pagerState.scrollToPage(target)
@@ -121,7 +125,7 @@ internal fun TasksScreen(
     Column(Modifier.fillMaxSize()) {
         TasksTopBar(
             activeTaskCount = sessions.count { it.isActive },
-            taskCount = sessions.size,
+            taskCount = hosts.values.sumOf { it.totalSessions ?: it.sessions.size },
             showWorkspaces = hosts.isNotEmpty(),
             openResources = openResources,
             checkForUpdates = actions.checkForUpdates,
@@ -132,6 +136,8 @@ internal fun TasksScreen(
             sessions = sessions,
             currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
             selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
+            loadMore = { hosts.values.filter { it.connected && it.nextSessionsCursor != null }.forEach { actions.loadMoreSessions(it.paired.host.id) } },
+            hasMore = hosts.values.any { it.nextSessionsCursor != null },
         )
         if (sessions.isEmpty()) {
             Box(Modifier.weight(1f)) {
@@ -187,6 +193,7 @@ internal fun TasksScreen(
                     ),
                     onAction = { action -> actions.session(session, action) },
                     onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
+                    loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
                 )
             }
         }
@@ -416,10 +423,16 @@ private fun TasksPagerBar(
     sessions: List<Session>,
     currentPage: Int,
     selectPage: (Int) -> Unit,
+    loadMore: () -> Unit,
+    hasMore: Boolean,
 ) {
     if (sessions.isEmpty()) return
     val listState = rememberLazyListState()
     val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }
+    LaunchedEffect(listState, sessions.size, hasMore) {
+        if (hasMore) snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
+            .collect { if (it >= sessions.lastIndex - 3) loadMore() }
+    }
     val cardWidth = 184.dp
     val startPadding = 12.dp
 
@@ -497,6 +510,10 @@ private fun TasksPagerBar(
                     }
                 }
             }
+            if (hasMore) item(key = "loadEarlierSessions") {
+                TextButton(onClick = loadMore) { Text("Load earlier") }
+            }
+
         }
         Box(
             Modifier

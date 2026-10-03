@@ -115,6 +115,7 @@ mod tests {
             pending_prompt_results: Default::default(),
             settled_revision: 0,
             dirty_messages: Default::default(),
+            published_messages: Default::default(),
             removed_messages: Vec::new(),
             display_flush_scheduled: false,
         }

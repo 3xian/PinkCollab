@@ -47,23 +47,26 @@ internal fun recoveryPrimaryAction(hosts: List<HostState>, actions: TasksScreenA
         it.connection is ConnectionState.Offline ||
             (it.connection is ConnectionState.Online && it.initialSync != InitialSyncState.Ready)
     }.map { it.paired.host.id }
+    val pendingIds = hosts.filter {
+        it.connection == ConnectionState.Connecting || it.connection == ConnectionState.Synchronizing
+    }.map { it.paired.host.id }
     return when {
         retryIds.isNotEmpty() -> RecoveryPrimaryAction("Try again", true) {
-            retryIds.forEach(actions.retryHost)
+            (retryIds + pendingIds).forEach(actions.retryHost)
         }
         hosts.any { it.connection == ConnectionState.AuthenticationRequired } ->
             RecoveryPrimaryAction("Reconnect host", true, actions.connectHost)
         hosts.any { it.connection == ConnectionState.UpgradeRequired } ->
             RecoveryPrimaryAction("Update app", true, actions.checkForUpdates)
+        pendingIds.isNotEmpty() -> RecoveryPrimaryAction("Try again", true) {
+            pendingIds.forEach(actions.retryHost)
+        }
         else -> RecoveryPrimaryAction("Try again", false) {}
     }
 }
 
 @Composable
 internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenActions) {
-    val pending = hosts.any {
-        it.connection == ConnectionState.Connecting || it.connection == ConnectionState.Synchronizing
-    }
     val primaryAction = recoveryPrimaryAction(hosts, actions)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         Column(
@@ -134,16 +137,6 @@ internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenA
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            Text(
-                when {
-                    pending -> "Reconnecting…"
-                    hosts.any { it.connection is ConnectionState.Offline && it.connectionProgress != null } -> "Checking periodically"
-                    else -> ""
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = TextMid,
-            )
             Spacer(Modifier.height(16.dp))
             PrimaryButton(
                 onClick = rememberHapticOnClick(primaryAction.onClick),
