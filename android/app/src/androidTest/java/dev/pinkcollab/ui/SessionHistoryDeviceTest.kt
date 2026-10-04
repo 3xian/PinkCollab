@@ -12,6 +12,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.performClick
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -57,27 +61,6 @@ class SessionHistoryDeviceTest {
     private val saved = TimelineItem("saved", "user", "Earlier question", "", "2026-09-20T00:00:00Z")
     private val live = TimelineItem("live", "user", "Current question", "", "2026-09-20T00:00:01Z")
 
-    @Test fun slow_initial_load_keeps_draft_without_a_retry_button() {
-        compose.mainClock.autoAdvance = false
-        compose.setContent {
-            PinkCollabTheme {
-                Box(Modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
-                    SessionPage(SessionPageState(LoadState.Loading, host, SessionDraft(text = "Keep draft"), 0,
-                        SessionActivity(), null, null, summary = session),
-                        onAction = {}, onApplyModelSettings = { true })
-                }
-            }
-        }
-        compose.mainClock.advanceTimeBy(100)
-        compose.onNodeWithText("Opening conversation…").assertIsDisplayed()
-        compose.onNodeWithTag("sessionSyncRetry").assertDoesNotExist()
-        compose.mainClock.advanceTimeBy(8_100)
-        compose.onNodeWithText("Taking longer than usual. You can switch sessions while this loads.").assertDoesNotExist()
-        compose.onNodeWithText("Opening conversation…").assertIsDisplayed()
-        compose.onNodeWithText("Retry").assertDoesNotExist()
-        compose.onNodeWithTag("sessionInput").assertTextEquals("Keep draft").assertIsNotEnabled()
-    }
-
     @Test fun retained_messages_remain_readable_while_subscription_refreshes() {
         val detail = SessionDetail(session, snapshotToken = null, savedHistory = SavedHistory.Loading)
         compose.setContent {
@@ -87,7 +70,7 @@ class SessionHistoryDeviceTest {
         }
         compose.onNodeWithText("Earlier question").assertIsDisplayed()
         compose.onNodeWithTag("historyLoading").assertDoesNotExist()
-        compose.onNodeWithTag("sessionSyncProgress").assertIsDisplayed()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
         compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
     }
 
@@ -101,7 +84,7 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithTag("sessionInput").assertIsEnabled()
         compose.runOnIdle { detail.value = detail.value.copy(snapshotToken = null) }
         compose.onNodeWithText("Host offline").assertDoesNotExist()
-        compose.onNodeWithTag("sessionSyncProgress").assertIsDisplayed()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
         compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
         compose.runOnIdle { connection.value = host.copy(connection = ConnectionState.Offline()) }
         compose.onNodeWithText("Host offline").assertIsDisplayed()
@@ -110,7 +93,6 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
         compose.runOnIdle { detail.value = detail.value.copy(snapshotToken = "second") }
         compose.onNodeWithTag("sessionInput").assertIsEnabled()
-        compose.onNodeWithTag("sessionSyncProgress").assertDoesNotExist()
     }
 
     @Test fun composer_and_draft_survive_detail_loading_failure_and_retry() {
@@ -123,6 +105,7 @@ class SessionHistoryDeviceTest {
         val input = compose.onNodeWithTag("sessionInput")
         input.assertIsDisplayed().assertIsNotEnabled().assertTextEquals("Unsent draft")
         compose.onNodeWithTag("sessionLoading").assertIsDisplayed()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
         compose.runOnIdle { load.value = LoadState.Failed("Unavailable") }
         input.assertIsDisplayed().assertIsNotEnabled().assertTextEquals("Unsent draft")
         compose.onNodeWithText("Could not load this session").assertIsDisplayed()
@@ -132,6 +115,7 @@ class SessionHistoryDeviceTest {
         compose.runOnIdle { load.value = LoadState.Ready(SessionDetail(session, snapshotToken = "sub", liveItems = listOf(live))) }
         input.assertIsDisplayed().assertIsEnabled().assertTextEquals("Unsent draft")
         compose.onNodeWithText("Current question").assertIsDisplayed()
+        compose.onAllNodesWithTag("sessionWorkStatus").assertCountEquals(1)
     }
 
     @Test fun composer_remains_above_keyboard_and_returns_after_hide() {

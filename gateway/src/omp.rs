@@ -78,6 +78,17 @@ struct Process {
 
 impl Process {
     fn spawn(command: &mut Command) -> Result<Self> {
+        Self::spawn_contained(
+            command,
+            #[cfg(windows)]
+            None,
+        )
+    }
+
+    fn spawn_contained(
+        command: &mut Command,
+        #[cfg(windows)] job: Option<crate::windows_job::Job>,
+    ) -> Result<Self> {
         #[cfg(windows)]
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_SUSPENDED);
         #[cfg(unix)]
@@ -86,7 +97,10 @@ impl Process {
         #[cfg(windows)]
         let mut child = child;
         #[cfg(windows)]
-        let job = match crate::windows_job::Job::attach_and_resume(&child) {
+        let job = match job.map_or_else(
+            || crate::windows_job::Job::attach_and_resume(&child),
+            |job| job.attach(&child).map(|()| job),
+        ) {
             Ok(job) => job,
             Err(err) => {
                 let _ = child.kill();
@@ -378,6 +392,31 @@ impl Runtime {
         args: &[String],
         cwd: &Path,
     ) -> Result<(Arc<Self>, mpsc::Receiver<Output>)> {
+        Self::spawn_contained(
+            executable,
+            args,
+            cwd,
+            #[cfg(windows)]
+            None,
+        )
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn spawn_in_job(
+        executable: &str,
+        args: &[String],
+        cwd: &Path,
+        job: crate::windows_job::Job,
+    ) -> Result<(Arc<Self>, mpsc::Receiver<Output>)> {
+        Self::spawn_contained(executable, args, cwd, Some(job))
+    }
+
+    fn spawn_contained(
+        executable: &str,
+        args: &[String],
+        cwd: &Path,
+        #[cfg(windows)] job: Option<crate::windows_job::Job>,
+    ) -> Result<(Arc<Self>, mpsc::Receiver<Output>)> {
         let mut command = Command::new(executable);
         command
             // `Stdio::piped()` is the only pipe path either `std` or tokio offers here: tokio's
@@ -391,10 +430,14 @@ impl Runtime {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let process =
-            Arc::new(Process::spawn(&mut command).with_context(|| {
-                format!("cannot start OMP at {executable} in {}", cwd.display())
-            })?);
+        let process = Arc::new(
+            Process::spawn_contained(
+                &mut command,
+                #[cfg(windows)]
+                job,
+            )
+            .with_context(|| format!("cannot start OMP at {executable} in {}", cwd.display()))?,
+        );
         let mut child = process.child.lock();
         let stdin = child.stdin.take().context("OMP stdin unavailable")?;
         let stdout = child.stdout.take().context("OMP stdout unavailable")?;

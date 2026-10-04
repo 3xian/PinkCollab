@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.EditNote
@@ -22,10 +21,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -207,7 +208,7 @@ private fun TaskListLoadingState() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator(color = Purple400)
+        CircularProgressIndicator(color = BrandBrass)
         Spacer(Modifier.height(20.dp))
         Text(
             "Syncing sessions…",
@@ -280,7 +281,7 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .glassPanel(CardShape, fillAlpha = 0.075f, borderAlpha = 0.18f)
+                        .framedPanel(CardShape, fillAlpha = 0.075f, borderAlpha = 0.18f)
                         .padding(horizontal = 18.dp, vertical = 6.dp),
                 ) {
                     steps.forEachIndexed { index, step ->
@@ -294,13 +295,9 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
                     }
                 }
                 Spacer(Modifier.height(20.dp))
-                Button(
-                    onClick = rememberHapticOnClick(connectHost),
+                PrimaryButton(
+                    onClick = connectHost,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF6846B2),
-                        contentColor = Color.White,
-                    ),
                 ) {
                     Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                     Spacer(Modifier.width(9.dp))
@@ -310,7 +307,7 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
                 Text(
                     "You can scan a QR code or enter info manually.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Gray400,
+                    color = MutedText,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -325,10 +322,10 @@ private fun PairingStepRow(number: Int, step: PairingStep) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
-            Modifier.size(38.dp).background(Purple400.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
+            Modifier.size(38.dp).background(BrandBrass.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(step.icon, contentDescription = null, Modifier.size(20.dp), tint = Purple200)
+            Icon(step.icon, contentDescription = null, Modifier.size(20.dp), tint = BrassLight)
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
@@ -361,7 +358,6 @@ private fun TasksTopBar(
         Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 44.dp)
-            .background(Base0.copy(alpha = 0.90f))
             .padding(start = 16.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -383,7 +379,14 @@ private fun TasksTopBar(
         }
         Box {
             TopBarAction(Icons.Outlined.Settings, "Conf") { showConfMenu = true }
-            DropdownMenu(expanded = showConfMenu, onDismissRequest = { showConfMenu = false }) {
+            DropdownMenu(
+                expanded = showConfMenu,
+                onDismissRequest = { showConfMenu = false },
+                modifier = Modifier.retroPanel(),
+                containerColor = Color.Transparent,
+                tonalElevation = 0.dp,
+                shape = RetroShape,
+            ) {
                 DropdownMenuItem(
                     text = { Text("Check for updates") },
                     onClick = { showConfMenu = false; checkForUpdates() },
@@ -409,10 +412,10 @@ private fun TopBarAction(icon: ImageVector, label: String, onClick: () -> Unit) 
                 .padding(horizontal = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Purple400)
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = BrandBrass)
             Spacer(Modifier.width(5.dp))
             Text(label, style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Medium, color = Purple400)
+                fontWeight = FontWeight.Medium, color = BrandBrass)
         }
     }
 }
@@ -435,11 +438,12 @@ private fun TasksPagerBar(
     }
     val cardWidth = 184.dp
     val startPadding = 12.dp
+    val stripHeight = 40.dp + 48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
 
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .height(64.dp)
+            .height(stripHeight)
             .zIndex(1f),
     ) {
         val centerOffset = ((maxWidth - cardWidth) / 2).coerceAtLeast(0.dp)
@@ -450,62 +454,95 @@ private fun TasksPagerBar(
         }
         LazyRow(
             state = listState,
-            modifier = Modifier.matchParentSize().background(Base0.copy(alpha = 0.90f)).testTag("sessionCards"),
-            contentPadding = PaddingValues(start = startPadding, end = centerOffset.coerceAtLeast(startPadding), top = 5.dp, bottom = 5.dp),
+            modifier = Modifier.matchParentSize().testTag("sessionCards"),
+            contentPadding = PaddingValues(start = startPadding, end = centerOffset.coerceAtLeast(startPadding), top = 6.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             itemsIndexed(sessions, key = { _, session -> SessionKey(session.hostId, session.id).pagerKey() }) { index, session ->
                 val cardStatus = sessionCardStatus(session, hosts[session.hostId]?.connection)
-                val cardColor = when (cardStatus) {
-                    SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired -> Amber300
-                    SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> Violet400
-                    SessionCardStatus.Ready -> Teal300
-                    else -> Gray400
+                val statusTop = when (cardStatus) {
+                    SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired -> RetroAmberTop
+                    SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> RetroSurfaceTop
+                    SessionCardStatus.Ready -> RetroGreenTop
+                    else -> RetroInsetTop
+                }
+                val statusBottom = when (cardStatus) {
+                    SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired -> RetroAmberBottom
+                    SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> RetroSurfaceBottom
+                    SessionCardStatus.Ready -> RetroGreenBottom
+                    else -> RetroInsetBottom
                 }
                 val selected = index == currentPage
                 val fileName = session.cwd.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { session.cwd }
-                val shape = RoundedCornerShape(16.dp)
-                Column(
+                val titleColor = if (selected) BrassLight else RetroText
+                val directoryColor = RetroMutedText
+                Box(
                     Modifier
                         .width(cardWidth)
                         .testTag("sessionCard:${session.id}")
                         .fillMaxHeight()
-                        .clip(shape)
-                        .then(
-                            if (selected) Modifier.glassPanel(shape, fillAlpha = 0.13f, borderAlpha = 0.24f)
-                            else Modifier.background(Color.White.copy(alpha = 0.055f), shape)
+                        .retroPanel(
+                            if (selected) Color(0xFF494033) else RetroSurfaceTop,
+                            if (selected) Color(0xFF342B23) else RetroSurfaceBottom,
+                            accented = selected,
                         )
-                        .clickable(onClick = rememberHapticOnClick { selectPage(index) })
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalArrangement = Arrangement.Center,
+                        .semantics {
+                            this.selected = selected
+                            stateDescription = cardStatus.label
+                        }
+                        .clickable(onClick = rememberHapticOnClick { selectPage(index) }),
                 ) {
-                    Text(
-                        session.title,
-                        style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (selected) TextHigh else TextMid,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    // A full-height status stripe remains visible even when the badge is truncated.
+                    Box(
+                        Modifier
+                            .padding(start = 3.dp, top = 8.dp, bottom = 8.dp)
+                            .width(5.dp)
+                            .fillMaxHeight()
+                            .background(Brush.verticalGradient(listOf(statusTop, statusBottom)), RetroShape),
                     )
-                    Spacer(Modifier.height(3.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(
+                        Modifier.fillMaxSize().padding(start = 16.dp, end = 10.dp, top = 7.dp, bottom = 7.dp),
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Text(
-                            fileName,
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextMid,
+                            session.title,
+                            style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp, lineHeight = 17.sp),
+                            fontWeight = FontWeight.ExtraBold,
+                            color = titleColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Box(Modifier.size(6.dp).background(cardColor, CircleShape))
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.height(3.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Outlined.FolderOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = directoryColor,
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                fileName,
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelSmall.copy(lineHeight = 14.sp),
+                                color = directoryColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
                         Text(
                             cardStatus.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = cardColor,
+                            modifier = Modifier
+                                .widthIn(max = cardWidth - 26.dp)
+                                .retroPanel(statusTop, statusBottom, inset = true)
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(lineHeight = 14.sp),
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (statusTop == RetroAmberTop) RetroInk else RetroText,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }

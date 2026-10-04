@@ -15,6 +15,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.pinkcollab.data.TimelineItem
+import dev.pinkcollab.data.ToolArguments
+import dev.pinkcollab.data.ToolSummary
+import dev.pinkcollab.data.ToolTrace
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -27,12 +31,13 @@ class ActivityGroupDeviceTest {
     @get:Rule val compose = createComposeRule()
 
     private fun operation(index: Int, status: ActivityStatus) = ActivityOperation(
-        "op-$index", "bash", "Command $index", "", status, "Output $index", ActivityDetailKind.Operation,
+        "op-$index", "bash", "Command $index", status, "Output $index", ActivityDetailKind.Operation,
+        error = if (status == ActivityStatus.Failed) "Operation $index failed" else "",
     )
 
     private fun group(operations: List<ActivityOperation>) = SessionDisplayItem.ActivityGroup(
-        "activity", ActivityStage.Execute, operations.size, emptyList(), ActivityStatus.Running,
-        "Run commands", "Build and inspect the workspace", operations.count { it.status == ActivityStatus.Failed }, operations,
+        "activity", ActivityStage.Execute, operations.size, ActivityStatus.Running,
+        "Run commands", operations.lastOrNull { it.error.isNotBlank() }?.error.orEmpty(), operations,
     )
 
     @Test fun mixed_outcomes_are_individual_horizontal_icons_and_details_toggle() {
@@ -55,6 +60,9 @@ class ActivityGroupDeviceTest {
         assertTrue(check.top >= compose.onNodeWithText(item.summary, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.bottom)
         compose.onNodeWithContentDescription("Expand activity").performClick()
         compose.onNodeWithText("Command 1", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(item.summary, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Completed", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Output 1", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithContentDescription("Collapse activity").performClick()
         compose.onNodeWithText("Command 1", useUnmergedTree = true).assertDoesNotExist()
     }
@@ -79,7 +87,7 @@ class ActivityGroupDeviceTest {
         compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
     }
 
-    @Test fun scrolling_to_an_icon_after_its_batch_deadline_does_not_restart_the_fade() {
+    @Test fun group_expansion_and_lazy_scrolling_do_not_restart_expired_icon_entrances() {
         compose.mainClock.autoAdvance = false
         val item = group((0..99).map { operation(it, ActivityStatus.Succeeded) })
         compose.setContent {
@@ -95,6 +103,11 @@ class ActivityGroupDeviceTest {
         // Expire the entire batch using its real monotonic clock, without advancing
         // Compose's animation clock. A restarted fade would remain transparent.
         SystemClock.sleep(8_000)
+        compose.onNodeWithText(item.action, useUnmergedTree = true).performTouchInput { click() }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText(item.action, useUnmergedTree = true).performTouchInput { click() }
+        compose.mainClock.advanceTimeBy(500)
         compose.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToIndex(99)
         compose.mainClock.advanceTimeByFrame()
         val pixels = compose.onNodeWithContentDescription("Command 99, Completed", useUnmergedTree = true)
@@ -142,8 +155,64 @@ class ActivityGroupDeviceTest {
         compose.onAllNodesWithText("Arguments & output").onFirst().performClick()
         compose.onNodeWithText("Output 0", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
-        compose.onNodeWithText(item.summary, useUnmergedTree = true).performTouchInput { click() }
+        compose.onNodeWithText(item.action, useUnmergedTree = true).performTouchInput { click() }
         compose.onNodeWithText("Command 0", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("Output 0", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun single_operation_keeps_title_once_and_parameters_collapsed_until_requested() {
+        val operation = ActivityOperation(
+            "read-config", "functions.read", "Reading configuration",
+            ActivityStatus.Succeeded, "Arguments\npath: /private/config\n\nOutput\nconfiguration content",
+            ActivityDetailKind.Operation,
+        )
+        val item = SessionDisplayItem.ActivityGroup(
+            "single-read", ActivityStage.Explore, 1, ActivityStatus.Succeeded,
+            operation.action, "", listOf(operation),
+        )
+        compose.setContent {
+            PinkCollabTheme {
+                val context = LocalContext.current
+                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
+                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer) }
+            }
+        }
+        compose.onAllNodesWithText(operation.action, useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText(operation.name, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("/private/config", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Expand activity").performClick()
+        compose.onAllNodesWithText(operation.action, useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText(operation.name, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText(operation.details, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Arguments & output").performClick()
+        compose.onAllNodesWithText(operation.name, useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText(operation.details, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
+    }
+
+    @Test fun operations_without_details_keep_outcomes_visible_without_empty_expanders() {
+        val traces = listOf(
+            ToolTrace("empty", "read", ToolArguments(), "", false, true,
+                summary = ToolSummary("Checking state", "", emptyList(), "")),
+            ToolTrace("failed", "read", ToolArguments(), "", true, true,
+                summary = ToolSummary("Reading configuration", "", emptyList(), "Access denied")),
+        )
+        val item = projectSessionTimeline(traces.map { trace ->
+            TimelineItem(trace.callId, "tool", "", "", "", trace)
+        }).single()
+        compose.setContent {
+            PinkCollabTheme {
+                val context = LocalContext.current
+                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
+                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer) }
+            }
+        }
+        compose.onNodeWithContentDescription("Expand activity").performClick()
+        compose.onNodeWithText("Checking state", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Access denied", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Checking state, Completed", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Reading configuration, Failed", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodesWithText("Details").assertCountEquals(0)
+        compose.onAllNodesWithText("Arguments & output").assertCountEquals(0)
     }
 }

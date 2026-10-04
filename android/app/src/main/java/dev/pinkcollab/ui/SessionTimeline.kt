@@ -32,11 +32,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
@@ -64,67 +60,23 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-internal val TimelineBandBase = Color(0xFF0D0A10)
+internal val TimelineBandBase = RetroInk
 
-/**
- * Timeline entries form full-width editorial bands. Their flat geometry keeps
- * the conversation continuous while the subtle tint distinguishes speakers
- * and status without competing with the floating composer.
- */
+/** Framed transcript bands keep speaker and status distinctions quiet and readable. */
 internal fun Modifier.timelineBand(
-    tint: Color = Purple400,
+    tint: Color = RetroBrass,
     tintAlpha: Float = 0.025f,
-): Modifier = background(TimelineBandBase)
-    .background(
-        Brush.horizontalGradient(
-            listOf(
-                tint.copy(alpha = tintAlpha),
-                Color.Transparent,
-            ),
-        ),
-    )
-    .drawBehind {
-        drawLine(
-            color = Color.White.copy(alpha = 0.055f),
-            start = Offset(0f, size.height),
-            end = Offset(size.width, size.height),
-            strokeWidth = 1.dp.toPx(),
-        )
-    }
+): Modifier = retroPanel(
+    top = RetroSurfaceBottom.copy(
+        red = RetroSurfaceBottom.red * (1f - tintAlpha) + tint.red * tintAlpha,
+        green = RetroSurfaceBottom.green * (1f - tintAlpha) + tint.green * tintAlpha,
+        blue = RetroSurfaceBottom.blue * (1f - tintAlpha) + tint.blue * tintAlpha,
+    ),
+    bottom = TimelineBandBase,
+)
 
-/**
- * The user's own turn. Separation comes from structure: a brand-gradient rail on the leading
- * edge, never a fill. [primaryContainer] was the only solid mid-tone surface in a
- * transcript otherwise built from faint tints over [TimelineBandBase], so it read as a banner
- * pasted over the timeline and outshouted the running-state accents. The tint stays inside the
- * band vocabulary and sits at the top of its alpha range, because a user turn is a hard
- * boundary between work phases.
- */
-private fun Modifier.userMessageBand(
-    primary: Color,
-    secondary: Color,
-): Modifier = background(TimelineBandBase)
-    .background(
-        Brush.horizontalGradient(
-            0.00f to primary.copy(alpha = 0.11f),
-            0.45f to secondary.copy(alpha = 0.05f),
-            1.00f to Color.Transparent,
-        ),
-    )
-    .drawBehind {
-        drawRect(
-            brush = Brush.verticalGradient(
-                listOf(primary.copy(alpha = 0.62f), secondary.copy(alpha = 0.40f)),
-            ),
-            size = Size(3.dp.toPx(), size.height),
-        )
-        drawLine(
-            color = Color.White.copy(alpha = 0.07f),
-            start = Offset(0f, size.height),
-            end = Offset(size.width, size.height),
-            strokeWidth = 1.dp.toPx(),
-        )
-    }
+private fun Modifier.userMessageBand(): Modifier =
+    retroPanel(top = RetroSurfaceTop, bottom = RetroSurfaceBottom, accented = true)
 
 
 @Composable
@@ -142,9 +94,9 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
     val isUser = item.role == "user"
     val colors = MaterialTheme.colorScheme
     val band = if (isUser) {
-        Modifier.userMessageBand(colors.primary, colors.secondary)
+        Modifier.userMessageBand()
     } else {
-        Modifier.timelineBand(tint = Teal300, tintAlpha = 0.026f)
+        Modifier.timelineBand(tint = RetroBrass, tintAlpha = 0.026f)
     }
     val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
@@ -170,7 +122,7 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
 
 @Composable
 private fun YouLabel() {
-    SpeakerTitle("You", Purple400)
+    SpeakerTitle("You", RetroBrass)
 }
 
 @Composable
@@ -198,13 +150,13 @@ private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
 @Composable
 internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        SpeakerTitle(if (replying) "Agent replying" else "Agent", BrandPink)
+        SpeakerTitle(if (replying) "Agent replying" else "Agent", RetroBrass)
         model?.let {
             Spacer(Modifier.width(8.dp))
             Surface(
-                modifier = Modifier.weight(1f, fill = false),
-                color = Purple400.copy(alpha = 0.14f),
-                shape = RoundedCornerShape(7.dp),
+                modifier = Modifier.weight(1f, fill = false).retroPanel(inset = true),
+                color = Color.Transparent,
+                shape = RoundedCornerShape(3.dp),
             ) {
                 Text(
                     it.name.ifBlank { it.id },
@@ -213,7 +165,7 @@ internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, mo
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Default,
-                    color = Purple200,
+                    color = RetroMutedText,
                 )
             }
         }
@@ -256,15 +208,19 @@ internal fun createSessionMarkwon(context: Context): Markwon =
             override fun configureTheme(builder: MarkwonTheme.Builder) {
                 val maple = ResourcesCompat.getFont(context, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
                 builder.codeTypeface(maple).codeBlockTypeface(maple)
+                builder.codeBlockBackgroundColor(RetroInsetTop.toArgb())
+                    .codeTextColor(RetroBrass.toArgb())
+                    .linkColor(RetroBrass.toArgb())
+                    .blockQuoteColor(RetroBrass.toArgb())
             }
 
             override fun configureVisitor(builder: MarkwonVisitor.Builder) {
                 builder.on(Code::class.java) { visitor, code ->
-                    var color = Purple200
+                    var color = RetroBrass
                     var ancestor = code.parent
                     while (ancestor != null) {
                         if (ancestor is StrongEmphasis) {
-                            color = BrandPink
+                            color = RetroText
                             break
                         }
                         ancestor = ancestor.parent
@@ -279,7 +235,7 @@ internal fun createSessionMarkwon(context: Context): Markwon =
 
             override fun configureSpansFactory(builder: MarkwonSpansFactory.Builder) {
                 builder.appendFactory(StrongEmphasis::class.java) { _, _ ->
-                    ForegroundColorSpan(BrandPink.toArgb())
+                    ForegroundColorSpan(RetroText.toArgb())
                 }
             }
         })
@@ -315,9 +271,20 @@ private fun MarkdownBody(messageId: String, markdown: String, color: Color, rend
     )
 }
 
+private const val ActivityEntranceDurationMillis = 280
+
 @Composable
 private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean, toolDetails: ToolDetailsController?) {
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
+    // The group owns batch deadlines even while its icon row is hidden by expansion.
+    val entranceDeadlines = remember(group.id) { HashMap<String, Long>() }
+    val batchStartMillis = SystemClock.uptimeMillis()
+    var entranceIndex = 0
+    for (operation in group.operations) {
+        if (operation.id !in entranceDeadlines) {
+            entranceDeadlines[operation.id] = batchStartMillis + entranceIndex++ * 70L + ActivityEntranceDurationMillis
+        }
+    }
     val activityTint = activityColor(group.status)
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(260), label = "activityArrow")
     Column(
@@ -352,10 +319,10 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (group.summary.isNotBlank()) {
-                    Text(group.summary, style = MaterialTheme.typography.bodySmall, color = TextMid, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (group.summary.isNotBlank() && (!expanded || group.operationCount == 1)) {
+                    Text(group.summary, style = MaterialTheme.typography.bodySmall, color = ErrorRed, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                ActivityOperationIcons(group, liveActivity)
+                if (!expanded || group.operationCount == 1) ActivityOperationIcons(group, liveActivity, entranceDeadlines)
             }
             Icon(
                 Icons.Outlined.ExpandMore,
@@ -366,25 +333,26 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
         }
         if (expanded) {
             group.operations.forEach { operation ->
-                key(operation.id) { ActivityOperationDetails(operation, initiallyExpanded = group.operationCount == 1, liveActivity = liveActivity, toolDetails = toolDetails) }
+                key(operation.id) {
+                    ActivityOperationDetails(
+                        operation,
+                        showSummary = group.operationCount > 1,
+                        liveActivity = liveActivity,
+                        toolDetails = toolDetails,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ActivityOperationIcons(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean) {
+private fun ActivityOperationIcons(
+    group: SessionDisplayItem.ActivityGroup,
+    liveActivity: Boolean,
+    entranceDeadlines: Map<String, Long>,
+) {
     val rowState = rememberLazyListState()
-    val entranceDurationMillis = 280
-    // Completion deadlines belong to the batch, not to lazy item composition.
-    val entranceDeadlines = remember(group.id) { HashMap<String, Long>() }
-    val batchStartMillis = SystemClock.uptimeMillis()
-    var entranceIndex = 0
-    for (operation in group.operations) {
-        if (operation.id !in entranceDeadlines) {
-            entranceDeadlines[operation.id] = batchStartMillis + entranceIndex++ * 70L + entranceDurationMillis
-        }
-    }
     var previousCount by remember(group.id) { mutableIntStateOf(group.operations.size) }
     LaunchedEffect(group.operations.size) {
         val grew = group.operations.size > previousCount
@@ -410,8 +378,8 @@ private fun ActivityOperationIcons(group: SessionDisplayItem.ActivityGroup, live
                     entrance.animateTo(
                         1f,
                         tween(
-                            durationMillis = remainingMillis.coerceAtMost(entranceDurationMillis.toLong()).toInt(),
-                            delayMillis = (remainingMillis - entranceDurationMillis).coerceAtLeast(0).toInt(),
+                            durationMillis = remainingMillis.coerceAtMost(ActivityEntranceDurationMillis.toLong()).toInt(),
+                            delayMillis = (remainingMillis - ActivityEntranceDurationMillis).coerceAtLeast(0).toInt(),
                         ),
                     )
                 }
@@ -429,20 +397,39 @@ private fun ActivityOperationIcons(group: SessionDisplayItem.ActivityGroup, live
 }
 
 @Composable
-private fun ActivityOperationDetails(operation: ActivityOperation, initiallyExpanded: Boolean, liveActivity: Boolean, toolDetails: ToolDetailsController?) {
-    var expanded by rememberSaveable(operation.id) { mutableStateOf(initiallyExpanded) }
+private fun ActivityOperationDetails(
+    operation: ActivityOperation,
+    showSummary: Boolean,
+    liveActivity: Boolean,
+    toolDetails: ToolDetailsController?,
+) {
+    var expanded by rememberSaveable(operation.id) { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.025f), RoundedCornerShape(8.dp)).padding(10.dp),
+        Modifier.fillMaxWidth().retroPanel(inset = true).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("${operation.name}  ${activityStatusLabel(operation.status, liveActivity)}", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Default, color = activityColor(operation.status))
-        Text(operation.action, style = MaterialTheme.typography.bodySmall, color = TextHigh)
-        if (operation.target.isNotBlank()) {
-            Text(operation.target, style = MaterialTheme.typography.bodySmall, color = TextMid, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        if (showSummary) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ActivityStatusIcon(operation.status, liveActivity, operation.action)
+                Text(operation.action, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = TextHigh)
+                if (operation.status != ActivityStatus.Succeeded) {
+                    Text(activityStatusLabel(operation.status, liveActivity), style = MaterialTheme.typography.labelSmall, color = activityColor(operation.status))
+                }
+            }
+        } else if (operation.status != ActivityStatus.Succeeded) {
+            Text(activityStatusLabel(operation.status, liveActivity), style = MaterialTheme.typography.labelSmall, color = activityColor(operation.status))
+        }
+        if (showSummary && operation.error.isNotBlank()) {
+            Text(operation.error, style = MaterialTheme.typography.bodySmall, color = ErrorRed)
         }
         operation.detailKind?.let { kind ->
             DetailToggle(kind.action, expanded, onClick = { expanded = !expanded })
             if (expanded) {
+                Text(operation.name, style = MaterialTheme.typography.labelSmall, color = TextMid)
                 if (operation.detailsAvailable && toolDetails != null) {
                     ToolDetailPanel(operation.callId, operation.detailsVersion, toolDetails)
                 } else SelectionContainer {
@@ -483,9 +470,9 @@ private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, ac
 }
 
 private fun activityColor(status: ActivityStatus): Color = when (status) {
-    ActivityStatus.Running -> Violet400
-    ActivityStatus.Succeeded -> Teal300
-    ActivityStatus.Failed -> Red400
+    ActivityStatus.Running -> RetroBrass
+    ActivityStatus.Succeeded -> Color(0xFFAAB77A)
+    ActivityStatus.Failed -> ErrorRed
 }
 
 private fun activityStatusLabel(status: ActivityStatus, liveActivity: Boolean): String =
@@ -515,16 +502,16 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
         Modifier
             .fillMaxWidth()
             .timelineBand(
-                tint = Red400,
+                tint = ErrorRed,
                 tintAlpha = 0.065f,
             )
             .padding(horizontal = 20.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Error", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = Red400)
+        Text("Error", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = ErrorRed)
         Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (item.details.isNotBlank() && item.details != item.text) {
-            DetailToggle("Error details", expanded, onClick = { expanded = !expanded }, tint = Red400)
+            DetailToggle("Error details", expanded, onClick = { expanded = !expanded }, tint = ErrorRed)
             if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
     }
@@ -543,13 +530,13 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
         }.joinToString("\n\n")
     }.orEmpty().ifBlank { item.detail }
     val band = if (isUser) {
-        Modifier.userMessageBand(colors.primary, colors.secondary)
+        Modifier.userMessageBand()
     } else {
         Modifier.timelineBand(
             tint = when (item.kind) {
-                "error" -> Red400
-                "assistant" -> Teal300
-                else -> Gray400
+                "error" -> ErrorRed
+                "assistant" -> RetroBrass
+                else -> MutedText
             },
         )
     }
@@ -574,7 +561,7 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic,
                     fontFamily = FontFamily.Default,
-                    color = if (item.kind == "error") Red400 else TextMid,
+                    color = if (item.kind == "error") ErrorRed else TextMid,
                 )
             }
         } else {

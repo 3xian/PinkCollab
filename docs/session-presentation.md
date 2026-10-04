@@ -27,7 +27,7 @@ The Android Tasks list places active sessions (`session.isActive`) first, ordere
 | Session presentation | The complete session detail surface | A single scrolling component |
 | Conversation timeline | Ordered messages and tool activity in the scrollable content area | A clock-sorted event log |
 | Tool activity | One tool call, or a display group of related calls | A Gateway command receipt |
-| Work status | The compact current-work strip above the composer | A durable transcript entry |
+| Work status | The single-line current-work row above the input card in the fixed composer area | A durable transcript entry |
 | Attention request | A pending runtime request for a user response | A tool failure |
 | Operation receipt | The Gateway's record of a client command | The result of an individual tool call |
 
@@ -89,7 +89,7 @@ Switching sessions invalidates the subscription snapshot, not the host connectio
 
 The top session cards derive status from the host connection and session runtime summary. Connection states take precedence over retained execution evidence. Online cards show Starting or Stopping during lifecycle transitions, Inactive when no runtime is attached, Needs you for pending input, `Working` for `running`, `Ready` for attached `idle`, and `Starting` for `starting` (including execution not yet confirmed by the Gateway). Ready does not claim task completion; Inactive does not imply the session has never run. Cards do not infer status from transcript text or tool results.
 
-The switcher uses the existing theme palette for status dots and labels: Ready is teal (`Teal300`), Working/Starting/Stopping are violet (`Violet400`), Needs you/Sign in/Update required are amber (`Amber300`), and remaining states are gray (`Gray400`). Ready does not add glow or animation, and status does not recolor the card background.
+The switcher uses 184dp-wide antique task panels with small corners, aged charcoal/brown fills, bronze keylines and shallow bevels. Selection has a lighter raised surface, a brass outline and a cream title. A stripe and recessed badge retain explicit labels: Ready uses olive green; Working/Starting/Stopping use bronze-brown; Needs you/Sign in/Update required use amber; inactive and disconnected states use dark recessed surfaces. Status is also exposed as `stateDescription`; selection has its own accessibility state. The strip grows with font scale rather than squeezing the title, directory or badge. Scrolling, centering and session ordering are unchanged.
 
 ### 2.1 Ordering and source boundaries
 
@@ -140,7 +140,7 @@ A timeline `ToolTrace` contains `callId`, `name`, `isError`, `completed`, `summa
 | Display type | Default content | Expandable content | Interpretation |
 | --- | --- | --- | --- |
 | `Message` | Speaker, local time, text; assistant text uses Markdown | No activity expander | User/assistant content, not a runtime status |
-| `ActivityGroup` | Focus operation's action and target, status icon stack, applicable running-group failure count | Individual operation records | A compact group of tools, not a plan step |
+| `ActivityGroup` | Focus operation's intent, status icons, supplied failure summary when applicable | Individual intents and independently expandable tool details | A compact group of tools, not a plan step |
 | `Error` | Error heading and concise text | Nonblank detail that differs from the summary | A supplied error; not automatically the whole session's outcome |
 | `Raw` | Generic kind label and supplied text; assistant text uses Markdown | Tool/subagent details when available | Fallback without inferred structured semantics |
 
@@ -170,7 +170,7 @@ Stages control grouping and specialized change details. They do not prove what a
 3. Ignored items do not split a group. End of input flushes the remaining group.
 4. Saved history and live items are merged before projection; source handoff does not split a group.
 5. The focus operation is the last running operation, otherwise the last failed operation, otherwise the last operation.
-6. The group summary uses the focus target, falling back to the group's extracted changed-file paths. All operations remain available on expansion.
+6. The group summary contains supplied failure evidence only. Targets, commands and changed-file paths remain available in operation details instead of occupying the collapsed group.
 
 ### 5.3 Status and live qualification
 
@@ -178,7 +178,7 @@ Stages control grouping and specialized change details. They do not prove what a
 | --- | --- | --- |
 | Individual tool | `completed == false` | `Running`, even if an error flag is already present |
 | Individual tool | Completed and `isError == true` | `Failed` |
-| Individual tool | Completed without error | `Succeeded` internally; `Completed` in the UI |
+| Individual tool | Completed without error | `Succeeded` internally; check icon visually and `Completed` in accessibility |
 | Group | Any operation running | Running tint; individual icons preserve mixed outcomes |
 | Group | No operation running, any failed | Failed tint |
 | Group | All operations succeeded | Completed tint |
@@ -187,37 +187,38 @@ A running structured activity animates only when its call ID is still an incompl
 
 Activity cards toggle expansion when tapped anywhere on the card, except where an operation's independent detail control or a selection/scroll gesture handles the input. A decorative chevron sits in a dedicated header row with a 20dp right inset matching the title's 20dp left inset; there is no Details/status-label row. The chevron stays beside the header when expanded, and operation details below it use the full content width. Accessibility exposes the card's expand/collapse action and expanded state. Below the summary, one horizontal icon per operation shows its actual status, with accessible action/status labels. Adjacent 18dp icons overlap by 4dp. The row scrolls without a count cap. On first appearance, icons fade in from left to right, staggered by 70ms with a 280ms fade per icon and no scaling. Each newly appended batch gets the same left-to-right entrance and scrolls into view; previously displayed icons do not replay on status updates, expansion, or horizontal scrolling back.
 
-Entrance batches use absolute monotonic completion deadlines. An icon first composed after its deadline is immediately opaque; an icon composed earlier consumes only the remaining delay and fade. Lazy scrolling never restarts an expired entrance.
+Entrance batches use absolute monotonic completion deadlines owned by the group, not by the conditionally rendered icon row. An icon first composed after its deadline is immediately opaque; an icon composed earlier consumes only the remaining delay and fade. Expanding/collapsing the group and lazy scrolling never restart an expired entrance.
 
 **Current limitation:** unlike the work-status strip, timeline qualification does not filter individual groups to the newest user turn. Do not interpret every retained unfinished live tool as independent proof of current execution.
 
-### 5.4 Action and target extraction
+### 5.4 Intent extraction
 
 | Value | Selection rule |
 | --- | --- |
-| Action | First nonblank argument in `i`, `description`, `title`; otherwise a tool-specific verb or original tool name |
-| Default verbs | Read, Search, Edit, Write, Run command, Execute code, Delegate work, or Wait for work for recognized exact names; otherwise the tool name, falling back to `Tool activity` |
-| Target location | First nonblank `path`, `file`, `filePath`, `file_path`, `filename`, `url`, `uri`, `cwd`; otherwise nonempty `files` or `paths` string list |
-| Target subject | First nonblank `command`, `cmd`, `query`, `pattern`, `task`, `code` |
-| Combined target | Distinct subject and location joined with a separator |
+| Action | First nonblank argument in `i`, `description`, `title`; otherwise supplied summary action, then a tool-specific verb |
+| Default verbs | Read, Search, Edit, Write, Run command, Execute code, Delegate work, or Wait for work for recognized families; otherwise `Tool activity` |
 
 Argument intent is supplied descriptive text, not a verified conclusion. Long summaries are ellipsized; detailed content remains separately accessible when supplied.
 
+Targets, commands and file paths remain in the complete arguments shown in details. The Android display model does not extract duplicate target rows, aggregate changed-file lists or failure counts; individual operation outcomes supply group status.
+
 ### 5.5 Detail types
 
-Each tool operation with `detailsAvailable` has an independent detail control. Expanding a group shows operation summaries; expanding an operation requests its details. A single-operation group's automatic detail expansion also initiates that read. The debug/raw renderer uses the same loader.
+Each tool operation with available details has an independent detail control. Operations with neither remote details nor nonblank inline content have no expander; their intents, status icons and supplied errors remain visible. Expanding a group shows operation intents; expanding an operation requests its details. Successful operations show a check without repeated completion text; running and failed states retain explicit labels. A single-operation group does not repeat its outer title. Tool names are shown only within opened details. The debug/raw renderer uses the same loader.
 
 Details come from authenticated `GET /api/v4/sessions/:id/tools/:callId?cursor=...`: current calls use Gateway memory and retired calls use the active OMP history branch. Each page carries complete UTF-8 text up to 32 KiB, an opaque prefix-hash/byte-offset cursor and a content version. Android caches by session, runtime generation, call ID and version, deduplicates requests, limits refreshes to two per second per call, and retains opened panels while evicting idle cached content over 4 MiB. In-flight failures appear locally with Retry. Load more and running-tail polling append only after the server validates the received prefix; a rewritten prefix reloads the first page. Completion reuses the resume cursor without duplicating arguments. Ordinary output progress keeps the summary version stable; start/availability changes and final status update summaries without folded payloads. Expanded running tails poll at 500 ms intervals; collapse or disposal stops polling.
 
-The expanded detail stream shows pretty-printed argument JSON followed by full output. Patch and file content remain lossless within their arguments. Summary file extraction accepts direct/list arguments and recognized unified or patch-header paths; it is not a filesystem audit.
+The expanded detail stream shows pretty-printed argument JSON followed by full output. Patch and file content remain lossless within their arguments. Inline full-payload details likewise retain the complete arguments and output once, without appending derived copies of patch, write content or output. Old/new edits with a supplied file path additionally show a synthesized diff. Gateway summary file extraction accepts direct/list arguments and recognized unified or patch-header paths; it is not a filesystem audit.
 
-Groups start collapsed. Opening a single-operation group opens that operation's output; multi-operation groups expose per-operation expanders. Expanded output is selectable and vertically scrollable within a bounded height.
+Groups and all operation detail controls start collapsed, including single-operation groups and failures. Supplied failure evidence remains visible without fetching full details: the collapsed group shows the latest supplied error, and expanded multi-operation groups show each operation's error. Tool names appear once inside opened details; targets are part of the complete arguments rather than a duplicate derived row. Expanded output is selectable and vertically scrollable within a bounded height.
 
 ### 5.6 Todo panel
 
-The floating todo card retains its compact focus header, settled-task count, progress bar, and expand/collapse control. Its expanded body shows phase headings, phase counts, and task rows only; it has no QUEST LOG summary row or Details/raw arguments-and-output expander.
+The floating todo panel shares the antique component system implemented by [RetroUi.kt](../android/app/src/main/java/dev/pinkcollab/ui/theme/RetroUi.kt): warm charcoal and brown surfaces, bronze keylines, shallow raised/recessed bevels and quiet cached static grain. A brass TASK PLAN title carries the settled count, expand/collapse control, focus task and progress bar; a settled plan reduces its border emphasis. The expanded task sheet is a recessed dark well with cream text, raised phase labels and outlined status emblems. The header starts at 72dp and grows with font scale; timeline clearance follows its height plus 12dp.
 
-During live work, active-task purple dots in both the focus header and expanded task rows breathe with synchronized scale and opacity changes over a 2.2-second cycle. Animation affects drawing only, so the card and row bounds remain stable. Retained/offline plans and non-active task states do not animate their dots.
+Tapping the banner reveals the task sheet downward over 420ms; closing reverses the motion over 320ms. The banner remains pinned while the bounded task sheet scrolls independently. Phase headings, phase counts and task rows remain the only expanded content, with no raw arguments/output expander. Expansion does not shift messages or cover the composer. Outside taps and Back still close the panel.
+
+During live work, active-task amber dots in both the focus header and expanded task rows breathe with synchronized scale and opacity changes over a 2.2-second cycle. Animation affects drawing only, so the card and row bounds remain stable. Retained/offline plans and non-active task states do not animate their dots.
 
 ## 6. Current-work contract
 
@@ -225,9 +226,11 @@ The work-status title is followed by a muted duration separated by whitespace, w
 
 ### 6.1 Placement and inputs
 
-The work-status strip is mounted only when session detail is ready. It sits above the composer, outside the scrolling timeline, and contributes to the composer's measured clearance. It remains visible while the user reads earlier messages.
+The sole status row is mounted above the input card, not inside it, including while session detail is loading. It belongs to the fixed composer area, stays outside the scrolling timeline and contributes to the composer's measured clearance. It remains visible while the user reads earlier messages. There is no additional conversation-area work-status strip.
 
-`sessionWorkStatus` derives `kind`, `title`, `detail`, and `active` from `SessionDetail` and host connection state. It does not use saved history or the grouped display projection.
+`sessionWorkStatus` derives `kind`, `title`, `active`, and optional `timing` from `SessionDetail` and host connection state. The renderer contains one line: icon, ellipsized title and optional duration. Auxiliary target, command, file-name and request-text lines are removed; attention cards retain actionable request content. Model, thinking-level and Fast controls are separate and unchanged.
+
+`SessionPage` displays `Loading session` while detail is pending or an online host's subscription snapshot is missing. Once subscribed, an empty initial history wait replaces only Ready or History with `Loading messages`; known work, attention, sending, and host connection statuses retain precedence. Loading uses the same neutral text shimmer as sending, with an animated download arrow above a stationary tray and no work timer or progress bar. The 16dp icon keeps fixed layout bounds; only the arrow moves, and system animation-duration settings remain respected. Starting and stopping retain their static hourglass icons. Loading never enables actions from summary or cached detail, and a detail failure removes the loading row.
 
 ### 6.2 Precedence table
 
@@ -238,10 +241,10 @@ Evaluate top to bottom; the first matching row wins.
 | 1 | Host absent or not connected | `Offline` | Connecting, syncing, reconnecting, sign-in/update required, or offline; current work cannot be confirmed | No |
 | 2 | Session starting | `Starting` | Starting agent | No |
 | 3 | Session stopping | `Stopping` | Stopping agent | No |
-| 4 | Attention object, attention flag, or needs-input status | `Attention` | Waiting for your input; show request text or direct the user to the conversation | No |
+| 4 | Attention object, attention flag, or needs-input status | `Attention` | Waiting for your input; the conversation card owns request content | No |
 | 5 | Runtime detached | `Ready` | Ready for a message | No |
 | 6 | Attached runtime is idle | `Ready` | Ready for a message | No |
-| 7 | Current live turn contains unfinished structured tools | `Working` | Tool intent and target; concurrent count when applicable | Yes |
+| 7 | Current live turn contains unfinished structured tools | `Working` | Tool intent; concurrent count when applicable | Yes |
 | 8 | No unfinished tool and `detail.streaming` nonblank | `Working` | Writing reply | Yes |
 | 9 | Runtime state is running with none of the above | `Working` | Thinking | Yes |
 
@@ -250,20 +253,14 @@ Evaluate top to bottom; the first matching row wins.
 ### 6.3 Current-tool selection
 
 - Scan `liveItems` backward and stop at the newest `user` item.
-- Count structured `tool` items whose `completed` flag is false. The first found in the backward scan supplies the current intent/target.
+- Count structured `tool` items whose `completed` flag is false. The first found in the backward scan supplies the current intent.
 - If the bounded live tail has no user item, scan the available tail. Do not consult history to invent a missing boundary.
-- One unfinished tool shows its intent. Multiple tools show `N tools running` with the latest unfinished tool's intent and target underneath.
+- One unfinished tool shows its intent. Multiple tools show `N tools running`, without a second-line description.
 - Completing one tool removes it from this selection; starting a new user turn excludes unfinished tools before that boundary.
 
 The strip uses the first nonblank `i` or `description` as intent, otherwise a tool label. Read/search/edit/command families have specific labels; other names use `Using <tool>` or `Running tool`.
 
-| Strip target family | Argument selection |
-| --- | --- |
-| Search | First `query`/`pattern`, plus first `path`/`url`/`cwd` |
-| Command | First `command`/`cmd`/`script`/`cwd` |
-| Other | First `path`/`file`/`filePath`/`file_path`/`filename`/`url`/`command`/`query`/`pattern` |
-
-The strip and timeline share a normalized, typed tool identity; target selection never depends on display labels. Their classification and summary policies remain surface-specific: the timeline recognizes more prefixes and also considers `title`, list-valued paths, and more generic subjects, while the strip recognizes additional exact command aliases. Do not assume their labels must be byte-identical.
+The status row and timeline share a normalized, typed tool identity. Their classification and intent policies remain surface-specific: the timeline recognizes more prefixes and also considers `title`, while the status row recognizes additional exact command aliases. Do not assume their labels must be byte-identical.
 
 ### 6.4 Streaming support boundary
 
@@ -304,15 +301,18 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 
 | Condition | Presentation rule |
 | --- | --- |
-| Session detail loading | Conversation skeleton with connection-stage text; preserve composer/draft; do not mount work status or enable actions from summary data |
+| Session detail loading | Gently pulsing conversation skeleton centered above the composer; show Loading session in the existing composer status row; preserve composer/draft and keep runtime actions disabled |
 | Session detail failed | Failure surface without a Retry button; preserve draft |
-| Initial history loading with no visible content | Conversation skeleton labeled “Loading message history”; never claim “no saved messages” |
+| Initial history loading with no visible content | The same centered skeleton; show Loading messages in the existing composer status row instead of Ready or History, without hiding known current work or connection status; never claim “no saved messages” |
+| Initial content becomes available | Fade the conversation layer in over 300ms after the loading wait ends; keep the composer and status row outside the fade |
 | Earlier history available | Pull down at the top, or invoke the timeline's “Load earlier messages” accessibility action; both preserve reading position and are unavailable while loading, disconnected, or inactive |
 | History failed or refresh error present | Error notice without a Retry button; retained messages remain available |
 | Detached session with known-empty history | No saved messages yet |
 | Attached idle session with no messages or pending content | Invitation to start the conversation |
 
-Loading shows a longer-wait hint after eight seconds without a stage change. Timeline loading and failure surfaces contain no Retry buttons. Host reconnection is available from Workspaces; selecting a session or receiving a fresh host snapshot reloads session detail through the existing recovery flow. The first history request, including a wait for a running first prompt's transcript, has a fifteen-second network/wait budget; a timeout produces a recoverable history error. Existing messages remain visible with an inline sync notice during refresh. Display cache survives navigation away from Tasks within the current app composition; it is in memory only and does not survive process death. Cached detail without a fresh subscription never enables runtime actions.
+The conversation entrance is scoped to the mounted session identity. Content already available when the page is composed starts fully visible. Loading without visible content starts transparent and fades in when content, a known-empty result, or a history error becomes available. A completed entrance is never reset by subscription refresh, reconnection, pagination, or new messages. Animation changes only drawing opacity, not layout or input permissions, and respects system animation-duration settings.
+
+Timeline loading and failure surfaces contain no Retry buttons. The conversation area has no opening, connection-stage or synchronization status block, including beneath retained messages; loading with no content uses a centered skeleton with a two-second breathing-opacity cycle. Its placement excludes the measured composer clearance, and animation changes opacity without moving the layout. The fixed composer area owns the sole status row, including loading hints; current-work claims and runtime actions remain subject to subscription readiness and host connectivity. Host reconnection is available from Workspaces; selecting a session or receiving a fresh host snapshot reloads session detail through the existing recovery flow. The first history request, including a wait for a running first prompt's transcript, has a fifteen-second network/wait budget; a timeout produces a recoverable history error. Existing messages remain visible without an inline sync notice during refresh. Display cache survives navigation away from Tasks within the current app composition; it is in memory only and does not survive process death. Cached detail without a fresh subscription never enables runtime actions.
 
 ## 8. Visual and interaction rules
 
@@ -320,30 +320,34 @@ Loading shows a longer-wait hint after eight seconds without a stage change. Tim
 | --- | --- |
 | User message | Distinct leading rail and static tint; plain text |
 | Agent message | Quiet static band; Markdown body |
-| Running tool | Violet status icon in the bottom row; small spinner only when live-qualified; explicit status in accessibility/details |
-| Completed tool | Teal check in the bottom row; Completed status in accessibility/details |
+| Running tool | Brass status icon in the bottom row; small spinner only when live-qualified; explicit status in accessibility/details |
+| Completed tool | Olive check; Completed status remains accessible without repeated visible text |
 | Failed tool | Red error icon in the bottom row; Failed status in accessibility/details |
 | Unconfirmed unfinished tool | Hourglass in the bottom row; Last seen running in accessibility/details; no spinner |
-| Work-status strip | One-line action and up to two lines of detail; ellipsis for overflow |
+| Work-status row | Above the input card in the fixed composer area; single-line action and optional duration, ellipsis for title overflow; no auxiliary line |
 | Attention | Amber status cue and explicit response controls |
 | Offline / ready strip | Distinct icon and text; no active indicator |
 | Backgrounds | Static fills/tints; no animated noise or moving background effects |
 
 - Color is supplementary; state remains distinguishable through text and icons.
 - The Android app uses only the platform default font and the bundled Maple Mono face. UI labels, speaker titles, model chips, timestamps, tool status labels, and detail toggles use the default font. Session body text and Markdown code blocks use Maple; native Markdown font fallback uses the platform default, never a separate system monospace face.
-- Agent Markdown bold text uses the theme's `BrandPink` foreground while keeping the surrounding font and size. Inline code inherits the surrounding font and size and uses light violet unless nested inside Markdown strong emphasis, where it uses pink, including through a link. Heading weight alone does not imply strong emphasis. The timeline renderer resolves this color from Markdown ancestry, not mutable paint state, without adding spaces around inline code; surrounding source whitespace is preserved. Neither has an inline background; adjacent or wrapped lines must not form joined highlight bands. Fenced code blocks keep their separate block styling.
+- Agent Markdown bold text uses the theme's `BrandBronze` foreground while keeping the surrounding font and size. Inline code inherits the surrounding font and size and uses `BrassLight` unless nested inside Markdown strong emphasis, where it uses bronze, including through a link. Heading weight alone does not imply strong emphasis. The timeline renderer resolves this color from Markdown ancestry, not mutable paint state, without adding spaces around inline code; surrounding source whitespace is preserved. Neither has an inline background; adjacent or wrapped lines must not form joined highlight bands. Fenced code blocks keep their separate block styling.
 - The work-status title is a polite accessibility live region. Streaming tokens and tool output are not individually announced through it.
 - The timeline follows new content while at the end. Scrolling backward suspends following; reaching the end or returning to the session re-enables it.
-- Bottom clearance includes the work strip and composer so the final content can be scrolled above them.
-- The floating composer uses a static black scrim: a short fade-in above the work-status strip already dims content behind “Thinking”, then the scrim darkens continuously to opaque black at the bottom.
+- Bottom clearance includes both the status row and the complete input card so the final content can be scrolled above them.
+- The floating composer uses a static warm-charcoal scrim, fading in above the status row and darkening continuously to the theme background at the bottom.
 - Status is not action permission. `sessionControls` independently gates sending, attachment, model selection, interrupt, and runtime exit. For example, Ready does not override an input-busy operation.
-- While sending, the work-status strip shows a neutral shimmering label for message submission or the current file index and count, with the file name below. The submission label has no trailing ellipsis. The composer has no send-progress component or animated progress bar. After sending finishes, the strip resumes the runtime work status; host connection status takes precedence while disconnected.
+- While sending, the composer status row shows a static submission label or the current file index and count, without a file-name line. The submission label has no trailing ellipsis. There is no animated progress bar. After sending finishes, the row resumes runtime work status; host connection status takes precedence while disconnected.
 - The composer action rail is ordered End, Stop, Send from top to bottom. Stop interrupts the turn; End is a separate runtime action with confirmation. A status-label change must not change those meanings.
+- Composer controls share the antique bevel treatment: End uses a neutral bronze-brown surface, Stop oxblood and Send amber, each with an icon and retained label. Disabled controls use readable muted text on recessed dark surfaces. Attachment and model controls use brass/cream on bronze-brown; enabled Fast uses amber with dark text. Touch targets remain at least 48dp. At narrow widths or large font scales, Model and Fast stack rather than losing a control. Long model names and thinking labels truncate independently. Input uses a recessed dark well with cream text, a brass cursor and a focus keyline; action gating and End confirmation are unchanged.
+- The whole app uses the same warm charcoal backdrop and restrained brass palette: workspaces, directory browser, pairing forms, recovery/loading surfaces, configuration menus, model/usage sheets, attention cards and update dialogs. Background grain and bevels are static and cached by drawing size; platform art is muted and startup artwork is warm grayscale. Material surfaces use small corners and coordinated brown tones rather than a second bright visual system.
+- Native cold-start and system-bar resources in `res/values/styles.xml` and `res/values-v31/styles.xml` stay aligned with `Base0` (`#191815`) and `RetroBrass` (`#C6A46A`), including the Android 12+ splash background.
+- Model-picker headings occupy their own row; Reload/Usage actions wrap independently rather than clipping the heading at large font scales. Compact model rows and apply/cancel actions retain at least 48dp touch targets.
 - Without a known model, the composer button reads `model`; a known model still shows its name or ID. Opening the picker for a detached runtime starts OMP. `SessionOperations` owns the attempt; closing and reopening the picker does not dispatch a duplicate pending start. Startup remains pending across separate operation and runtime-snapshot updates; a falling startup flag alone is not failure evidence. Explicit command errors and failed, cancelled, or unconfirmed start receipts resolve the attempt to a visible, retryable error even when the receipt has no error message. Retry clears that attempt's error without resending an unconfirmed outbox command under a new identity.
 
 ## Host history entries
 
-Session `origin` is an explicit protocol fact. A discovered entry uses the compact **History** card label and **History on host** work-status text, with “Send a message to continue”. Connectivity still qualifies the card status. No runtime, elapsed time, completion or success is inferred from saved messages. Opening loads the existing history pipeline and recoverable error presentation. The composer submits its ordinary generation-less prompt; adoption replaces the same ID with managed state, preserving Tasks pager/card selection, draft/outbox identity and cached history. No import dialog is required.
+Session `origin` is an explicit protocol fact. A discovered entry uses the compact **History** card label and **History on host** work-status text, without a second-line continuation hint. Connectivity still qualifies the card status. No runtime, elapsed time, completion or success is inferred from saved messages. Opening loads the existing history pipeline and recoverable error presentation. The composer submits its ordinary generation-less prompt; adoption replaces the same ID with managed state, preserving Tasks pager/card selection, draft/outbox identity and cached history. No import dialog is required.
 
 ## 9. Acceptance scenarios
 
@@ -351,8 +355,8 @@ These are behavior checks, not requirements to pin exact wording in tests.
 
 | Scenario | Expected observation |
 | --- | --- |
-| Read a file with an intent and path | Action and file visible without opening details |
-| Run an arbitrary shell command successfully | Command available in history; Completed, never an inferred Verified |
+| Read a file with an intent and path | Intent visible by default; path and full arguments available in details |
+| Run an arbitrary shell command successfully | Check icon by default; command and output available in details, never an inferred Verified |
 | Receive an unfamiliar structured tool | Visible operation under Other, with available details |
 | One operation fails while another in its group continues | Group remains running and exposes the failure count/details |
 | Disconnect during a tool call | Strip reports uncertainty; retained structured activity stops animating and says Last seen running |

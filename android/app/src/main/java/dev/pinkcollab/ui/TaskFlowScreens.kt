@@ -1,10 +1,5 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,7 +11,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -55,9 +49,9 @@ private fun DirectoryListing(
     select: (String) -> Unit,
 ) {
 
-    Column(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxWidth().padding(16.dp).glassPanel(CardShape).padding(16.dp)) {
-            Text(hostName, style = MaterialTheme.typography.labelLarge, color = Purple400)
+    Column(Modifier.fillMaxSize().retroBackdrop()) {
+        Column(Modifier.fillMaxWidth().padding(16.dp).retroPanel().padding(16.dp)) {
+            Text(hostName, style = MaterialTheme.typography.labelLarge, color = RetroBrass)
             Spacer(Modifier.height(6.dp))
             Text(listing.path, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(16.dp))
@@ -71,13 +65,13 @@ private fun DirectoryListing(
                 }
             }
         }
-        HorizontalDivider(color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = RetroBrass.copy(alpha = 0.2f))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(8.dp)) {
             listing.parent?.let { parent ->
                 item {
                     TextButton(
                         onClick = rememberHapticOnClick { browse(parent) },
-                        colors = ButtonDefaults.textButtonColors(contentColor = Purple200),
+                        colors = ButtonDefaults.textButtonColors(contentColor = RetroBrass),
                     ) {
                         Icon(Icons.Outlined.ArrowUpward, null)
                         Spacer(Modifier.width(8.dp))
@@ -88,13 +82,13 @@ private fun DirectoryListing(
             items(listing.directories, key = { it.path }) { directory ->
                 TextButton(
                     onClick = rememberHapticOnClick { browse(directory.path) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).retroPanel(inset = true),
                     colors = ButtonDefaults.textButtonColors(contentColor = TextHigh),
                 ) {
-                    Icon(Icons.Outlined.Folder, null, tint = Purple400)
+                    Icon(Icons.Outlined.Folder, null, tint = RetroBrass)
                     Spacer(Modifier.width(12.dp))
                     Text(directory.name, Modifier.weight(1f))
-                    Icon(Icons.Outlined.ChevronRight, null, tint = Gray400)
+                    Icon(Icons.Outlined.ChevronRight, null, tint = MutedText)
                 }
             }
             if (listing.directories.isEmpty()) {
@@ -113,16 +107,10 @@ private fun DirectoryListing(
 
 @Composable
 private fun DirectoryLoadingState(hostName: String) {
-    val transition = rememberInfiniteTransition(label = "directoryLoading")
-    val pulse by transition.animateFloat(
-        initialValue = 0.42f,
-        targetValue = 0.82f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "directoryLoadingPulse",
-    )
-    Column(Modifier.fillMaxSize().semantics(mergeDescendants = true) {}) {
-        Column(Modifier.fillMaxWidth().padding(16.dp).glassPanel(CardShape).padding(16.dp)) {
-            Text(hostName, style = MaterialTheme.typography.labelLarge, color = Purple400)
+    val pulse = 0.65f
+    Column(Modifier.fillMaxSize().retroBackdrop().semantics(mergeDescendants = true) {}) {
+        Column(Modifier.fillMaxWidth().padding(16.dp).retroPanel().padding(16.dp)) {
+            Text(hostName, style = MaterialTheme.typography.labelLarge, color = RetroBrass)
             Spacer(Modifier.height(10.dp))
             DirectoryPlaceholder(0.72f, 18.dp, pulse)
             Spacer(Modifier.height(22.dp))
@@ -132,8 +120,8 @@ private fun DirectoryLoadingState(hostName: String) {
         }
         LinearProgressIndicator(
             Modifier.fillMaxWidth(),
-            color = Purple400,
-            trackColor = Color.White.copy(alpha = 0.05f),
+            color = RetroBrass,
+            trackColor = RetroInsetTop,
         )
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
             repeat(6) { index ->
@@ -144,7 +132,7 @@ private fun DirectoryLoadingState(hostName: String) {
                     Icon(
                         Icons.Outlined.Folder,
                         contentDescription = null,
-                        tint = Purple400.copy(alpha = 0.34f + pulse * 0.16f),
+                        tint = RetroBrass.copy(alpha = 0.45f),
                     )
                     Spacer(Modifier.width(14.dp))
                     DirectoryPlaceholder(if (index % 3 == 0) 0.62f else 0.46f, 12.dp, pulse)
@@ -160,8 +148,7 @@ private fun RowScope.DirectoryPlaceholder(width: Float, height: Dp, pulse: Float
         Modifier
             .fillMaxWidth(width)
             .height(height)
-            .alpha(pulse)
-            .background(Color.White.copy(alpha = 0.11f), RoundedCornerShape(999.dp)),
+            .background(RetroBrass.copy(alpha = 0.11f * pulse), RoundedCornerShape(3.dp)),
     )
 }
 
@@ -171,7 +158,6 @@ private fun DirectoryPlaceholder(width: Float, height: Dp, pulse: Float) {
         Modifier
             .fillMaxWidth(width)
             .height(height)
-            .alpha(pulse)
-            .background(Color.White.copy(alpha = 0.11f), RoundedCornerShape(999.dp)),
+            .background(RetroBrass.copy(alpha = 0.11f * pulse), RoundedCornerShape(3.dp)),
     )
 }

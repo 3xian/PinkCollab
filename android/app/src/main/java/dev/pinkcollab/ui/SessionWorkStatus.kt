@@ -1,13 +1,14 @@
 package dev.pinkcollab.ui
 
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.HourglassEmpty
-import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,11 +30,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -50,17 +46,16 @@ import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.ToolArguments
 import dev.pinkcollab.data.ToolTrace
-import dev.pinkcollab.ui.theme.Amber300
-import dev.pinkcollab.ui.theme.Purple400
+import dev.pinkcollab.ui.theme.RetroBrass
+import dev.pinkcollab.ui.theme.retroPanel
 import dev.pinkcollab.ui.theme.TextHigh
 import dev.pinkcollab.ui.theme.TextMid
 
-internal enum class WorkStatusKind { Sending, Working, Starting, Stopping, Attention, Offline, Ready, History }
+internal enum class WorkStatusKind { Loading, Sending, Working, Starting, Stopping, Attention, Offline, Ready, History }
 
 internal data class SessionWorkStatus(
     val kind: WorkStatusKind,
     val title: String,
-    val detail: String = "",
     val active: Boolean = false,
     val timing: WorkTiming? = null,
 )
@@ -75,7 +70,6 @@ internal fun sessionWorkStatus(
             is SendProgress.Uploading -> SessionWorkStatus(
                 WorkStatusKind.Sending,
                 "Sending file ${sendProgress.fileIndex} of ${sendProgress.fileCount}",
-                sendProgress.fileName,
             )
             SendProgress.Submitting -> SessionWorkStatus(WorkStatusKind.Sending, "Sending message")
         }
@@ -104,11 +98,11 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
             ConnectionState.UpgradeRequired -> "Update required"
             else -> "Host offline"
         }
-        return SessionWorkStatus(WorkStatusKind.Offline, title, "Current work cannot be confirmed")
+        return SessionWorkStatus(WorkStatusKind.Offline, title)
     }
     val session = detail.session
     if (session.origin == dev.pinkcollab.data.SessionOrigin.Discovered) {
-        return SessionWorkStatus(WorkStatusKind.History, "History on host", "Send a message to continue")
+        return SessionWorkStatus(WorkStatusKind.History, "History on host")
     }
     val active = session.status == SessionStatus.Running
     if (session.status == SessionStatus.Starting) {
@@ -121,7 +115,6 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
         return SessionWorkStatus(
             WorkStatusKind.Attention,
             "Waiting for your input",
-            session.attention?.text?.trim()?.takeIf(String::isNotEmpty) ?: "Review the request in the conversation",
         )
     }
     if (!session.runtimeAttached) return SessionWorkStatus(WorkStatusKind.Ready, "Ready for a message")
@@ -150,20 +143,9 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
             else -> tool.name.takeIf(String::isNotBlank)?.let { "Using $it" } ?: "Running tool"
         }
         val intent = tool.summary?.action?.takeIf(String::isNotBlank) ?: tool.arguments.firstString("i", "description") ?: label
-        val target = tool.summary?.target ?: when (family) {
-            ToolFamily.Search -> joinWorkDetail(
-                tool.arguments.firstString("query", "pattern"),
-                tool.arguments.firstString("path", "url", "cwd"),
-            )
-            ToolFamily.Command -> tool.arguments.firstString("command", "cmd", "script", "cwd").orEmpty()
-            else -> tool.arguments.firstString("path", "file", "filePath", "file_path", "filename", "url", "command", "query", "pattern").orEmpty()
-        }
         return SessionWorkStatus(
             WorkStatusKind.Working,
             if (toolCount > 1) "$toolCount tools running" else intent,
-            if (toolCount > 1) joinWorkDetail(intent, target)
-            else if (intent != label) joinWorkDetail(label, target)
-            else target,
             active = true,
         )
     }
@@ -182,29 +164,28 @@ private fun ToolArguments.firstString(vararg keys: String): String? {
     return null
 }
 
-private fun joinWorkDetail(first: String?, second: String?): String = when {
-    first.isNullOrBlank() -> second.orEmpty()
-    second.isNullOrBlank() -> first
-    else -> "$first  $second"
-}
-
 @Composable
-internal fun SessionWorkStatusStrip(status: SessionWorkStatus, modifier: Modifier = Modifier) {
-    val sendingTextEffect = if (status.kind == WorkStatusKind.Sending) sendingTextShimmer() else Modifier
+internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier = Modifier) {
     val tint = when (status.kind) {
-        WorkStatusKind.Attention -> Amber300
-        WorkStatusKind.Sending, WorkStatusKind.Working, WorkStatusKind.Starting, WorkStatusKind.Stopping -> Purple400
+        WorkStatusKind.Attention -> RetroBrass
+        WorkStatusKind.Sending, WorkStatusKind.Working, WorkStatusKind.Starting, WorkStatusKind.Stopping -> RetroBrass
         else -> TextMid
     }
     Row(
-        modifier.fillMaxWidth().testTag("sessionWorkStatus").padding(horizontal = 8.dp, vertical = 8.dp),
+        modifier.fillMaxWidth().testTag("sessionWorkStatus").retroPanel(inset = true)
+            .padding(horizontal = ComposerContentInset, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         if (status.active) {
             ThinkingSquares(
                 color = tint,
-                modifier = Modifier.padding(top = 1.dp).size(14.dp).clearAndSetSemantics { },
+                modifier = Modifier.size(14.dp).clearAndSetSemantics { },
+            )
+        } else if (status.kind == WorkStatusKind.Loading) {
+            DownloadingIcon(
+                color = tint,
+                modifier = Modifier.size(16.dp).clearAndSetSemantics { },
             )
         } else {
             Icon(
@@ -216,68 +197,65 @@ internal fun SessionWorkStatusStrip(status: SessionWorkStatus, modifier: Modifie
                 },
                 contentDescription = null,
                 tint = tint,
-                modifier = Modifier.padding(top = 2.dp).size(16.dp),
+                modifier = Modifier.size(16.dp),
             )
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            // Only the stable action label announces changes, never streaming tokens or tool output.
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    status.title,
-                    modifier = Modifier.weight(1f, fill = false).then(sendingTextEffect)
-                        .semantics { liveRegion = LiveRegionMode.Polite },
-                    color = TextHigh,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                status.timing?.let { timing ->
-                    val elapsed by produceState(timing.elapsedAt(), timing) {
-                        value = timing.elapsedAt()
-                        while (timing.running && !timing.completed) {
-                            delay(1_000)
-                            value = timing.elapsedAt()
-                        }
-                    }
-                    Text(workDurationLabel(elapsed), color = TextMid, style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1)
+        // Only the stable action label announces changes, never streaming tokens or tool output.
+        Text(
+            status.title,
+            modifier = Modifier.weight(1f)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+            color = TextHigh,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        status.timing?.let { timing ->
+            val elapsed by produceState(timing.elapsedAt(), timing) {
+                value = timing.elapsedAt()
+                while (timing.running && !timing.completed) {
+                    delay(1_000)
+                    value = timing.elapsedAt()
                 }
             }
-            if (status.detail.isNotBlank()) Text(
-                status.detail,
+            Text(
+                workDurationLabel(elapsed),
                 color = TextMid,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
             )
         }
     }
 }
 
-/** A neutral highlight sweeps over the glyphs; animation only invalidates drawing. */
+/** The arrow moves within fixed bounds; the tray and layout stay still. */
 @Composable
-private fun sendingTextShimmer(): Modifier {
-    val phase = rememberInfiniteTransition(label = "sendingTextShimmer").animateFloat(
+private fun DownloadingIcon(color: Color, modifier: Modifier = Modifier) {
+    val offset = rememberInfiniteTransition(label = "loadingDownload").animateFloat(
         initialValue = -1f,
         targetValue = 2f,
-        animationSpec = infiniteRepeatable(tween(1_600, easing = LinearEasing)),
-        label = "sendingTextHighlight",
+        animationSpec = infiniteRepeatable(
+            tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "downloadArrowOffset",
     )
-    return Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-        .drawWithContent {
-            drawContent()
-            val center = size.width * phase.value
-            val halfWidth = size.width * 0.35f
-            drawRect(
-                brush = Brush.linearGradient(
-                    colors = listOf(TextMid, Color.White, TextMid),
-                    start = Offset(center - halfWidth, 0f),
-                    end = Offset(center + halfWidth, 0f),
-                ),
-                blendMode = BlendMode.SrcIn,
-            )
-        }
+    Canvas(modifier) {
+        val unit = size.minDimension / 16f
+        val stroke = 1.5f * unit
+        val arrowOffset = offset.value
+        drawLine(color, Offset(8f, 3f + arrowOffset) * unit,
+            Offset(8f, 8f + arrowOffset) * unit, stroke, StrokeCap.Round)
+        drawLine(color, Offset(4.5f, 4.5f + arrowOffset) * unit,
+            Offset(8f, 8f + arrowOffset) * unit, stroke, StrokeCap.Round)
+        drawLine(color, Offset(8f, 8f + arrowOffset) * unit,
+            Offset(11.5f, 4.5f + arrowOffset) * unit, stroke, StrokeCap.Round)
+        drawLine(color, Offset(3f, 10f) * unit, Offset(3f, 13f) * unit, stroke, StrokeCap.Round)
+        drawLine(color, Offset(3f, 13f) * unit, Offset(13f, 13f) * unit, stroke, StrokeCap.Round)
+        drawLine(color, Offset(13f, 13f) * unit, Offset(13f, 10f) * unit, stroke, StrokeCap.Round)
+    }
 }
+
 
 /** Four fixed tiles light up clockwise; animation state is read only during drawing. */
 @Composable

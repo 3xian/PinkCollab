@@ -567,6 +567,31 @@ fn runtime_lease_requires_the_exact_generation_to_clear() {
 }
 
 #[test]
+fn upgrading_preserves_unverified_runtime_leases() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    assert!(store.reserve_runtime("session", "before-upgrade").unwrap());
+    drop(store);
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    db.execute_batch(
+        "ALTER TABLE runtime_leases DROP COLUMN windows_job_name;
+         PRAGMA user_version=5;",
+    )
+    .unwrap();
+    drop(db);
+
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(
+        store.runtime_leases().unwrap(),
+        vec![("session".into(), "before-upgrade".into())]
+    );
+    assert!(!store.reserve_runtime("session", "after-upgrade").unwrap());
+    assert!(!store.release_runtime("session", "after-upgrade").unwrap());
+    assert!(store.release_runtime("session", "before-upgrade").unwrap());
+    assert!(store.reserve_runtime("session", "after-upgrade").unwrap());
+}
+
+#[test]
 fn todo_snapshot_is_typed_and_survives_reverse_tool_updates() {
     let timestamp = "2026-09-20T00:00:00Z".parse().unwrap();
     let mut item = TimelineItem::tool_completed("todo-1", "todo", "truncated", false, timestamp)

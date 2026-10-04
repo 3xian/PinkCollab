@@ -3,6 +3,7 @@ package dev.pinkcollab.ui
 import dev.pinkcollab.data.TimelineItem
 import dev.pinkcollab.data.ToolArguments
 import dev.pinkcollab.data.ToolTrace
+import dev.pinkcollab.data.ToolSummary
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -48,7 +49,6 @@ class SessionDisplayProjectionTest {
         assertEquals(ActivityStage.Explore, explore.stage)
         assertEquals(2, explore.operationCount)
         val change = projected[2] as SessionDisplayItem.ActivityGroup
-        assertEquals(listOf("src/Login.kt"), change.files)
         assertTrue(change.operations[0].details.contains("--- a/src/Login.kt"))
         assertTrue(change.operations[0].details.contains("+b"))
         assertEquals(ActivityDetailKind.Diff, change.operations[0].detailKind)
@@ -104,9 +104,9 @@ class SessionDisplayProjectionTest {
         ).single() as SessionDisplayItem.ActivityGroup
 
         assertEquals(ActivityStatus.Running, group.status)
-        assertEquals(1, group.failureCount)
         assertEquals("Reading repository state", group.action)
-        assertEquals("git status", group.summary)
+        assertEquals(group.operations.first().error, group.summary)
+        assertTrue(group.summary.isNotBlank())
         assertEquals(listOf(ActivityStatus.Failed, ActivityStatus.Running), group.operations.map { it.status })
     }
 
@@ -120,9 +120,10 @@ class SessionDisplayProjectionTest {
 
         assertEquals(ActivityStage.Explore, group.stage)
         assertEquals("Finding API documentation", group.action)
-        assertTrue(group.summary.contains("Compose state"))
-        assertTrue(group.summary.contains("https://developer.android.com"))
-        assertEquals("src/**/*.kt", group.operations[0].target)
+        assertTrue(group.summary.isBlank())
+        assertTrue(group.operations[1].details.contains("Compose state"))
+        assertTrue(group.operations[1].details.contains("https://developer.android.com"))
+        assertTrue(group.operations[0].details.contains("src/**/*.kt"))
         assertTrue(group.operations[1].details.contains("documentation"))
     }
 
@@ -133,7 +134,7 @@ class SessionDisplayProjectionTest {
 
         assertEquals(ActivityStage.Execute, group.stage)
         assertEquals(ActivityStatus.Succeeded, group.status)
-        assertEquals("git status", group.summary)
+        assertTrue(group.summary.isBlank())
         assertTrue(group.operations.single().details.contains("command: git status"))
         assertTrue(group.operations.single().details.contains("working tree clean"))
     }
@@ -155,8 +156,85 @@ class SessionDisplayProjectionTest {
         val eval = projected[1] as SessionDisplayItem.ActivityGroup
         assertEquals(ActivityStatus.Running, task.status)
         assertEquals(ActivityStage.Execute, eval.stage)
-        assertEquals("print(42)", eval.summary)
+        assertTrue(eval.summary.isBlank())
         assertTrue(eval.operations.single().details.contains("42"))
+    }
+
+    @Test fun allToolFamiliesKeepTargetsInDetailsRatherThanDefaultSummaries() {
+        for (name in listOf("read", "grep", "edit", "write", "bash", "eval", "task", "wait", "custom")) {
+            val intent = "Inspecting the shared presentation"
+            val raw = """{"i":"$intent","path":"src/Session.kt","command":"inspect --all","content":"replacement"}"""
+            val group = projectSessionTimeline(listOf(tool(
+                name, name, ToolArguments.parse(raw), result = "Supplied result",
+            ))).single() as SessionDisplayItem.ActivityGroup
+            val operation = group.operations.single()
+            assertEquals(name, intent, group.action)
+            assertTrue(name, group.summary.isBlank())
+            for (value in listOf(intent, "src/Session.kt", "inspect --all", "replacement")) {
+                assertTrue("$name must retain $value", operation.details.contains(value))
+            }
+            assertTrue(name, operation.details.contains("Supplied result"))
+        }
+    }
+
+    @Test fun summaryOnlyFailuresStayVisibleWithoutFetchingFullDetails() {
+        val trace = ToolTrace(
+            "failed", "functions.read", ToolArguments(), "", true, true,
+            summary = ToolSummary("Reading configuration", "/private/config", emptyList(), "Access denied"),
+            detailsVersion = "version-2", detailsAvailable = true,
+        )
+        val group = projectSessionTimeline(listOf(
+            tool("failed", trace.name).copy(tool = trace),
+        )).single() as SessionDisplayItem.ActivityGroup
+        val operation = group.operations.single()
+        assertEquals(ActivityStatus.Failed, group.status)
+        assertEquals(trace.summary!!.action, group.action)
+        assertEquals(trace.summary.error, group.summary)
+        assertEquals(trace.summary.error, operation.error)
+        assertTrue(operation.details.isBlank())
+        assertEquals(ActivityDetailKind.Operation, operation.detailKind)
+        assertTrue(operation.detailsAvailable)
+        assertEquals("version-2", operation.detailsVersion)
+    }
+
+    @Test fun inlineChangeDetailsKeepRawInputsAndOutputWithoutDerivedCopies() {
+        val cases = listOf(
+            "write" to JSONObject()
+                .put("i", "Writing full content")
+                .put("path", "src/New.kt")
+                .put("content", "unique-written-content"),
+            "edit" to JSONObject()
+                .put("i", "Applying supplied patch")
+                .put("patch", "*** Update File: src/New.kt\n+unique-patch-line"),
+            "edit" to JSONObject()
+                .put("i", "Recording opaque changes")
+                .put("custom", JSONObject().put("enabled", true))
+                .put("items", org.json.JSONArray().put(7).put("retained")),
+        )
+        for ((name, input) in cases) {
+            val raw = input.toString()
+            val output = "unique-full-output\nsecond output line"
+            val operation = (projectSessionTimeline(listOf(
+                tool(name, name, ToolArguments.parse(raw), result = output),
+            )).single() as SessionDisplayItem.ActivityGroup).operations.single()
+
+            assertTrue(operation.details.contains(raw))
+            assertTrue(operation.details.contains(output))
+            val markers = listOf(raw, output) +
+                listOf("unique-written-content", "unique-patch-line").filter(raw::contains)
+            for (marker in markers) {
+                assertEquals(marker, operation.details.indexOf(marker), operation.details.lastIndexOf(marker))
+            }
+        }
+    }
+
+    @Test fun missingInlinePayloadHasNoExpandableDetailKind() {
+        val operation = (projectSessionTimeline(listOf(
+            tool("empty", "edit", result = ""),
+        )).single() as SessionDisplayItem.ActivityGroup).operations.single()
+        assertTrue(operation.details.isBlank())
+        assertEquals(null, operation.detailKind)
+        assertEquals(ActivityStatus.Succeeded, operation.status)
     }
 
     private fun arguments(

@@ -1,12 +1,8 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -20,8 +16,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -43,7 +37,7 @@ internal fun ResourcesScreen(
 
     if (app.hosts.isEmpty()) {
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 32.dp).padding(top = 80.dp),
+            Modifier.fillMaxSize().retroBackdrop().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 32.dp).padding(top = 48.dp, bottom = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -67,7 +61,7 @@ internal fun ResourcesScreen(
         return
     }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().retroBackdrop(),
         contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -79,15 +73,15 @@ internal fun ResourcesScreen(
                 host.connection == ConnectionState.Synchronizing
             val (connectionLabel, connectionColor) = when (host.connection) {
                 ConnectionState.Connecting, ConnectionState.Synchronizing ->
-                    (if ((host.connectionProgress?.attempt ?: 1) > 1) "Reconnecting" else "Connecting") to BrandPink
-                is ConnectionState.Online -> "$activeTasks active" to Teal300
-                is ConnectionState.Offline -> "Offline" to Gray400
-                ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
-                ConnectionState.UpgradeRequired -> "App update required" to Red400
+                    (if ((host.connectionProgress?.attempt ?: 1) > 1) "Reconnecting" else "Connecting") to RetroBrass
+                is ConnectionState.Online -> "$activeTasks active" to Color(0xFFA8B581)
+                is ConnectionState.Offline -> "Offline" to MutedText
+                ConnectionState.AuthenticationRequired -> "Reconnect required" to ErrorRed
+                ConnectionState.UpgradeRequired -> "App update required" to ErrorRed
             }
             Card(
-                Modifier.fillMaxWidth().glassPanel(CardShape).clip(CardShape).workspaceBackdrop(host.host.os),
-                shape = CardShape,
+                Modifier.fillMaxWidth().retroPanel().clip(RoundedCornerShape(3.dp)).workspaceBackdrop(host.host.os),
+                shape = RoundedCornerShape(3.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
             ) {
                 Column(Modifier.padding(16.dp)) {
@@ -100,40 +94,39 @@ internal fun ResourcesScreen(
                         IconButton(
                             onClick = rememberHapticOnClick { refresh(hostId) },
                             enabled = !busy,
-                            colors = IconButtonDefaults.iconButtonColors(contentColor = Purple200),
+                            colors = IconButtonDefaults.iconButtonColors(contentColor = RetroBrass),
                         ) {
                             Icon(Icons.Outlined.Refresh, "Refresh host")
                         }
                         IconButton(
                             onClick = rememberHapticOnClick { hostPendingRemoval = host.host },
                             enabled = !busy,
-                            colors = IconButtonDefaults.iconButtonColors(contentColor = Gray400),
+                            colors = IconButtonDefaults.iconButtonColors(contentColor = MutedText),
                         ) {
                             Icon(Icons.Outlined.DeleteOutline, "Remove host")
                         }
                     }
                     Spacer(Modifier.height(2.dp))
                     HostUrlRow(host.url)
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
                             "OMP ${host.host.ompVersion} · Gateway ${host.host.gatewayVersion}",
-                            Modifier.weight(1f),
+                            Modifier.fillMaxWidth(),
                             style = MaterialTheme.typography.bodySmall,
-                            color = Gray400,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                            color = MutedText,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Box(Modifier.size(6.dp).background(connectionColor, CircleShape))
-                        Spacer(Modifier.width(5.dp))
-                        if (connectionPending) {
-                            ConnectingLabel(connectionLabel, connectionColor)
-                        } else {
-                            Text(
-                                connectionLabel,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = connectionColor,
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(6.dp).background(connectionColor, CircleShape))
+                            Spacer(Modifier.width(5.dp))
+                            if (connectionPending) {
+                                ConnectingLabel(connectionLabel, connectionColor)
+                            } else {
+                                Text(
+                                    connectionLabel,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = connectionColor,
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -143,13 +136,13 @@ internal fun ResourcesScreen(
                                 Icons.Outlined.ChatBubbleOutline,
                                 contentDescription = null,
                                 modifier = Modifier.padding(top = 2.dp).size(14.dp),
-                                tint = Gray400,
+                                tint = MutedText,
                             )
                             Text(
                                 workspaceConnectionMessage(host),
                                 modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Gray400,
+                                color = MutedText,
                             )
                         }
                     }
@@ -166,7 +159,7 @@ internal fun ResourcesScreen(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                OutlinedButton(onClick = rememberHapticOnClick(pair)) {
+                OutlinedButton(onClick = rememberHapticOnClick(pair), shape = RetroShape) {
                     Icon(Icons.Outlined.AddLink, null)
                     Spacer(Modifier.width(8.dp))
                     Text("Connect another host")
@@ -177,7 +170,7 @@ internal fun ResourcesScreen(
     hostPendingRemoval?.let { host ->
         AlertDialog(
             onDismissRequest = { hostPendingRemoval = null },
-            icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = Red400) },
+            icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = ErrorRed) },
             title = { Text("Remove host?") },
             text = { Text("This removes “${host.name}” and its saved connection from this phone. The host itself will not be changed.") },
             confirmButton = {
@@ -186,7 +179,7 @@ internal fun ResourcesScreen(
                         hostPendingRemoval = null
                         forget(host.id)
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Red400),
+                    colors = ButtonDefaults.textButtonColors(contentColor = ErrorRed),
                 ) {
                     Text("Remove")
                 }
@@ -198,27 +191,7 @@ internal fun ResourcesScreen(
 
 @Composable
 private fun ConnectingLabel(text: String, color: Color) {
-    var textWidth by remember { mutableFloatStateOf(0f) }
-    val transition = rememberInfiniteTransition(label = "hostConnection")
-    val progress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1_800, easing = LinearEasing)),
-        label = "connectionFlow",
-    )
-    val streakWidth = textWidth * 0.38f
-    val streakStart = -streakWidth + progress * (textWidth + streakWidth)
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall.copy(
-            brush = Brush.linearGradient(
-                colors = listOf(color, color, MaterialTheme.colorScheme.primary, color, color),
-                start = Offset(streakStart, 0f),
-                end = Offset(streakStart + streakWidth.coerceAtLeast(1f), 0f),
-            ),
-        ),
-        onTextLayout = { textWidth = it.size.width.toFloat() },
-    )
+    Text(text, style = MaterialTheme.typography.bodySmall, color = color)
 }
 
 @Composable
@@ -229,14 +202,14 @@ private fun HostUrlRow(url: String) {
             if (visible) url else "https://••••",
             Modifier.weight(1f, fill = false),
             style = MaterialTheme.typography.bodySmall,
-            color = Gray400,
+            color = MutedText,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         IconButton(
             onClick = rememberHapticOnClick { visible = !visible },
             modifier = Modifier.size(36.dp),
-            colors = IconButtonDefaults.iconButtonColors(contentColor = Gray400),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = MutedText),
         ) {
             Icon(
                 if (visible) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
@@ -250,22 +223,22 @@ private fun HostUrlRow(url: String) {
 @Composable
 private fun WorkspaceRow(workspace: Workspace, enabled: Boolean, onClick: () -> Unit) {
 
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(3.dp)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Color.White.copy(alpha = if (enabled) 0.055f else 0.025f), shape)
+            .retroPanel(inset = true)
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Outlined.FolderOpen, null, Modifier.size(21.dp), tint = if (enabled) Purple400 else Gray400)
+        Icon(Icons.Outlined.FolderOpen, null, Modifier.size(21.dp), tint = if (enabled) RetroBrass else RetroMutedText)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(workspace.name, style = MaterialTheme.typography.titleSmall, color = if (enabled) TextHigh else Gray400)
-            Text(workspace.path, style = MaterialTheme.typography.bodySmall, color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(workspace.name, style = MaterialTheme.typography.titleSmall, color = if (enabled) TextHigh else MutedText)
+            Text(workspace.path, style = MaterialTheme.typography.bodySmall, color = MutedText, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = Gray400)
+        Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = MutedText)
     }
 }

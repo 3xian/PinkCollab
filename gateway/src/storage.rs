@@ -87,7 +87,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 5,
+            schema_version <= 6,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -125,6 +125,26 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         )?;
         if schema_version < 5 {
             references::migrate_references(&db)?;
+        }
+        if schema_version < 6 {
+            db.execute_batch("BEGIN IMMEDIATE;")?;
+            let migration = (|| -> Result<()> {
+                if db.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('runtime_leases') WHERE name='windows_job_name'",
+                    [], |row| row.get::<_, i64>(0),
+                )? == 0 {
+                    db.execute_batch("ALTER TABLE runtime_leases ADD COLUMN windows_job_name TEXT;")?;
+                }
+                db.execute_batch("PRAGMA user_version=6;")?;
+                Ok(())
+            })();
+            match migration {
+                Ok(()) => db.execute_batch("COMMIT;")?,
+                Err(error) => {
+                    let _ = db.execute_batch("ROLLBACK;");
+                    return Err(error);
+                }
+            }
         }
         Ok(Self {
             db: Mutex::new(db),
@@ -573,6 +593,26 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
             "INSERT OR IGNORE INTO runtime_leases (session_id,generation,created_at) VALUES (?1,?2,?3)",
             params![session_id,generation,Utc::now().to_rfc3339()],
         )?==1)
+    }
+    #[cfg(windows)]
+    pub(crate) fn reserve_runtime_in_job(
+        &self,
+        session_id: &str,
+        generation: &str,
+        job_name: &str,
+    ) -> Result<bool> {
+        Ok(self.db.lock().execute(
+            "INSERT OR IGNORE INTO runtime_leases (session_id,generation,created_at,windows_job_name) VALUES (?1,?2,?3,?4)",
+            params![session_id, generation, Utc::now().to_rfc3339(), job_name],
+        )? == 1)
+    }
+    #[cfg(windows)]
+    pub(crate) fn runtime_job(&self, session_id: &str) -> Result<Option<(String, String)>> {
+        Ok(self.db.lock().query_row(
+            "SELECT generation,windows_job_name FROM runtime_leases WHERE session_id=?1 AND windows_job_name IS NOT NULL",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?)
     }
     pub fn runtime_leases(&self) -> Result<Vec<(String, String)>> {
         let db = self.db.lock();

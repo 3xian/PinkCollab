@@ -35,15 +35,6 @@ internal fun sessionHistoryError(detail: SessionDetail, host: HostState?, refres
     return if (detail.savedHistory == SavedHistory.Failed) "Could not load message history" else null
 }
 
-internal fun sessionSyncMessage(host: HostState?, hasSnapshot: Boolean): String = when (host?.connection) {
-    ConnectionState.Connecting -> "Connecting to ${host.paired.host.name}…"
-    ConnectionState.Synchronizing -> "Syncing sessions…"
-    ConnectionState.AuthenticationRequired -> "Sign-in required. Open hosts to reconnect."
-    ConnectionState.UpgradeRequired -> "Update required. Open hosts for details."
-    is ConnectionState.Offline -> "Host offline. Waiting for a connection…"
-    else -> if (hasSnapshot) "Loading message history…" else "Opening conversation…"
-}
-
 internal sealed interface SessionAction {
     data object Send : SessionAction
     data class DraftChanged(val text: String) : SessionAction

@@ -13,8 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import dev.pinkcollab.ui.theme.BrandPink
-import dev.pinkcollab.ui.theme.Purple200
+import dev.pinkcollab.ui.theme.BrandBronze
+import dev.pinkcollab.ui.theme.BrassLight
 import io.noties.markwon.AbstractMarkwonPlugin
 import io.noties.markwon.Markwon
 import kotlinx.coroutines.runBlocking
@@ -32,7 +32,7 @@ class SessionMarkdownDeviceTest {
     @Test fun inline_code_keeps_foreground_only_after_background_rendering() = runBlocking {
         val renderer = SessionMarkdownRenderer(createSessionMarkwon(compose.activity))
         val parsed = renderer.render("Plain `code` and **`bold`**")
-        assertInlineCodeFormatting(parsed, Purple200.toArgb(), BrandPink.toArgb())
+        assertInlineCodeFormatting(parsed, BrassLight.toArgb(), BrandBronze.toArgb())
     }
 
     @Test fun background_markdown_keeps_formatting_links_and_updates_the_current_message() {

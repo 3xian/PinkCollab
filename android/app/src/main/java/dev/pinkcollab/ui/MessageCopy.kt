@@ -19,7 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.pinkcollab.ui.theme.BrandPurple
+import dev.pinkcollab.ui.theme.BrandBrass
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 
 /** Owns both the copy action's position and the space it needs beside the message. */
@@ -61,7 +61,7 @@ private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
                 imageVector = Icons.Outlined.ContentCopy,
                 contentDescription = "Copy message",
                 modifier = Modifier.size(16.dp),
-                tint = BrandPurple,
+                tint = BrandBrass,
             )
         }
         if (feedback.value < 1f) {

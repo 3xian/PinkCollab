@@ -7,29 +7,52 @@ use std::{
     process::Child,
     time::{Duration, Instant},
 };
-use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Foundation::{
+    ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError, INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
 };
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+    JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation, OpenJobObjectW,
     QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
+use windows_sys::Win32::System::SystemServices::JOB_OBJECT_QUERY;
 use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
 
 pub(crate) struct Job(OwnedHandle);
 
 impl Job {
     pub(crate) fn attach_and_resume(child: &Child) -> Result<Self> {
-        // SAFETY: A null name creates a private job; the returned owned handle is closed exactly
-        // once by OwnedHandle. Every Win32 call below receives a valid handle and initialized data.
-        let raw = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        let job = Self::create(None)?;
+        job.attach(child)?;
+        Ok(job)
+    }
+
+    pub(crate) fn named(name: &str) -> Result<Self> {
+        Self::create(Some(name))
+    }
+
+    fn create(name: Option<&str>) -> Result<Self> {
+        let wide = name.map(|name| name.encode_utf16().chain(Some(0)).collect::<Vec<_>>());
+        // Create the containment before reserving a lease. Its handle keeps even an empty
+        // job present until startup finishes, so a concurrent Gateway cannot reclaim it.
+        let raw = unsafe {
+            CreateJobObjectW(
+                std::ptr::null(),
+                wide.as_ref().map_or(std::ptr::null(), |name| name.as_ptr()),
+            )
+        };
         if raw.is_null() {
             return Err(std::io::Error::last_os_error()).context("cannot create OMP job");
         }
+        let already_exists = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
         let job = Self(unsafe { OwnedHandle::from_raw_handle(raw) });
+        if already_exists {
+            bail!("OMP job name is already in use");
+        }
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         let set = unsafe {
@@ -43,13 +66,32 @@ impl Job {
         if set == 0 {
             return Err(std::io::Error::last_os_error()).context("cannot configure OMP job");
         }
+        Ok(job)
+    }
+
+    pub(crate) fn absent(name: &str) -> Result<bool> {
+        let wide: Vec<_> = name.encode_utf16().chain(Some(0)).collect();
+        let raw = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, wide.as_ptr()) };
+        if raw.is_null() {
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_FILE_NOT_FOUND as i32) {
+                return Ok(true);
+            }
+            return Err(error).context("cannot inspect previous OMP job");
+        }
+        let _job = unsafe { OwnedHandle::from_raw_handle(raw) };
+        // Existence blocks recovery even when empty: another Gateway may be about to attach OMP.
+        Ok(false)
+    }
+
+    pub(crate) fn attach(&self, child: &Child) -> Result<()> {
         let assigned =
-            unsafe { AssignProcessToJobObject(job.0.as_raw_handle(), child.as_raw_handle()) };
+            unsafe { AssignProcessToJobObject(self.0.as_raw_handle(), child.as_raw_handle()) };
         if assigned == 0 {
             return Err(std::io::Error::last_os_error()).context("cannot assign OMP to job");
         }
         resume_initial_thread(child.id())?;
-        Ok(job)
+        Ok(())
     }
 
     fn active_processes(&self) -> Result<u32> {

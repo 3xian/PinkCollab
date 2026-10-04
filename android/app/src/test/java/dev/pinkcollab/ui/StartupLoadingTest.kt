@@ -44,7 +44,7 @@ class StartupLoadingTest {
         val states = MutableStateFlow(appWithHost(ConnectionState.Synchronizing))
         var ready = false
         launch {
-            awaitStartupReadiness(states, maximumDurationMillis = 8_000)
+            awaitStartupReadiness(states)
             ready = true
         }
 
@@ -61,16 +61,16 @@ class StartupLoadingTest {
     }
 
     @Test
-    fun `snapshot arriving after three seconds releases startup without extra delay`() = runTest {
+    fun `a delayed snapshot releases startup without an extra delay`() = runTest {
         val states = MutableStateFlow(appWithHost(ConnectionState.Synchronizing))
         var ready = false
         launch {
-            awaitStartupReadiness(states, maximumDurationMillis = 8_000)
+            awaitStartupReadiness(states)
             ready = true
         }
 
         runCurrent()
-        advanceTimeBy(5_000)
+        advanceTimeBy(60_000)
         runCurrent()
         assertFalse(ready)
 
@@ -85,21 +85,22 @@ class StartupLoadingTest {
     }
 
     @Test
-    fun `startup timeout releases the global loading screen`() = runTest {
-        val states = MutableStateFlow(appWithHost(ConnectionState.Connecting))
-        var ready = false
-        launch {
-            awaitStartupReadiness(states, maximumDurationMillis = 8_000)
-            ready = true
+    fun `connection failures release startup into recovery`() = runTest {
+        for (failure in listOf(ConnectionState.Offline(), ConnectionState.AuthenticationRequired,
+            ConnectionState.UpgradeRequired)) {
+            val states = MutableStateFlow(appWithHost(ConnectionState.Connecting))
+            var ready = false
+            launch {
+                awaitStartupReadiness(states)
+                ready = true
+            }
+            runCurrent()
+            assertFalse(ready)
+            states.value = appWithHost(failure, initialSync = InitialSyncState.Unavailable)
+            runCurrent()
+            assertTrue(ready)
+            assertEquals(TaskListLoadState.Unavailable, states.value.taskListLoadState)
         }
-
-        advanceTimeBy(7_999)
-        runCurrent()
-        assertFalse(ready)
-        advanceTimeBy(1)
-        runCurrent()
-
-        assertTrue(ready)
     }
 
     @Test
@@ -107,7 +108,7 @@ class StartupLoadingTest {
         val states = MutableStateFlow(AppState())
         var ready = false
         launch {
-            awaitStartupReadiness(states, maximumDurationMillis = 8_000)
+            awaitStartupReadiness(states)
             ready = true
         }
 
@@ -147,8 +148,8 @@ class StartupLoadingTest {
     }
 
     @Test
-    fun `leaving Tasks after startup timeout withdraws the pending focus`() = runTest {
-        val states = MutableStateFlow(appWithHost(ConnectionState.Synchronizing))
+    fun `leaving Tasks after startup recovery withdraws the pending focus`() = runTest {
+        val states = MutableStateFlow(appWithHost(ConnectionState.Offline(), initialSync = InitialSyncState.Unavailable))
         val selected = MutableStateFlow<SessionKey?>(null)
         val focused = mutableListOf<Session>()
         val focusJob = launch {
@@ -156,7 +157,6 @@ class StartupLoadingTest {
         }
         var ready = false
         launch { awaitStartupReadiness(states); ready = true }
-        advanceTimeBy(8_000)
         runCurrent()
         assertTrue(ready)
         assertTrue(focused.isEmpty())

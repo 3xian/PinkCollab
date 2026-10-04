@@ -214,6 +214,8 @@ The default data directory is `~/.pinkcollab` (`./.pinkcollab` if no home direct
 | `leases` | List runtime leases whose process exit was not confirmed |
 | `clear-lease --session <id> --generation <id> --verified-exited` | With the Gateway stopped, clear one lease **only after verifying the old OMP process and descendants have exited** |
 
+On Windows, new runtime leases record a named Job Object. After a crash or reboot, starting or sending to an inactive session automatically recovers its lease only when that exact job no longer exists. An existing job (including an empty job during startup) or a failed job lookup never permits another writer. Older leases without job evidence and Unix leases still require the stopped-Gateway, verified-exit procedure above; upgrading does not discard them or replay failed prompts.
+
 `status` exits nonzero if local health, managed background state, OMP, or a managed Funnel check fails. Externally managed HTTPS does not require a verified Funnel. Windows' hidden `background-start`/`background-run` entries are internal; use `service start` or `serve`.
 
 ### Automation
@@ -242,7 +244,7 @@ File: `<data-dir>/config.yaml`. See [the example](../gateway/config.example.yaml
 
 #### `max_sessions`
 
-Creating a SessionRecord uses no slot. Starting OMP reserves a slot until confirmed exit; a completed turn still occupies one while its process remains attached. At the limit, new records can be created but their runtimes cannot start. Restarts do not resume processes, and unresolved exit leases may block a session until safely cleared.
+Creating a SessionRecord uses no slot. Starting OMP reserves a slot until confirmed exit; a completed turn still occupies one while its process remains attached. At the limit, new records can be created but their runtimes cannot start. Restarts do not resume processes automatically. A new Windows runtime can recover its old lease from confirmed named-job absence when the user starts or sends again; unverifiable leases may block a session until safely cleared.
 
 Windows executable lookup honors `PATHEXT`. Unix data directories/files use `0700`/`0600`; Windows uses default ACLs.
 

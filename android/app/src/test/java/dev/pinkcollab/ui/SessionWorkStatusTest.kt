@@ -36,11 +36,32 @@ class SessionWorkStatusTest {
         completed: Boolean = false,
     ) = TimelineItem(id, "tool", "", "", "", ToolTrace(id, name, ToolArguments(strings = arguments), "", false, completed))
 
+    @Test fun sending_overrides_attention_and_work_only_while_online() {
+        val detail = SessionDetail(
+            session.copy(
+                attention = Attention("confirm", AttentionType.Confirm, "Apply changes?", emptyList()),
+                workTiming = WorkTiming(23_000, true, false, 0),
+            ),
+            streaming = "Partial answer",
+            liveItems = listOf(user, tool()),
+        )
+        for (progress in listOf(SendProgress.Uploading(1, 2, "notes.txt"), SendProgress.Submitting)) {
+            val sending = sessionWorkStatus(detail, online, progress)
+            assertEquals(WorkStatusKind.Sending, sending.kind)
+            assertFalse(sending.active)
+            assertEquals(null, sending.timing)
+            val offline = sessionWorkStatus(detail, online.copy(connection = ConnectionState.Offline()), progress)
+            assertEquals(WorkStatusKind.Offline, offline.kind)
+            assertEquals(null, offline.timing)
+        }
+        assertEquals(WorkStatusKind.Attention, sessionWorkStatus(detail, online).kind)
+    }
+
     @Test fun historical_session_never_claims_ready_or_completed_work() {
         val historical = session.copy(origin = dev.pinkcollab.data.SessionOrigin.Discovered,
             runtimeAttached = false, generation = null, status = SessionStatus.Idle)
         val status = sessionWorkStatus(SessionDetail(session = historical), online)
-        assertEquals("History on host", status.title)
+        assertEquals(WorkStatusKind.History, status.kind)
         assertFalse(status.active)
         assertEquals(null, status.timing)
     }
@@ -83,7 +104,6 @@ class SessionWorkStatusTest {
             val status = sessionWorkStatus(detail, online.copy(connection = connection))
             assertEquals(WorkStatusKind.Offline, status.kind)
             assertFalse(status.active)
-            assertFalse(status.detail.contains("Session.kt"))
         }
         assertEquals(WorkStatusKind.Offline, sessionWorkStatus(detail, null).kind)
     }
@@ -97,7 +117,6 @@ class SessionWorkStatusTest {
         val status = sessionWorkStatus(detail, online)
         assertEquals(WorkStatusKind.Starting, status.kind)
         assertFalse(status.active)
-        assertFalse(status.detail.contains("Session.kt"))
     }
 
     @Test fun lifecycle_transitions_override_attention_and_tools() {
@@ -113,7 +132,6 @@ class SessionWorkStatusTest {
             val status = sessionWorkStatus(detail, online)
             assertEquals(kind, status.kind)
             assertFalse(status.active)
-            assertFalse(status.detail.contains("Session.kt"))
         }
     }
 
@@ -125,7 +143,6 @@ class SessionWorkStatusTest {
         )
         val status = sessionWorkStatus(detail, online)
         assertEquals(WorkStatusKind.Attention, status.kind)
-        assertEquals("Apply these changes?", status.detail)
         assertFalse(status.active)
         for (waiting in listOf(
             session.copy(status = SessionStatus.NeedsInput),
@@ -146,17 +163,13 @@ class SessionWorkStatusTest {
         )
         val thinking = sessionWorkStatus(detail, online)
         assertTrue(thinking.active)
-        assertFalse(thinking.detail.contains("stale.kt"))
         assertEquals(sessionWorkStatus(SessionDetail(session), online), thinking)
 
         val current = sessionWorkStatus(detail.copy(liveItems = listOf(oldTool, user, tool())), online)
         assertEquals("Inspecting session state", current.title)
-        assertTrue(current.detail.contains("src/Session.kt"))
-        assertFalse(current.detail.contains("stale.kt"))
-        assertFalse(current.title.contains("2 tools"))
     }
 
-    @Test fun concurrent_tools_count_only_incomplete_calls_and_show_latest_target() {
+    @Test fun concurrent_tools_count_only_incomplete_calls() {
         val detail = SessionDetail(session, liveItems = listOf(
             user, tool(), tool(id = "finished", completed = true),
             tool(id = "command", name = "bash", arguments = mapOf(
@@ -165,13 +178,10 @@ class SessionWorkStatusTest {
         ))
         val status = sessionWorkStatus(detail, online)
         assertTrue(status.title.contains("2 tools"))
-        assertTrue(status.detail.contains("Checking compiler errors"))
-        assertTrue(status.detail.contains("./gradlew compileDebugKotlin"))
         assertTrue(status.active)
         val commandFinished = detail.liveItems.last().let { it.copy(tool = it.tool!!.copy(completed = true)) }
         val remaining = sessionWorkStatus(detail.copy(liveItems = detail.liveItems.dropLast(1) + commandFinished), online)
         assertEquals("Inspecting session state", remaining.title)
-        assertTrue(remaining.detail.contains("src/Session.kt"))
     }
 
     @Test fun active_tool_precedes_streaming_until_it_completes() {
@@ -185,44 +195,6 @@ class SessionWorkStatusTest {
         assertTrue(thinking.active)
     }
 
-    @Test fun search_keeps_query_and_scope_and_unknown_tools_keep_their_name() {
-        val search = sessionWorkStatus(SessionDetail(session, liveItems = listOf(tool(
-            name = "grep", arguments = mapOf("pattern" to "runtimeState", "path" to "src/data"),
-        ))), online)
-        assertTrue(search.detail.contains("runtimeState"))
-        assertTrue(search.detail.contains("src/data"))
-        val custom = sessionWorkStatus(SessionDetail(session, liveItems = listOf(tool(
-            name = "custom.inspect", arguments = mapOf("url" to "https://example.com/spec"),
-        ))), online)
-        assertTrue(custom.title.contains("custom.inspect"))
-        assertTrue(custom.detail.contains("https://example.com/spec"))
-    }
-
-    @Test fun surface_specific_tool_classification_preserves_targets() {
-        for ((name, stage, stripSubject) in listOf(
-            Triple("tools/SEARCH_files", ActivityStage.Explore, "needle"),
-            Triple("tools/GLOB_files", ActivityStage.Explore, ""),
-            Triple("tools/COMMAND", ActivityStage.Other, "runner"),
-            Triple("tools/BASH_script", ActivityStage.Execute, ""),
-        )) {
-            val item = tool(name = name, arguments = mapOf(
-                "i" to "Inspecting activity",
-                "path" to "src/scope",
-                "query" to "needle",
-                "command" to "runner",
-            ))
-            val status = sessionWorkStatus(SessionDetail(session, liveItems = listOf(item)), online)
-            assertEquals(name, stripSubject == "needle", status.detail.contains("needle"))
-            assertEquals(name, stripSubject == "runner", status.detail.contains("runner"))
-            assertEquals(name, stripSubject != "runner", status.detail.contains("src/scope"))
-
-            val group = projectSessionTimeline(listOf(item)).single() as SessionDisplayItem.ActivityGroup
-            assertEquals(name, stage, group.stage)
-            assertTrue(group.summary.contains("runner"))
-            assertTrue(group.summary.contains("src/scope"))
-        }
-    }
-
     @Test fun idle_and_detached_are_ready_not_stale_work_or_completion() {
         val detail = SessionDetail(session, streaming = "Old partial reply", liveItems = listOf(tool()))
         for (readySession in listOf(
@@ -232,7 +204,6 @@ class SessionWorkStatusTest {
             val status = sessionWorkStatus(detail.copy(session = readySession), online)
             assertEquals(WorkStatusKind.Ready, status.kind)
             assertFalse(status.active)
-            assertFalse(status.detail.contains("Session.kt"))
         }
     }
 }

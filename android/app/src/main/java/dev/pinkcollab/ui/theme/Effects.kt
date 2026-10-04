@@ -18,11 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,9 +36,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-val BrandGradient: Brush = Brush.linearGradient(listOf(BrandPurple, BrandPink))
+val BrandGradient: Brush = Brush.linearGradient(listOf(BrandBrass, BrandBronze))
 
-/** Paint icon/vector content with the same purple-to-pink brand gradient used by text. */
+/** Paint icon/vector content with the same antique brass gradient used by text. */
 fun Modifier.brandGradientMask(): Modifier =
     graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithCache {
@@ -50,25 +48,18 @@ fun Modifier.brandGradientMask(): Modifier =
             }
         }
 
-/** Brand-gradient hairline: white edges read as grey against the near-black base. */
+/** Bronze edge treatment for subdued, dark controls. */
 private fun edgeBrush(alpha: Float): Brush =
-    Brush.linearGradient(listOf(BrandPurple.copy(alpha = alpha), BrandPink.copy(alpha = alpha)))
+    Brush.linearGradient(listOf(BrandBrass.copy(alpha = alpha), BrandBronze.copy(alpha = alpha)))
 
-/**
- * Frosted-glass panel: translucent gradient fill plus a purple→violet hairline border.
- * Drawn over the dark app background it reads as glass without paying per-node blur cost,
- * which keeps long scrolling lists smooth.
- *
- * The outline is derived from [shape], so pills and cards each get a matching corner
- * radius; a fixed radius makes the stroke drift off the corner and show a stray edge.
- */
-fun Modifier.glassPanel(
+/** Static bronze-tinted framing for compact chips and custom-shaped activity surfaces. */
+fun Modifier.framedPanel(
     shape: Shape,
     fillAlpha: Float = 0.07f,
     borderAlpha: Float = 0.14f,
     borderBrush: Brush? = null,
 ): Modifier = background(
-    Brush.linearGradient(listOf(BrandPurple.copy(alpha = fillAlpha), BrandPink.copy(alpha = fillAlpha * 0.72f))),
+    Brush.linearGradient(listOf(BrandBrass.copy(alpha = fillAlpha), BrandBronze.copy(alpha = fillAlpha * 0.72f))),
     shape,
 ).border(1.2.dp, borderBrush ?: edgeBrush(borderAlpha), shape)
 
@@ -84,16 +75,9 @@ private fun rememberPulseAlpha(): Float {
     return alpha
 }
 
-/** Card border that breathes: a purple→violet gradient outline with pulsing alpha. */
-@Composable
-fun Modifier.pulsingGlowBorder(shape: Shape, width: Dp = 1.5.dp): Modifier {
-    val alpha = rememberPulseAlpha()
-    return border(
-        width,
-        Brush.linearGradient(listOf(BrandPurple.copy(alpha = alpha), BrandPink.copy(alpha = alpha * 0.82f))),
-        shape,
-    )
-}
+/** Localized state emphasis, never an animated full-screen background. */
+fun Modifier.stateAccentBorder(shape: Shape, width: Dp = 1.5.dp): Modifier =
+    border(width, RetroBrass.copy(alpha = 0.70f), shape)
 
 /** Small status dot with a soft outer glow, optionally pulsing. */
 @Composable
@@ -115,7 +99,7 @@ fun StatusChip(status: dev.pinkcollab.data.SessionStatus, modifier: Modifier = M
     val color = statusColor(status)
     Row(
         modifier
-            .glassPanel(RoundedCornerShape(999.dp), fillAlpha = 0.06f, borderAlpha = 0.10f)
+            .framedPanel(RoundedCornerShape(3.dp), fillAlpha = 0.06f, borderAlpha = 0.10f)
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -125,11 +109,11 @@ fun StatusChip(status: dev.pinkcollab.data.SessionStatus, modifier: Modifier = M
     }
 }
 
-/** Shared card treatment; controls use Material 3's own shape scale. */
-val CardCornerRadius = 20.dp
+/** Shallow bevels and small corners keep panels aligned with the antique component system. */
+val CardCornerRadius = 4.dp
 val CardShape = RoundedCornerShape(CardCornerRadius)
 
-/** High-emphasis action using Material 3 sizing and the app's brand gradient. */
+/** Raised amber action with legible dark text and the usual Material touch target. */
 @Composable
 fun PrimaryButton(
     onClick: () -> Unit,
@@ -139,36 +123,27 @@ fun PrimaryButton(
     content: @Composable RowScope.() -> Unit,
 ) {
 
-    val shape = ButtonDefaults.shape
-    val fill = if (enabled) {
-        BrandGradient
-    } else {
-        Brush.linearGradient(
-            listOf(
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-            ),
-        )
-    }
+    val shape = RetroShape
     Button(
         onClick = rememberHapticOnClick(onClick),
         enabled = enabled,
-        modifier = modifier.clip(shape).background(fill, shape),
+        modifier = modifier.retroPanel(
+            if (enabled) RetroAmberTop else RetroSurfaceTop,
+            if (enabled) RetroAmberBottom else RetroSurfaceBottom,
+            accented = enabled,
+        ),
         contentPadding = contentPadding,
+        shape = shape,
         colors = ButtonDefaults.buttonColors(
             containerColor = Color.Transparent,
             disabledContainerColor = Color.Transparent,
+            contentColor = RetroInk,
+            disabledContentColor = RetroMutedText,
         ),
         content = content,
     )
 }
 
-/** Material 3 Expressive small button. compose-bom 2025.05.01 has no size tokens. */
-internal val SmallButtonHeight = 40.dp
+/** Compact actions keep the platform's minimum touch-target height. */
+internal val SmallButtonHeight = 48.dp
 internal val SmallButtonPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-
-/** Drops the 48dp touch-target floor so a 40dp button stays 40dp. */
-@Composable
-internal fun SmallButtons(content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp, content = content)
-}

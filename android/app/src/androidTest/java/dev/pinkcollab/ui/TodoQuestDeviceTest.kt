@@ -81,6 +81,40 @@ class TodoQuestDeviceTest {
         compose.onNodeWithText("Ship").assertIsDisplayed()
     }
 
+    @Test fun longScrollUnrollsDownwardAndKeepsHeaderPinned() {
+        val plan = TodoPlan(listOf(TodoPhase("Long quest", (1..24).map {
+            TodoTask("Quest objective $it", TodoStatus.Pending)
+        })), ToolTrace("todo", "todo", ToolArguments(), "", false, true))
+        val expanded = mutableStateOf(false)
+        compose.mainClock.autoAdvance = false
+        compose.setContent { PinkCollabTheme {
+            FloatingTodoPanel(plan, live = false, expanded = expanded.value,
+                onExpandedChange = { expanded.value = it }, maxHeight = 320.dp)
+        } }
+        val header = compose.onNodeWithTag("todoHeader")
+        val headerBounds = header.fetchSemanticsNode().boundsInRoot
+        val collapsedBounds = compose.onNodeWithTag("floatingTodoPanel").fetchSemanticsNode().boundsInRoot
+        saveScreenshot("todo-scroll-collapsed.png")
+        header.performClick()
+        compose.mainClock.advanceTimeBy(180)
+        val unfoldingBounds = compose.onNodeWithTag("floatingTodoPanel").fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertEquals(headerBounds, header.fetchSemanticsNode().boundsInRoot)
+        org.junit.Assert.assertTrue(unfoldingBounds.bottom > collapsedBounds.bottom)
+        saveScreenshot("todo-scroll-unrolling.png")
+        compose.mainClock.advanceTimeBy(500)
+        val openBounds = compose.onNodeWithTag("floatingTodoPanel").fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue(openBounds.bottom > unfoldingBounds.bottom)
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithText("Quest objective 24").performScrollTo().assertIsDisplayed()
+        org.junit.Assert.assertEquals(headerBounds, header.fetchSemanticsNode().boundsInRoot)
+        saveScreenshot("todo-scroll-last-task.png")
+        header.performClick()
+        compose.mainClock.advanceTimeBy(500)
+        org.junit.Assert.assertEquals(collapsedBounds,
+            compose.onNodeWithTag("floatingTodoPanel").fetchSemanticsNode().boundsInRoot)
+        compose.onNodeWithTag("todoScrollBody").assertDoesNotExist()
+    }
+
     private fun saveScreenshot(name: String) {
         val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, ContentValues().apply {

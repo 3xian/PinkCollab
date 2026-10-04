@@ -27,6 +27,23 @@ impl SessionController {
                 return Ok((current.generation.clone(), current.process.clone()));
             }
         }
+        #[cfg(windows)]
+        {
+            let session_id = self.state.lock().await.session.id.clone();
+            self.store
+                .run(move |store| {
+                    if let Some((generation, name)) = store.runtime_job(&session_id)?
+                        && crate::windows_job::Job::absent(&name)?
+                    {
+                        // A named job disappears only after its handles and contained processes
+                        // are gone. Legacy leases have no such proof and remain fail-closed.
+                        store.mark_generation_unknown(&session_id, &generation)?;
+                        store.release_runtime(&session_id, &generation)?;
+                    }
+                    Ok(())
+                })
+                .await?;
+        }
         let permit = self
             .quota
             .clone()
@@ -49,13 +66,34 @@ impl SessionController {
         let generation = storage::id("run_");
         let reserve_session = session.id.clone();
         let reserve_generation = generation.clone();
+        #[cfg(windows)]
+        let job_name = format!("Global\\PinkCollab.{generation}");
+        #[cfg(windows)]
+        let job = crate::windows_job::Job::named(&job_name)?;
         ensure!(
             self.store
-                .run(move |store| store.reserve_runtime(&reserve_session, &reserve_generation))
+                .run(move |store| {
+                    #[cfg(windows)]
+                    {
+                        store.reserve_runtime_in_job(
+                            &reserve_session,
+                            &reserve_generation,
+                            &job_name,
+                        )
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        store.reserve_runtime(&reserve_session, &reserve_generation)
+                    }
+                })
                 .await?,
             "previous runtime exit is not confirmed"
         );
-        let (runtime, mut output) = match Runtime::spawn(&self.executable, &self.args, &cwd) {
+        #[cfg(windows)]
+        let spawned = Runtime::spawn_in_job(&self.executable, &self.args, &cwd, job);
+        #[cfg(not(windows))]
+        let spawned = Runtime::spawn(&self.executable, &self.args, &cwd);
+        let (runtime, mut output) = match spawned {
             Ok(started) => started,
             Err(err) => {
                 let release_session = session.id.clone();

@@ -200,9 +200,6 @@ class TasksPagerBarDeviceTest {
         val strip = compose.onNodeWithTag("sessionCards").fetchSemanticsNode().boundsInRoot
         val first = compose.onNodeWithTag("sessionCard:s0").fetchSemanticsNode().boundsInRoot
         assertTrue("First card stays at the start", abs(first.left - strip.left - 12 * compose.density.density) <= 2f)
-        assertEquals(listOf("Session 0", "project-0", "Connecting"),
-            compose.onNodeWithTag("sessionCard:s0").fetchSemanticsNode().config[SemanticsProperties.Text].map { it.text })
-        assertTrue("Compact two-line strip", abs(strip.height - 64 * compose.density.density) <= 2f)
 
         // Scrolling the strip alone must not select a different timeline.
         compose.onNodeWithTag("sessionCards").performTouchInput { swipeLeft() }
@@ -229,8 +226,8 @@ class TasksPagerBarDeviceTest {
         compose.waitForIdle()
         assertEquals(SessionKey("host", "s2"), selected)
         // Host connectivity takes precedence over cached session attention.
-        assertEquals(listOf("Session 2", "project-2", "Connecting"),
-            compose.onNodeWithTag("sessionCard:s2").fetchSemanticsNode().config[SemanticsProperties.Text].map { it.text })
+        assertEquals(SessionCardStatus.Connecting.label,
+            compose.onNodeWithTag("sessionCard:s2").fetchSemanticsNode().config[SemanticsProperties.StateDescription])
         assertCentered("s2")
 
         compose.onNodeWithTag("sessionTimelinePager").performTouchInput { swipeLeft() }

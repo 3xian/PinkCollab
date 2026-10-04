@@ -35,18 +35,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
-import dev.pinkcollab.ui.theme.Base0
-import dev.pinkcollab.ui.theme.PrimaryButton
-import dev.pinkcollab.ui.theme.Purple700
-import dev.pinkcollab.ui.theme.TextMid
-import dev.pinkcollab.ui.theme.rememberHapticOnClick
+import dev.pinkcollab.ui.theme.*
 import org.json.JSONObject
 
 internal fun decodePairingCode(value: String): PairHostSheetState {
@@ -89,12 +84,12 @@ internal fun PairHostModal(
     ModalBottomSheet(
         onDismissRequest = { if (!busy) onStateChange(PairHostSheetState()) },
         sheetState = sheetState,
-        containerColor = Color.Transparent,
+        containerColor = RetroSurfaceBottom,
         tonalElevation = 0.dp,
         scrimColor = Color.Black.copy(alpha = 0.64f),
         dragHandle = {
             Box(
-                Modifier.fillMaxWidth().background(Purple700),
+                Modifier.fillMaxWidth().background(RetroSurfaceTop),
                 contentAlignment = Alignment.Center,
             ) {
                 BottomSheetDefaults.DragHandle()
@@ -102,14 +97,7 @@ internal fun PairHostModal(
         },
     ) {
         PairHostSheet(
-            modifier = Modifier.background(
-                Brush.verticalGradient(
-                    0f to Purple700,
-                    0.22f to Color(0xFF1B1123),
-                    0.42f to Base0,
-                    1f to Base0,
-                ),
-            ),
+            modifier = Modifier.retroBackdrop(),
             url = state.url,
             token = state.token,
             busy = busy,
@@ -157,7 +145,7 @@ private fun PairHostSheet(
                 "Connect OMP host",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                color = RetroText,
             )
             Spacer(Modifier.height(8.dp))
             Text(
@@ -165,7 +153,7 @@ private fun PairHostSheet(
                 color = TextMid,
             )
         }
-        OutlinedButton(onClick = rememberHapticOnClick(scan), enabled = !busy) {
+        OutlinedButton(onClick = rememberHapticOnClick(scan), enabled = !busy, shape = RetroShape) {
             Icon(Icons.Outlined.QrCodeScanner, null)
             Spacer(Modifier.size(8.dp))
             Text("Scan pairing code")
@@ -177,14 +165,14 @@ private fun PairHostSheet(
             label = { Text("Gateway address") },
             placeholder = { Text("https://dev-server.example.com") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().retroPanel(inset = true),
             enabled = !busy,
         )
         OutlinedTextField(
             value = token,
             onValueChange = onToken,
             label = { Text("One-time pairing token") },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().retroPanel(inset = true),
             enabled = !busy,
         )
         error?.let { message ->

@@ -2,13 +2,13 @@
     <style name="Theme.PinkCollab" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:statusBarColor">#050408</item>
-        <item name="android:navigationBarColor">#050408</item>
-        <item name="android:colorAccent">#8360DD</item>
-        <item name="android:windowBackground">#050408</item>
-        <item name="android:windowSplashScreenBackground">#050408</item>
+        <item name="android:statusBarColor">#191815</item>
+        <item name="android:navigationBarColor">#191815</item>
+        <item name="android:colorAccent">#C6A46A</item>
+        <item name="android:windowBackground">#191815</item>
+        <item name="android:windowSplashScreenBackground">#191815</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_blank</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">#050408</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#191815</item>
         <item name="android:windowSplashScreenAnimationDuration">280</item>
         <item name="android:windowDisablePreview">false</item>
     </style>

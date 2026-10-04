@@ -5,13 +5,14 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -31,12 +32,11 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -110,13 +110,6 @@ internal fun SessionPage(
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
-    // Subscription readiness gates current work, not the host's connection state.
-    val workStatus = if (load is LoadState.Ready &&
-        (detail.snapshotToken != null || state.host?.connected != true)) {
-        remember(session, detail.liveItems, detail.streaming.isNotBlank(), state.host?.connection, state.sendProgress) {
-            sessionWorkStatus(detail, state.host, state.sendProgress)
-        }
-    } else null
     val savedHistory = detail.savedHistory
     val historyItems = state.historyItems ?: savedHistory.items
     val liveItems = if (session.runtimeAttached) detail.liveItems else emptyList()
@@ -130,11 +123,34 @@ internal fun SessionPage(
     LaunchedEffect(todo == null) { if (todo == null) todoExpanded = false }
     BackHandler(todoExpanded && isActive) { todoExpanded = false }
     val historyError = sessionHistoryError(detail, state.host, state.refreshError)
-    val syncing = load == LoadState.Loading || detail.snapshotToken == null || savedHistory == SavedHistory.Loading
-    val syncMessage = sessionSyncMessage(state.host, detail.snapshotToken != null)
     val awaitingHistory = historyError == null &&
         (savedHistory == SavedHistory.Loading || savedHistory == SavedHistory.Failed) && conversationDisplay.isEmpty() &&
         detail.streaming.isBlank() && session.attention == null
+    val contentReady = load is LoadState.Ready && !awaitingHistory
+    // Retained content starts visible; refreshes never reset a completed entrance.
+    val contentOpacity = remember(session.hostId, session.id) {
+        Animatable(if (contentReady) 1f else 0f)
+    }
+    LaunchedEffect(contentReady, contentOpacity) {
+        if (contentReady && contentOpacity.value < 1f) contentOpacity.animateTo(1f, tween(300))
+    }
+    // Loading is presentation only; subscription readiness still gates runtime actions.
+    val workStatus = when {
+        load == LoadState.Loading -> SessionWorkStatus(WorkStatusKind.Loading, "Loading session")
+        load !is LoadState.Ready -> null
+        detail.snapshotToken == null && state.host?.connected == true ->
+            SessionWorkStatus(WorkStatusKind.Loading, "Loading session")
+        else -> {
+            val current = remember(session, detail.liveItems, detail.streaming.isNotBlank(),
+                state.host?.connection, state.sendProgress) {
+                sessionWorkStatus(detail, state.host, state.sendProgress)
+            }
+            if (awaitingHistory &&
+                (current.kind == WorkStatusKind.Ready || current.kind == WorkStatusKind.History)) {
+                SessionWorkStatus(WorkStatusKind.Loading, "Loading messages")
+            } else current
+        }
+    }
     val timelineState = rememberLazyListState(initialFirstVisibleItemIndex = Int.MAX_VALUE)
     val historyPullState = rememberPullToRefreshState()
     var followTimeline by rememberSaveable(session.id) { mutableStateOf(true) }
@@ -191,38 +207,22 @@ internal fun SessionPage(
             .coerceAtLeast(0)
         IntOffset(0, -overlap)
     }
-    val composerShape = RoundedCornerShape(14.dp)
-    val composerFill = Brush.verticalGradient(
-        listOf(
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    )
-    val idleBorder = Brush.linearGradient(listOf(Color.White.copy(alpha = 0.16f), Purple400.copy(alpha = 0.14f)))
-    fun Modifier.composerCard(border: Brush? = null) = this
-        .shadow(
-            elevation = 18.dp,
-            shape = composerShape,
-            clip = false,
-            ambientColor = Color.Black.copy(alpha = 0.62f),
-            spotColor = Purple400.copy(alpha = 0.18f),
-        )
-        .then(if (border == null) Modifier else Modifier.border(width = 1.dp, brush = border, shape = composerShape))
-        .clip(composerShape)
-        .background(composerFill)
     val placeholder = controls.placeholder
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val todoClearance = if (todo != null) 72.dp else 0.dp
+        val stackComposerControls = maxWidth < 360.dp * density.fontScale
+        val todoHeaderHeight = todoPanelHeaderHeight()
+        val todoClearance = if (todo != null) todoHeaderHeight + 12.dp else 0.dp
         val keyboardHeight = with(density) {
             (imeInsets.getBottom(this) - navigationInsets.getBottom(this)).coerceAtLeast(0).toDp()
         }
-        val panelMaxHeight = (maxHeight - composerClearance - keyboardHeight - 12.dp).coerceAtLeast(60.dp)
+        val panelMaxHeight = (maxHeight - composerClearance - keyboardHeight - 12.dp).coerceAtLeast(todoHeaderHeight)
         if (load is LoadState.Ready) MaterialTheme(
             colorScheme = MaterialTheme.colorScheme,
             typography = SessionTypography,
         ) {
-            Box(Modifier.fillMaxSize().padding(top = todoClearance).pullToRefresh(
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentOpacity.value }
+                .padding(top = todoClearance).pullToRefresh(
                 state = historyPullState,
                 isRefreshing = activity.history,
                 enabled = canLoadEarlier,
@@ -251,7 +251,7 @@ internal fun SessionPage(
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .timelineBand(tint = Purple400, tintAlpha = 0.055f)
+                                .timelineBand(tint = BrandBrass, tintAlpha = 0.055f)
                                 .padding(horizontal = 20.dp, vertical = 18.dp),
                         ) {
                             AgentHeader(detail.model, replying = true)
@@ -276,9 +276,6 @@ internal fun SessionPage(
                         }
                     }
                     session.attention?.let { attention -> item(key = "attention") { AttentionCard(attention, !activity.inputBusy && attached, onRespond) } }
-                    if (syncing && !awaitingHistory) item(key = "session-sync") {
-                        SessionSyncProgress(syncMessage, Modifier.testTag("sessionSyncProgress"))
-                    }
                     if (historyError != null) item(key = "history-failed") {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp)) {
                             Text(historyError, color = TextMid,
@@ -293,7 +290,7 @@ internal fun SessionPage(
                         state = historyPullState,
                         isRefreshing = activity.history,
                         modifier = Modifier.align(Alignment.TopCenter).testTag("historyPullIndicator"),
-                        color = BrandPink,
+                        color = BrandBronze,
                     )
                 }
             }
@@ -302,7 +299,7 @@ internal fun SessionPage(
             EmptyState("Could not load this session", load.message,
                 modifier = Modifier.padding(bottom = composerClearance))
         } else if (load == LoadState.Loading || awaitingHistory) {
-            TimelineLoadingState(syncMessage, Modifier.padding(bottom = composerClearance)
+            TimelineLoadingState(Modifier.padding(bottom = composerClearance)
                 .testTag(if (load == LoadState.Loading) "sessionLoading" else "historyLoading"))
         }
         Box(
@@ -314,9 +311,9 @@ internal fun SessionPage(
                 .background(
                     Brush.verticalGradient(
                         0.00f to Color.Transparent,
-                        // Reach the work-status strip already dimmed, then fade to black below it.
-                        (32.dp / (composerClearance + 32.dp)) to Color.Black.copy(alpha = 0.60f),
-                        1.00f to Color.Black,
+                        // Keep the conversation legible behind the composer without a black footer.
+                        (32.dp / (composerClearance + 32.dp)) to Base0.copy(alpha = 0.80f),
+                        1.00f to Base0,
                     ),
                 ),
         )
@@ -328,21 +325,22 @@ internal fun SessionPage(
                 .padding(horizontal = 12.dp, vertical = 6.dp)
                 .onSizeChanged { composerHeightPx = it.height },
         ) {
-            workStatus?.let { SessionWorkStatusStrip(it) }
+            workStatus?.let { SessionWorkStatusLine(it) }
             Row(
                 Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val composerBorder = if (inputFocused) {
-                    Brush.linearGradient(listOf(Purple400.copy(alpha = 0.74f), Violet400.copy(alpha = 0.54f)))
-                } else {
-                    idleBorder
-                }
                 Column(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .composerCard(composerBorder),
+                        .retroPanel(
+                            RetroInsetTop,
+                            RetroInsetBottom,
+                            inset = true,
+                            accented = inputFocused,
+                        )
+                        .testTag("sessionComposer"),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     val composerTextStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -369,9 +367,9 @@ internal fun SessionPage(
                                 },
                             enabled = inputEnabled,
                             textStyle = composerTextStyle.copy(
-                                color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
+                                color = if (inputEnabled) RetroText else RetroMutedText,
                             ),
-                            cursorBrush = SolidColor(Purple400),
+                            cursorBrush = SolidColor(RetroBrass),
                             maxLines = 5,
                             decorationBox = { innerTextField ->
                                 Box(Modifier.fillMaxWidth()) {
@@ -379,23 +377,32 @@ internal fun SessionPage(
                                         Text(
                                             placeholder,
                                             style = composerTextStyle,
-                                            color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
+                                            color = RetroMutedText,
                                         )
                                     }
                                     innerTextField()
                                 }
                             },
                         )
-                        IconButton(
-                            onClick = rememberHapticOnClick { picker.launch(arrayOf("*/*")) },
-                            enabled = controls.canAttach,
-                            modifier = Modifier.size(48.dp),
+                        Box(
+                            Modifier
+                                .size(48.dp)
+                                .retroPanel(
+                                    if (controls.canAttach) RetroSurfaceTop else RetroInsetTop,
+                                    if (controls.canAttach) RetroSurfaceBottom else RetroInsetBottom,
+                                )
+                                .clickable(
+                                    enabled = controls.canAttach,
+                                    role = androidx.compose.ui.semantics.Role.Button,
+                                    onClick = rememberHapticOnClick { picker.launch(arrayOf("*/*")) },
+                                ),
+                            contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 Icons.Outlined.AttachFile,
                                 contentDescription = "Attach files",
                                 modifier = Modifier.size(20.dp),
-                                tint = if (controls.canAttach) TextMid else Gray400.copy(alpha = 0.34f),
+                                tint = if (controls.canAttach) RetroBrass else RetroMutedText,
                             )
                         }
                     }
@@ -422,24 +429,52 @@ internal fun SessionPage(
                         Text(
                             it,
                             modifier = Modifier.padding(horizontal = ComposerContentInset),
-                            color = MaterialTheme.colorScheme.error,
+                            color = Color(0xFF8D2037),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        ComposerModelButton(
-                            label = composerModelLabel(detail.model),
-                            thinkingLevel = composerThinkingLabel(detail.model),
-                            onClick = { showModels = true },
-                            enabled = controls.canChooseModel,
-                            modifier = Modifier.weight(1f),
-                        )
-                        ComposerFastSwitch(
-                            checked = detail.model?.fastModeEnabled == true,
-                            active = detail.model?.fastModeActive == true,
-                            enabled = controls.canChooseModel,
-                            onCheckedChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
-                        )
+                    Box(Modifier.fillMaxWidth().padding(6.dp)) {
+                        // Use the page width: a subcomposed layout cannot participate in the rail's intrinsic-height pass.
+                        if (stackComposerControls) {
+                            Column(
+                                Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalAlignment = Alignment.End,
+                            ) {
+                                ComposerModelButton(
+                                    label = composerModelLabel(detail.model),
+                                    thinkingLevel = composerThinkingLabel(detail.model),
+                                    onClick = { showModels = true },
+                                    enabled = controls.canChooseModel,
+                                )
+                                ComposerFastSwitch(
+                                    checked = detail.model?.fastModeEnabled == true,
+                                    active = detail.model?.fastModeActive == true,
+                                    enabled = controls.canChooseModel,
+                                    onCheckedChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
+                                )
+                            }
+                        } else {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                ComposerModelButton(
+                                    label = composerModelLabel(detail.model),
+                                    thinkingLevel = composerThinkingLabel(detail.model),
+                                    onClick = { showModels = true },
+                                    enabled = controls.canChooseModel,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                ComposerFastSwitch(
+                                    checked = detail.model?.fastModeEnabled == true,
+                                    active = detail.model?.fastModeActive == true,
+                                    enabled = controls.canChooseModel,
+                                    onCheckedChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
+                                )
+                            }
+                        }
                     }
                 }
                 ComposerRail(

@@ -6,6 +6,8 @@ import dev.pinkcollab.data.TodoTask
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -20,6 +22,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.ui.theme.*
 import kotlin.math.cos
@@ -48,16 +51,16 @@ internal fun Modifier.todoDotBreathing(live: Boolean): Modifier {
 @Composable
 internal fun QuestTaskRow(task: TodoTask, live: Boolean) {
     val target = when (task.status) {
-        TodoStatus.Active -> Purple400
-        TodoStatus.Completed -> Teal300
-        TodoStatus.Blocked -> Color(0xFFE8B96C)
-        else -> TextMid
+        TodoStatus.Active -> TodoActiveInk
+        TodoStatus.Completed -> TodoCompletedInk
+        TodoStatus.Blocked -> TodoBlockedInk
+        else -> TodoMutedInk
     }
     val color by animateColorAsState(target, tween(350), label = "taskColor")
     val textColor by animateColorAsState(when (task.status) {
-        TodoStatus.Active -> Purple400
-        TodoStatus.Abandoned -> TextMid
-        else -> TextHigh
+        TodoStatus.Active -> TodoActiveInk
+        TodoStatus.Abandoned -> TodoMutedInk
+        else -> TodoInk
     }, tween(350), label = "taskTextColor")
     val textPulse = if (task.status == TodoStatus.Active && live) {
         val transition = rememberInfiniteTransition(label = "runningTaskText")
@@ -78,11 +81,13 @@ internal fun QuestTaskRow(task: TodoTask, live: Boolean) {
     }
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
         stateDescription = task.status.label
-    }.padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+    }.padding(horizontal = 2.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.size(26.dp)
+            .background(color.copy(alpha = if (task.status == TodoStatus.Active) 0.22f else 0.10f), RetroShape)
+            .border(1.5.dp, color, RetroShape), contentAlignment = Alignment.Center) {
             if (task.status == TodoStatus.Active) GlowDot(color,
-                modifier = Modifier.todoDotBreathing(live), size = 8.dp)
+                modifier = Modifier.todoDotBreathing(live), size = 7.dp)
             else {
                 val icon = when (task.status) {
                     TodoStatus.Completed -> Icons.Outlined.CheckCircle
@@ -106,8 +111,9 @@ internal fun QuestTaskRow(task: TodoTask, live: Boolean) {
         }
         Text(task.content + if (task.blocker.isNotBlank()) " · ${task.blocker}" else "",
             modifier = Modifier.weight(1f),
-            color = lerp(textColor, TextHigh, textPulse),
+            color = lerp(textColor, TodoInk, textPulse),
             style = MaterialTheme.typography.bodySmall,
+            fontWeight = if (task.status == TodoStatus.Active) FontWeight.Bold else FontWeight.Medium,
             textDecoration = if (task.status == TodoStatus.Abandoned) TextDecoration.LineThrough else null)
     }
 }

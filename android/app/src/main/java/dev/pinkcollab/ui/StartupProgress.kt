@@ -1,18 +1,20 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
@@ -26,7 +28,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.InitialSyncState
-import dev.pinkcollab.ui.theme.TextMid
+import dev.pinkcollab.ui.theme.RetroMutedText
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filter
 
 internal data class StartupStep(val key: String, val text: String)
 
@@ -56,7 +60,7 @@ internal fun StartupProgress(app: NavigationState, modifier: Modifier = Modifier
     val entries = remember { mutableStateListOf<StartupStep>() }
     val latest = remember { mutableMapOf<String, String>() }
     val steps = startupSteps(app)
-    val scroll = rememberLazyListState()
+    val scroll = rememberScrollState()
     LaunchedEffect(steps) {
         steps.forEach { step ->
             if (latest.put(step.key, step.text) != step.text) entries.add(step)
@@ -64,10 +68,13 @@ internal fun StartupProgress(app: NavigationState, modifier: Modifier = Modifier
         while (entries.size > 40) entries.removeAt(0)
     }
     LaunchedEffect(entries.toList()) {
-        if (entries.isNotEmpty()) scroll.animateScrollToItem(entries.lastIndex)
+        snapshotFlow { scroll.maxValue }
+            .filter { it != Int.MAX_VALUE }
+            .collectLatest { end ->
+                scroll.animateScrollTo(end, tween(1_200, easing = FastOutSlowInEasing))
+            }
     }
-    LazyColumn(
-        state = scroll,
+    Column(
         modifier = modifier.fillMaxWidth().height(108.dp).testTag("startupProgress")
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
@@ -81,15 +88,16 @@ internal fun StartupProgress(app: NavigationState, modifier: Modifier = Modifier
                     ),
                     blendMode = BlendMode.DstIn,
                 )
-            },
-        contentPadding = PaddingValues(vertical = 40.dp),
+            }
+            .verticalScroll(scroll)
+            .padding(vertical = 40.dp),
     ) {
-        itemsIndexed(entries) { index, step ->
+        entries.forEach { step ->
             Text(
                 step.text,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 5.dp),
                 style = MaterialTheme.typography.bodySmall,
-                color = TextMid.copy(alpha = if (index == entries.lastIndex) 0.8f else 0.55f),
+                color = RetroMutedText,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
