@@ -12,6 +12,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
@@ -73,6 +76,8 @@ class FloatingTodoSessionDeviceTest {
         }
         val timeline = compose.onNodeWithTag("sessionTimeline")
         val timelineBounds = timeline.fetchSemanticsNode().boundsInRoot
+        assertTrue("The conversation viewport must extend behind the floating Todo panel",
+            timelineBounds.top < initialBounds.bottom)
         header.performClick()
         compose.mainClock.advanceTimeBy(500)
         assertEquals(timelineBounds, timeline.fetchSemanticsNode().boundsInRoot)
@@ -104,6 +109,30 @@ class FloatingTodoSessionDeviceTest {
         compose.runOnIdle { detail.value = detail.value.copy(liveItems = detail.value.liveItems + todo("clear", true)) }
         compose.mainClock.advanceTimeBy(500)
         compose.onNodeWithTag("floatingTodoPanel").assertDoesNotExist()
+    }
+
+    @Test fun historyRefreshStaysBelowCollapsedPlanAtLargeFontScale() {
+        val detail = SessionDetail(session, snapshotToken = "sub",
+            liveItems = listOf(todo("plan"), message(0)),
+            savedHistory = SavedHistory.Ready(null, emptyList(), "older"))
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                PinkCollabTheme {
+                    SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
+                        SessionActivity(history = true), null, null), {}, { true })
+                }
+            }
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        val header = compose.onNodeWithTag("todoHeader").fetchSemanticsNode().boundsInRoot
+        val indicator = compose.onNodeWithTag("historyPullIndicator").fetchSemanticsNode().boundsInRoot
+        assertTrue("History refresh feedback must not be covered by the pinned plan", indicator.top >= header.bottom)
+        val timeline = compose.onNodeWithTag("sessionTimeline").fetchSemanticsNode().boundsInRoot
+        assertTrue("Only the indicator should move below the plan, not the conversation viewport",
+            timeline.top < header.bottom)
+        saveScreenshot("todo-history-refresh-large-text.png")
     }
 
     private fun saveScreenshot(name: String) {

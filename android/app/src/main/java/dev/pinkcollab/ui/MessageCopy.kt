@@ -19,14 +19,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.pinkcollab.ui.theme.BrandBrass
+import dev.pinkcollab.ui.theme.BrandPurple
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 
-/** Owns both the copy action's position and the space it needs beside the message. */
+/** Keeps the body full-width and reserves a short footer for the copy action. */
 @Composable
 internal fun TimelineMessageBody(text: String, copyable: Boolean = true, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth()) {
-        Box(Modifier.padding(end = if (copyable) 32.dp else 0.dp)) { content() }
+        Box(Modifier.fillMaxWidth().padding(bottom = if (copyable) 20.dp else 0.dp)) { content() }
         if (copyable) {
             Box(Modifier.matchParentSize()) {
                 CopyMessageButton(text, Modifier.align(Alignment.BottomEnd).offset(x = 8.dp, y = 12.dp))
@@ -60,8 +60,8 @@ private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
             Icon(
                 imageVector = Icons.Outlined.ContentCopy,
                 contentDescription = "Copy message",
-                modifier = Modifier.size(16.dp),
-                tint = BrandBrass,
+                modifier = Modifier.size(14.dp),
+                tint = BrandPurple,
             )
         }
         if (feedback.value < 1f) {

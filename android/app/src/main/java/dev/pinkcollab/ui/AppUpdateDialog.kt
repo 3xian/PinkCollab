@@ -15,10 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.AppRelease
-import dev.pinkcollab.ui.theme.*
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Color
 
 @Composable
 internal fun AppUpdateDialog(
@@ -31,11 +27,6 @@ internal fun AppUpdateDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.retroPanel(accented = true),
-        shape = RoundedCornerShape(3.dp),
-        containerColor = Color.Transparent,
-        titleContentColor = RetroText,
-        textContentColor = RetroText,
         title = { Text("PinkCollab update available") },
         text = {
             Column(Modifier.heightIn(max = 360.dp)) {
@@ -46,8 +37,7 @@ internal fun AppUpdateDialog(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     release.notes.ifBlank { "No release notes provided." },
-                    modifier = Modifier.weight(1f, fill = false).retroPanel(inset = true)
-                        .padding(12.dp).verticalScroll(rememberScrollState()),
+                    modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
                 )
                 Spacer(Modifier.height(16.dp))
                 when (download) {

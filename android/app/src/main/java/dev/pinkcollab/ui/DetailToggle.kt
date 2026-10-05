@@ -20,7 +20,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import dev.pinkcollab.ui.theme.RetroBrass
+import dev.pinkcollab.ui.theme.Purple200
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 
 @Composable
@@ -29,7 +29,7 @@ internal fun DetailToggle(
     expanded: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    tint: Color = RetroBrass,
+    tint: Color = Purple200,
 ) {
     Row(
         modifier = modifier

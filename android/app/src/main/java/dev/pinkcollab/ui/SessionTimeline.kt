@@ -32,6 +32,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -60,23 +64,67 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-internal val TimelineBandBase = RetroInk
+internal val TimelineBandBase = Color(0xFF0D0A10)
 
-/** Framed transcript bands keep speaker and status distinctions quiet and readable. */
+/**
+ * Timeline entries form full-width editorial bands. Their flat geometry keeps
+ * the conversation continuous while the subtle tint distinguishes speakers
+ * and status without competing with the floating composer.
+ */
 internal fun Modifier.timelineBand(
-    tint: Color = RetroBrass,
+    tint: Color = Purple400,
     tintAlpha: Float = 0.025f,
-): Modifier = retroPanel(
-    top = RetroSurfaceBottom.copy(
-        red = RetroSurfaceBottom.red * (1f - tintAlpha) + tint.red * tintAlpha,
-        green = RetroSurfaceBottom.green * (1f - tintAlpha) + tint.green * tintAlpha,
-        blue = RetroSurfaceBottom.blue * (1f - tintAlpha) + tint.blue * tintAlpha,
-    ),
-    bottom = TimelineBandBase,
-)
+): Modifier = background(TimelineBandBase)
+    .background(
+        Brush.horizontalGradient(
+            listOf(
+                tint.copy(alpha = tintAlpha),
+                Color.Transparent,
+            ),
+        ),
+    )
+    .drawBehind {
+        drawLine(
+            color = Color.White.copy(alpha = 0.055f),
+            start = Offset(0f, size.height),
+            end = Offset(size.width, size.height),
+            strokeWidth = 1.dp.toPx(),
+        )
+    }
 
-private fun Modifier.userMessageBand(): Modifier =
-    retroPanel(top = RetroSurfaceTop, bottom = RetroSurfaceBottom, accented = true)
+/**
+ * The user's own turn. Separation comes from structure: a brand-gradient rail on the leading
+ * edge, never a fill. [primaryContainer] was the only solid mid-tone surface in a
+ * transcript otherwise built from faint tints over [TimelineBandBase], so it read as a banner
+ * pasted over the timeline and outshouted the running-state accents. The tint stays inside the
+ * band vocabulary and sits at the top of its alpha range, because a user turn is a hard
+ * boundary between work phases.
+ */
+private fun Modifier.userMessageBand(
+    primary: Color,
+    secondary: Color,
+): Modifier = background(TimelineBandBase)
+    .background(
+        Brush.horizontalGradient(
+            0.00f to primary.copy(alpha = 0.11f),
+            0.45f to secondary.copy(alpha = 0.05f),
+            1.00f to Color.Transparent,
+        ),
+    )
+    .drawBehind {
+        drawRect(
+            brush = Brush.verticalGradient(
+                listOf(primary.copy(alpha = 0.62f), secondary.copy(alpha = 0.40f)),
+            ),
+            size = Size(3.dp.toPx(), size.height),
+        )
+        drawLine(
+            color = Color.White.copy(alpha = 0.07f),
+            start = Offset(0f, size.height),
+            end = Offset(size.width, size.height),
+            strokeWidth = 1.dp.toPx(),
+        )
+    }
 
 
 @Composable
@@ -94,16 +142,16 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
     val isUser = item.role == "user"
     val colors = MaterialTheme.colorScheme
     val band = if (isUser) {
-        Modifier.userMessageBand()
+        Modifier.userMessageBand(colors.primary, colors.secondary)
     } else {
-        Modifier.timelineBand(tint = RetroBrass, tintAlpha = 0.026f)
+        Modifier.timelineBand(tint = Teal300, tintAlpha = 0.026f)
     }
     val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
         Modifier
             .fillMaxWidth()
             .then(band)
-            .padding(horizontal = 20.dp, vertical = 20.dp),
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         val time = messageTimeLabel(item.timestamp)
@@ -122,7 +170,7 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
 
 @Composable
 private fun YouLabel() {
-    SpeakerTitle("You", RetroBrass)
+    SpeakerTitle("You", Purple400)
 }
 
 @Composable
@@ -150,13 +198,13 @@ private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
 @Composable
 internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        SpeakerTitle(if (replying) "Agent replying" else "Agent", RetroBrass)
+        SpeakerTitle(if (replying) "Agent replying" else "Agent", BrandPink)
         model?.let {
             Spacer(Modifier.width(8.dp))
             Surface(
-                modifier = Modifier.weight(1f, fill = false).retroPanel(inset = true),
-                color = Color.Transparent,
-                shape = RoundedCornerShape(3.dp),
+                modifier = Modifier.weight(1f, fill = false),
+                color = Purple400.copy(alpha = 0.14f),
+                shape = RoundedCornerShape(7.dp),
             ) {
                 Text(
                     it.name.ifBlank { it.id },
@@ -165,7 +213,7 @@ internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, mo
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.labelSmall,
                     fontFamily = FontFamily.Default,
-                    color = RetroMutedText,
+                    color = Purple200,
                 )
             }
         }
@@ -208,19 +256,15 @@ internal fun createSessionMarkwon(context: Context): Markwon =
             override fun configureTheme(builder: MarkwonTheme.Builder) {
                 val maple = ResourcesCompat.getFont(context, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
                 builder.codeTypeface(maple).codeBlockTypeface(maple)
-                builder.codeBlockBackgroundColor(RetroInsetTop.toArgb())
-                    .codeTextColor(RetroBrass.toArgb())
-                    .linkColor(RetroBrass.toArgb())
-                    .blockQuoteColor(RetroBrass.toArgb())
             }
 
             override fun configureVisitor(builder: MarkwonVisitor.Builder) {
                 builder.on(Code::class.java) { visitor, code ->
-                    var color = RetroBrass
+                    var color = Purple200
                     var ancestor = code.parent
                     while (ancestor != null) {
                         if (ancestor is StrongEmphasis) {
-                            color = RetroText
+                            color = BrandPink
                             break
                         }
                         ancestor = ancestor.parent
@@ -235,7 +279,7 @@ internal fun createSessionMarkwon(context: Context): Markwon =
 
             override fun configureSpansFactory(builder: MarkwonSpansFactory.Builder) {
                 builder.appendFactory(StrongEmphasis::class.java) { _, _ ->
-                    ForegroundColorSpan(RetroText.toArgb())
+                    ForegroundColorSpan(BrandPink.toArgb())
                 }
             }
         })
@@ -260,6 +304,12 @@ private fun MarkdownBody(messageId: String, markdown: String, color: Color, rend
         },
         update = { view ->
             if (view.currentTextColor != textColor) view.setTextColor(textColor)
+            val textSizePx = android.util.TypedValue.applyDimension(
+                android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp, view.resources.displayMetrics,
+            )
+            if (view.textSize != textSizePx) {
+                view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
+            }
             val content = rendered ?: markdown
             if (view.tag !== content) {
                 val parsed = rendered
@@ -276,7 +326,7 @@ private const val ActivityEntranceDurationMillis = 280
 @Composable
 private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean, toolDetails: ToolDetailsController?) {
     var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
-    // The group owns batch deadlines even while its icon row is hidden by expansion.
+    // The group owns batch deadlines even while its header icons are hidden by expansion.
     val entranceDeadlines = remember(group.id) { HashMap<String, Long>() }
     val batchStartMillis = SystemClock.uptimeMillis()
     var entranceIndex = 0
@@ -301,7 +351,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
                 contentDescription = if (expanded) "Collapse activity" else "Expand activity"
                 stateDescription = if (expanded) "Expanded" else "Collapsed"
             }
-            .padding(horizontal = 20.dp, vertical = 12.dp),
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
@@ -310,19 +360,31 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    group.action,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Default,
-                    fontWeight = FontWeight.Medium,
-                    color = TextHigh,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (group.summary.isNotBlank() && (!expanded || group.operationCount == 1)) {
-                    Text(group.summary, style = MaterialTheme.typography.bodySmall, color = ErrorRed, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        group.action,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontFamily = FontFamily.Default,
+                        fontWeight = FontWeight.Medium,
+                        color = TextHigh,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (!expanded || group.operationCount == 1) {
+                        ActivityOperationIcons(
+                            group, liveActivity, entranceDeadlines,
+                            Modifier.width((group.operations.size * 14 + 4).dp.coerceAtMost(112.dp)),
+                        )
+                    }
                 }
-                if (!expanded || group.operationCount == 1) ActivityOperationIcons(group, liveActivity, entranceDeadlines)
+                if (group.summary.isNotBlank() && (!expanded || group.operationCount == 1)) {
+                    Text(group.summary, style = MaterialTheme.typography.bodySmall, color = Red400, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
             }
             Icon(
                 Icons.Outlined.ExpandMore,
@@ -351,6 +413,7 @@ private fun ActivityOperationIcons(
     group: SessionDisplayItem.ActivityGroup,
     liveActivity: Boolean,
     entranceDeadlines: Map<String, Long>,
+    modifier: Modifier,
 ) {
     val rowState = rememberLazyListState()
     var previousCount by remember(group.id) { mutableIntStateOf(group.operations.size) }
@@ -361,7 +424,7 @@ private fun ActivityOperationIcons(
     }
     LazyRow(
         state = rowState,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy((-4).dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -405,7 +468,7 @@ private fun ActivityOperationDetails(
 ) {
     var expanded by rememberSaveable(operation.id) { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxWidth().retroPanel(inset = true).padding(10.dp),
+        Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.025f), RoundedCornerShape(8.dp)).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (showSummary) {
@@ -424,7 +487,7 @@ private fun ActivityOperationDetails(
             Text(activityStatusLabel(operation.status, liveActivity), style = MaterialTheme.typography.labelSmall, color = activityColor(operation.status))
         }
         if (showSummary && operation.error.isNotBlank()) {
-            Text(operation.error, style = MaterialTheme.typography.bodySmall, color = ErrorRed)
+            Text(operation.error, style = MaterialTheme.typography.bodySmall, color = Red400)
         }
         operation.detailKind?.let { kind ->
             DetailToggle(kind.action, expanded, onClick = { expanded = !expanded })
@@ -470,9 +533,9 @@ private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, ac
 }
 
 private fun activityColor(status: ActivityStatus): Color = when (status) {
-    ActivityStatus.Running -> RetroBrass
-    ActivityStatus.Succeeded -> Color(0xFFAAB77A)
-    ActivityStatus.Failed -> ErrorRed
+    ActivityStatus.Running -> Violet400
+    ActivityStatus.Succeeded -> Teal300
+    ActivityStatus.Failed -> Red400
 }
 
 private fun activityStatusLabel(status: ActivityStatus, liveActivity: Boolean): String =
@@ -502,16 +565,16 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
         Modifier
             .fillMaxWidth()
             .timelineBand(
-                tint = ErrorRed,
+                tint = Red400,
                 tintAlpha = 0.065f,
             )
-            .padding(horizontal = 20.dp, vertical = 18.dp),
+            .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Error", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = ErrorRed)
+        Text("Error", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Default, fontWeight = FontWeight.Bold, fontStyle = FontStyle.Italic, color = Red400)
         Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
         if (item.details.isNotBlank() && item.details != item.text) {
-            DetailToggle("Error details", expanded, onClick = { expanded = !expanded }, tint = ErrorRed)
+            DetailToggle("Error details", expanded, onClick = { expanded = !expanded }, tint = Red400)
             if (expanded) Text(item.details, style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
     }
@@ -530,19 +593,19 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
         }.joinToString("\n\n")
     }.orEmpty().ifBlank { item.detail }
     val band = if (isUser) {
-        Modifier.userMessageBand()
+        Modifier.userMessageBand(colors.primary, colors.secondary)
     } else {
         Modifier.timelineBand(
             tint = when (item.kind) {
-                "error" -> ErrorRed
-                "assistant" -> RetroBrass
-                else -> MutedText
+                "error" -> Red400
+                "assistant" -> Teal300
+                else -> Gray400
             },
         )
     }
     val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
-        Modifier.fillMaxWidth().then(band).padding(horizontal = 20.dp, vertical = 18.dp),
+        Modifier.fillMaxWidth().then(band).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         val time = messageTimeLabel(item.timestamp)
@@ -561,7 +624,7 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
                     fontWeight = FontWeight.Bold,
                     fontStyle = FontStyle.Italic,
                     fontFamily = FontFamily.Default,
-                    color = if (item.kind == "error") ErrorRed else TextMid,
+                    color = if (item.kind == "error") Red400 else TextMid,
                 )
             }
         } else {

@@ -55,7 +55,9 @@ class ActivityGroupDeviceTest {
         assertEquals(check.top, pending.top, 1f)
         assertTrue(check.left < error.left && error.left < check.right)
         assertTrue(error.left < pending.left && pending.left < error.right)
-        assertTrue(check.top >= compose.onNodeWithText(item.summary, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.bottom)
+        val title = compose.onNodeWithText(item.action, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("Status icons must sit to the right of the title", check.left >= title.right)
+        assertTrue("Status icons must share the title row", check.center.y in title.top..title.bottom)
         compose.onNodeWithContentDescription("Expand activity").performClick()
         compose.onNodeWithText("Command 1", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText(item.summary, useUnmergedTree = true).assertIsDisplayed()
@@ -80,7 +82,8 @@ class ActivityGroupDeviceTest {
         }
         compose.onNodeWithContentDescription("Command 29, Failed", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
-        compose.onNode(hasScrollAction(), useUnmergedTree = true).performTouchInput { swipeRight() }
+        compose.onNode(hasScrollAction(), useUnmergedTree = true)
+            .performScrollToNode(hasContentDescription("Command 0, Completed"))
         compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
     }

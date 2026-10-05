@@ -31,6 +31,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -46,8 +51,8 @@ import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.ToolArguments
 import dev.pinkcollab.data.ToolTrace
-import dev.pinkcollab.ui.theme.RetroBrass
-import dev.pinkcollab.ui.theme.retroPanel
+import dev.pinkcollab.ui.theme.Amber300
+import dev.pinkcollab.ui.theme.Purple400
 import dev.pinkcollab.ui.theme.TextHigh
 import dev.pinkcollab.ui.theme.TextMid
 
@@ -166,14 +171,14 @@ private fun ToolArguments.firstString(vararg keys: String): String? {
 
 @Composable
 internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier = Modifier) {
+    val sendingTextEffect = if (status.kind == WorkStatusKind.Sending) sendingTextShimmer() else Modifier
     val tint = when (status.kind) {
-        WorkStatusKind.Attention -> RetroBrass
-        WorkStatusKind.Sending, WorkStatusKind.Working, WorkStatusKind.Starting, WorkStatusKind.Stopping -> RetroBrass
+        WorkStatusKind.Attention -> Amber300
+        WorkStatusKind.Sending, WorkStatusKind.Working, WorkStatusKind.Starting, WorkStatusKind.Stopping -> Purple400
         else -> TextMid
     }
     Row(
-        modifier.fillMaxWidth().testTag("sessionWorkStatus").retroPanel(inset = true)
-            .padding(horizontal = ComposerContentInset, vertical = 8.dp),
+        modifier.fillMaxWidth().testTag("sessionWorkStatus").padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -200,32 +205,60 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
                 modifier = Modifier.size(16.dp),
             )
         }
-        // Only the stable action label announces changes, never streaming tokens or tool output.
-        Text(
-            status.title,
-            modifier = Modifier.weight(1f)
-                .semantics { liveRegion = LiveRegionMode.Polite },
-            color = TextHigh,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        status.timing?.let { timing ->
-            val elapsed by produceState(timing.elapsedAt(), timing) {
-                value = timing.elapsedAt()
-                while (timing.running && !timing.completed) {
-                    delay(1_000)
-                    value = timing.elapsedAt()
-                }
-            }
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Only the stable action label announces changes, never streaming tokens or tool output.
             Text(
-                workDurationLabel(elapsed),
-                color = TextMid,
+                status.title,
+                modifier = Modifier.weight(1f, fill = false).then(sendingTextEffect)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                color = TextHigh,
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
+            status.timing?.let { timing ->
+                val elapsed by produceState(timing.elapsedAt(), timing) {
+                    value = timing.elapsedAt()
+                    while (timing.running && !timing.completed) {
+                        delay(1_000)
+                        value = timing.elapsedAt()
+                    }
+                }
+                Text(
+                    workDurationLabel(elapsed),
+                    color = TextMid,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                )
+            }
         }
     }
+}
+
+/** A neutral highlight sweeps over the glyphs; animation only invalidates drawing. */
+@Composable
+private fun sendingTextShimmer(): Modifier {
+    val phase = rememberInfiniteTransition(label = "sendingTextShimmer").animateFloat(
+        initialValue = -1f,
+        targetValue = 2f,
+        animationSpec = infiniteRepeatable(tween(1_600, easing = LinearEasing)),
+        label = "sendingTextHighlight",
+    )
+    return Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val center = size.width * phase.value
+            val halfWidth = size.width * 0.35f
+            drawRect(
+                brush = Brush.linearGradient(
+                    colors = listOf(TextMid, Color.White, TextMid),
+                    start = Offset(center - halfWidth, 0f),
+                    end = Offset(center + halfWidth, 0f),
+                ),
+                blendMode = BlendMode.SrcIn,
+            )
+        }
 }
 
 /** The arrow moves within fixed bounds; the tray and layout stay still. */

@@ -21,9 +21,10 @@ import dev.pinkcollab.ui.theme.*
 internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (AttentionResponse) -> Unit) {
     var answer by rememberSaveable(attention.id) { mutableStateOf("") }
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).retroPanel(accented = true),
-        shape = RoundedCornerShape(3.dp),
-        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
     ) {
         Column(
             Modifier.padding(16.dp),
@@ -34,7 +35,7 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
                 style = MaterialTheme.typography.labelMedium,
                 fontFamily = FontFamily.SansSerif,
                 fontWeight = FontWeight.Medium,
-                color = WarningAmber,
+                color = Amber300,
             )
             Text(
                 attention.text,
@@ -48,10 +49,10 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
                         OutlinedButton(
                             onClick = rememberHapticOnClick { respond(AttentionResponse.Value(attention.id, option)) },
                             enabled = enabled,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).retroPanel(inset = true),
-                            shape = RoundedCornerShape(3.dp),
-                            border = BorderStroke(1.dp, RetroBrass.copy(alpha = if (enabled) 0.45f else 0.18f)),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = RetroText),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = if (enabled) 0.14f else 0.06f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextHigh),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                         ) {
                             Text(
@@ -62,7 +63,7 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
                             )
                             Spacer(Modifier.width(12.dp))
                             Icon(Icons.AutoMirrored.Outlined.ArrowForward, null,
-                                modifier = Modifier.size(18.dp), tint = if (enabled) RetroBrass else TextMid.copy(alpha = 0.38f))
+                                modifier = Modifier.size(18.dp), tint = if (enabled) Purple400 else TextMid.copy(alpha = 0.38f))
                         }
                     }
                 }
@@ -83,11 +84,11 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
                         label = { Text("Your answer", fontFamily = FontFamily.SansSerif) },
                         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.SansSerif),
                         minLines = if (attention.type == AttentionType.Editor) 4 else 1,
-                        modifier = Modifier.fillMaxWidth().retroPanel(inset = true),
+                        modifier = Modifier.fillMaxWidth(),
                         enabled = enabled,
-                        shape = RoundedCornerShape(3.dp),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = RetroBrass,
-                            unfocusedBorderColor = RetroBrass.copy(alpha = 0.25f), cursorColor = RetroBrass),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple400,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Purple400),
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         PrimaryButton(onClick = { respond(AttentionResponse.Value(attention.id, answer)) }, enabled = enabled) {

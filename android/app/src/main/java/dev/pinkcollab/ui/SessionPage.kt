@@ -32,6 +32,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -168,7 +170,6 @@ internal fun SessionPage(
     }
 
     val inputEnabled = controls.inputEnabled
-    var inputFocused by remember { mutableStateOf(false) }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
     LaunchedEffect(timelineState) {
         snapshotFlow {
@@ -207,6 +208,23 @@ internal fun SessionPage(
             .coerceAtLeast(0)
         IntOffset(0, -overlap)
     }
+    val composerShape = RoundedCornerShape(14.dp)
+    val composerFill = Brush.verticalGradient(
+        listOf(
+            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.surfaceContainer,
+        ),
+    )
+    fun Modifier.composerCard() = this
+        .shadow(
+            elevation = 18.dp,
+            shape = composerShape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = 0.62f),
+            spotColor = Purple400.copy(alpha = 0.18f),
+        )
+        .clip(composerShape)
+        .background(composerFill)
     val placeholder = controls.placeholder
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -222,7 +240,7 @@ internal fun SessionPage(
             typography = SessionTypography,
         ) {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = contentOpacity.value }
-                .padding(top = todoClearance).pullToRefresh(
+                .pullToRefresh(
                 state = historyPullState,
                 isRefreshing = activity.history,
                 enabled = canLoadEarlier,
@@ -236,7 +254,7 @@ internal fun SessionPage(
                     },
                     state = timelineState,
                     contentPadding = PaddingValues(
-                        top = 8.dp,
+                        top = todoClearance + 8.dp,
                         // Keeps the last timeline item clear of the floating composer card.
                         bottom = composerClearance,
                     ),
@@ -251,8 +269,8 @@ internal fun SessionPage(
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .timelineBand(tint = BrandBrass, tintAlpha = 0.055f)
-                                .padding(horizontal = 20.dp, vertical = 18.dp),
+                                .timelineBand(tint = Purple400, tintAlpha = 0.055f)
+                                .padding(12.dp),
                         ) {
                             AgentHeader(detail.model, replying = true)
                             Spacer(Modifier.height(4.dp))
@@ -289,8 +307,9 @@ internal fun SessionPage(
                     PullToRefreshDefaults.Indicator(
                         state = historyPullState,
                         isRefreshing = activity.history,
-                        modifier = Modifier.align(Alignment.TopCenter).testTag("historyPullIndicator"),
-                        color = BrandBronze,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                            .offset(y = todoClearance).testTag("historyPullIndicator"),
+                        color = BrandPink,
                     )
                 }
             }
@@ -311,9 +330,9 @@ internal fun SessionPage(
                 .background(
                     Brush.verticalGradient(
                         0.00f to Color.Transparent,
-                        // Keep the conversation legible behind the composer without a black footer.
-                        (32.dp / (composerClearance + 32.dp)) to Base0.copy(alpha = 0.80f),
-                        1.00f to Base0,
+                        // Reach the work-status strip already dimmed, then fade to black below it.
+                        (32.dp / (composerClearance + 32.dp)) to Color.Black.copy(alpha = 0.60f),
+                        1.00f to Color.Black,
                     ),
                 ),
         )
@@ -334,12 +353,7 @@ internal fun SessionPage(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .retroPanel(
-                            RetroInsetTop,
-                            RetroInsetBottom,
-                            inset = true,
-                            accented = inputFocused,
-                        )
+                        .composerCard()
                         .testTag("sessionComposer"),
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
@@ -362,14 +376,13 @@ internal fun SessionPage(
                                 // Center the first 20sp line beside the 48dp attachment target.
                                 .padding(top = 14.dp)
                                 .onFocusChanged {
-                                    inputFocused = it.isFocused
                                     if (it.isFocused) todoExpanded = false
                                 },
                             enabled = inputEnabled,
                             textStyle = composerTextStyle.copy(
-                                color = if (inputEnabled) RetroText else RetroMutedText,
+                                color = if (inputEnabled) TextHigh else Gray400.copy(alpha = 0.65f),
                             ),
-                            cursorBrush = SolidColor(RetroBrass),
+                            cursorBrush = SolidColor(Purple400),
                             maxLines = 5,
                             decorationBox = { innerTextField ->
                                 Box(Modifier.fillMaxWidth()) {
@@ -377,32 +390,23 @@ internal fun SessionPage(
                                         Text(
                                             placeholder,
                                             style = composerTextStyle,
-                                            color = RetroMutedText,
+                                            color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
                                         )
                                     }
                                     innerTextField()
                                 }
                             },
                         )
-                        Box(
-                            Modifier
-                                .size(48.dp)
-                                .retroPanel(
-                                    if (controls.canAttach) RetroSurfaceTop else RetroInsetTop,
-                                    if (controls.canAttach) RetroSurfaceBottom else RetroInsetBottom,
-                                )
-                                .clickable(
-                                    enabled = controls.canAttach,
-                                    role = androidx.compose.ui.semantics.Role.Button,
-                                    onClick = rememberHapticOnClick { picker.launch(arrayOf("*/*")) },
-                                ),
-                            contentAlignment = Alignment.Center,
+                        IconButton(
+                            onClick = rememberHapticOnClick { picker.launch(arrayOf("*/*")) },
+                            enabled = controls.canAttach,
+                            modifier = Modifier.size(48.dp),
                         ) {
                             Icon(
                                 Icons.Outlined.AttachFile,
                                 contentDescription = "Attach files",
                                 modifier = Modifier.size(20.dp),
-                                tint = if (controls.canAttach) RetroBrass else RetroMutedText,
+                                tint = if (controls.canAttach) TextMid else Gray400.copy(alpha = 0.34f),
                             )
                         }
                     }
@@ -429,11 +433,11 @@ internal fun SessionPage(
                         Text(
                             it,
                             modifier = Modifier.padding(horizontal = ComposerContentInset),
-                            color = Color(0xFF8D2037),
+                            color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    Box(Modifier.fillMaxWidth().padding(6.dp)) {
+                    Box(Modifier.fillMaxWidth()) {
                         // Use the page width: a subcomposed layout cannot participate in the rail's intrinsic-height pass.
                         if (stackComposerControls) {
                             Column(
@@ -458,7 +462,6 @@ internal fun SessionPage(
                             Row(
                                 Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
                                 ComposerModelButton(
                                     label = composerModelLabel(detail.model),
@@ -490,7 +493,6 @@ internal fun SessionPage(
             AnimatedVisibility(todoExpanded, modifier = Modifier.align(Alignment.TopCenter),
                 enter = fadeIn(), exit = fadeOut()) {
                 Box(Modifier.fillMaxWidth().height(panelMaxHeight).testTag("todoDismissArea")
-                    .background(Color.Black.copy(alpha = 0.2f))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                         todoExpanded = false
                     })

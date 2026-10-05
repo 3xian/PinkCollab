@@ -3,8 +3,6 @@ package dev.pinkcollab.ui.theme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
-import androidx.compose.material3.Shapes
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -12,62 +10,62 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.unit.dp
 import dev.pinkcollab.R
 import dev.pinkcollab.data.SessionStatus
-// ── Palette: aged charcoal, bronze and legible parchment text ─────────────────
-val Base0 = Color(0xFF191815)
-val Base1 = Color(0xFF2C2822)
-val BrandBrass = Color(0xFFC6A46A)
-val BrandBronze = Color(0xFF997442)
-val BrassLight = Color(0xFFE4CCA1)
-val BrassDark = Color(0xFF53422B)
-val ActivityAmber = Color(0xFFDBB36E)
-val SuccessOlive = Color(0xFFA8BB79)
-val WarningAmber = Color(0xFFE8B16B)
-val ErrorRed = Color(0xFFE39B86)
-val MutedText = Color(0xFFAD9E88)
-val TextHigh = Color(0xFFF2E5CA)
-val TextMid = Color(0xFFBDAE95)
+// ── Palette: neutral graphite surfaces with restrained violet accents ────────
+val Base0 = Color(0xFF07070A)
+val Base1 = Color(0xFF101014)
+val BrandPurple = Color(0xFF8360DD)
+val BrandPink = Color(0xFFC069C9)
+val Purple400 = BrandPurple
+val Purple200 = Color(0xFFCFC3F7)
+val Purple700 = Color(0xFF372A57)
+val Violet400 = Color(0xFF9B87F5)
+val Teal300 = Color(0xFF4DE0BE)
+val Amber300 = Color(0xFFF2B84B)
+val Red400 = Color(0xFFFF5470)
+val Gray400 = Color(0xFF85858F)
+val TextHigh = Color(0xFFF4F4F5)
+val TextMid = Color(0xFFB3B3BD)
 
 val PinkCollabScheme = darkColorScheme(
-    primary = BrandBrass,
-    onPrimary = Color(0xFF241B10),
-    primaryContainer = BrassDark,
-    onPrimaryContainer = BrassLight,
-    secondary = ActivityAmber,
-    onSecondary = Color(0xFF291E10),
-    secondaryContainer = Color(0xFF4B3821),
-    onSecondaryContainer = Color(0xFFF0D3A3),
-    tertiary = SuccessOlive,
-    onTertiary = Color(0xFF19200F),
+    primary = Purple400,
+    onPrimary = Color(0xFF160B24),
+    primaryContainer = Purple700,
+    onPrimaryContainer = Purple200,
+    secondary = Violet400,
+    onSecondary = Color(0xFF171126),
+    secondaryContainer = Color(0xFF2D2540),
+    onSecondaryContainer = Color(0xFFE9E3F5),
+    tertiary = Teal300,
+    onTertiary = Color(0xFF03211A),
     background = Base0,
     onBackground = TextHigh,
     surface = Base1,
     onSurface = TextHigh,
-    surfaceVariant = Color(0xFF3A342C),
+    surfaceVariant = Color(0xFF1A1A20),
     onSurfaceVariant = TextMid,
     surfaceContainerLowest = Base0,
-    surfaceContainerLow = Color(0xFF24211D),
-    surfaceContainer = Base1,
-    surfaceContainerHigh = Color(0xFF39332B),
-    surfaceContainerHighest = Color(0xFF453D32),
-    inverseSurface = Color(0xFF453D32),
+    surfaceContainerLow = Color(0xFF0D0D11),
+    surfaceContainer = Color(0xFF141418),
+    surfaceContainerHigh = Color(0xFF1B1B21),
+    surfaceContainerHighest = Color(0xFF23232A),
+    inverseSurface = Color(0xFF23232A),
     inverseOnSurface = TextHigh,
-    inversePrimary = BrassLight,
-    outline = Color(0xFF8D795A),
-    outlineVariant = Color(0xFF5A4D3A),
-    error = ErrorRed,
-    onError = Color(0xFF30130E),
-    errorContainer = Color(0xFF542C24),
-    onErrorContainer = Color(0xFFF8D7C7),
+    inversePrimary = Purple200,
+    outline = Color(0xFF45434C),
+    outlineVariant = Color(0xFF302F36),
+    error = Red400,
+    onError = Color(0xFF2B040C),
+    errorContainer = Color(0xFF43101E),
+    onErrorContainer = Color(0xFFFFC9D3),
 )
 
 private val MapleMono = FontFamily(
     Font(R.font.maple_mono_cn_regular, FontWeight.Normal),
 )
 
-private fun TextStyle.sessionFont() = copy(fontFamily = MapleMono, fontSize = (fontSize.value - 0.5f).sp)
+private fun TextStyle.sessionFont(sizeSp: Float = fontSize.value - 1f) = copy(fontFamily = MapleMono, fontSize = sizeSp.sp)
 
 private fun Typography.sessionFont() = copy(
     displayLarge = displayLarge.sessionFont(),
@@ -79,9 +77,9 @@ private fun Typography.sessionFont() = copy(
     titleLarge = titleLarge.sessionFont(),
     titleMedium = titleMedium.sessionFont(),
     titleSmall = titleSmall.sessionFont(),
-    bodyLarge = bodyLarge.sessionFont(),
-    bodyMedium = bodyMedium.sessionFont(),
-    bodySmall = bodySmall.sessionFont(),
+    bodyLarge = bodyLarge.sessionFont(11f),
+    bodyMedium = bodyMedium.sessionFont(11f),
+    bodySmall = bodySmall.sessionFont(11f),
     labelLarge = labelLarge.sessionFont(),
     labelMedium = labelMedium.sessionFont(),
     labelSmall = labelSmall.sessionFont(),
@@ -100,20 +98,11 @@ val PinkCollabTypography = Typography(
 /** Message list only. Heavier weights are synthesized from the bundled regular face. */
 internal val SessionTypography = PinkCollabTypography.sessionFont()
 
-private val PinkCollabShapes = Shapes(
-    extraSmall = RoundedCornerShape(2.dp),
-    small = RoundedCornerShape(3.dp),
-    medium = RoundedCornerShape(4.dp),
-    large = RoundedCornerShape(6.dp),
-    extraLarge = RoundedCornerShape(8.dp),
-)
-
 @Composable
 fun PinkCollabTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = PinkCollabScheme,
         typography = PinkCollabTypography,
-        shapes = PinkCollabShapes,
         content = content,
     )
 }
@@ -121,9 +110,9 @@ fun PinkCollabTheme(content: @Composable () -> Unit) {
 // ── Status semantics ─────────────────────────────────────────────────────────
 /** Semantic session-status colors, kept separate from decorative brand accents. */
 fun statusColor(status: SessionStatus): Color = when (status) {
-    SessionStatus.NeedsInput -> WarningAmber
-    SessionStatus.Starting, SessionStatus.Running, SessionStatus.Stopping -> ActivityAmber
-    SessionStatus.Idle -> MutedText
+    SessionStatus.NeedsInput -> Amber300
+    SessionStatus.Starting, SessionStatus.Running, SessionStatus.Stopping -> Violet400
+    SessionStatus.Idle -> Gray400
 }
 
 fun statusLabel(status: SessionStatus): String = when (status) {

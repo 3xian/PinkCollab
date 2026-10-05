@@ -11,9 +11,6 @@ import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.GatewayHttpException
 import dev.pinkcollab.data.ToolDetailPage
 import dev.pinkcollab.ui.theme.TextMid
-import dev.pinkcollab.ui.theme.retroPanel
-import dev.pinkcollab.ui.theme.RetroText
-import dev.pinkcollab.ui.theme.RetroBrass
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -107,18 +104,17 @@ internal fun ToolDetailPanel(callId: String, version: String, controller: ToolDe
             if (current.loaded && !current.hasMore && current.error == null) controller.load(callId, version, more = true)
         }
     }
-    Column(Modifier.fillMaxWidth().retroPanel(inset = true).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (state.text.isNotBlank()) SelectionContainer {
             Text(state.text, modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
-                style = MaterialTheme.typography.bodySmall, color = RetroText)
+                style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
         if (state.loading) {
-            CircularProgressIndicator(Modifier.size(18.dp), color = RetroBrass, strokeWidth = 2.dp)
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             Text("Loading details…", style = MaterialTheme.typography.labelSmall, color = TextMid)
         }
         if (state.error != null) {
-            Text(state.error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(state.error, style = MaterialTheme.typography.bodySmall, color = TextMid)
             TextButton(onClick = { scope.launch { controller.load(callId, version, more = state.nextCursor != null, retry = true) } }) { Text("Retry") }
         } else if (state.hasMore && !state.loading) {
             TextButton(onClick = { scope.launch { controller.load(callId, version, more = true) } }) { Text("Load more") }

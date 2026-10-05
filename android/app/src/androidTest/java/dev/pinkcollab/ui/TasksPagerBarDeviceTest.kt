@@ -5,6 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasTestTag
@@ -326,6 +329,33 @@ class TasksPagerBarDeviceTest {
         compose.runOnIdle { assertEquals(targetKey, selected) }
         compose.onNodeWithText("Retry").performClick()
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+    }
+
+    @Test fun long_status_keeps_workspace_visible_at_large_font_scale() {
+        val session = sessions.first().copy(cwd = "/work/project")
+        val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            connection = ConnectionState.UpgradeRequired, sessions = listOf(session))
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                dev.pinkcollab.ui.theme.PinkCollabTheme {
+                    TasksScreen(
+                        TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
+                            emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(),
+                            SessionKey("host", session.id)),
+                        TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        val workspace = compose.onNodeWithText("project", useUnmergedTree = true)
+        val status = compose.onNodeWithText(SessionCardStatus.UpdateRequired.label, useUnmergedTree = true)
+        workspace.assertIsDisplayed()
+        status.assertIsDisplayed()
+        val workspaceBounds = workspace.fetchSemanticsNode().boundsInRoot
+        val statusBounds = status.fetchSemanticsNode().boundsInRoot
+        assertTrue("Workspace and status must have separate visible space", workspaceBounds.right < statusBounds.left)
     }
 
     private fun assertCentered(id: String) {

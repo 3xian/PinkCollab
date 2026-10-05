@@ -1,5 +1,6 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.selection.toggleable
@@ -9,10 +10,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.outlined.Stop
-import androidx.compose.material.icons.outlined.Bolt
-import androidx.compose.material.icons.outlined.Check
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -23,7 +23,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -71,6 +70,7 @@ private val ComposerRailMinWidth = 52.dp
 /** Each rail action keeps a 48 dp touch target even when the composer card is short. */
 private val ComposerRailActionMinHeight = 48.dp
 
+
 /** Stop aborts the turn; End opens confirmation before stopping the runtime. */
 @Composable
 internal fun ComposerRail(
@@ -92,28 +92,20 @@ internal fun ComposerRail(
             label = "End",
             onClick = onExit,
             enabled = controls.canStop,
-            icon = Icons.AutoMirrored.Outlined.Logout,
-            top = RetroSurfaceTop,
-            bottom = RetroSurfaceBottom,
-            contentColor = RetroMutedText,
+            contentColor = TextMid,
         )
         ComposerRailButton(
             label = "Stop",
             onClick = { onCommand(SessionUserCommand.Interrupt) },
             enabled = controls.canInterrupt,
-            icon = Icons.Outlined.Stop,
-            top = RetroDangerTop,
-            bottom = RetroDangerBottom,
-            contentColor = RetroText,
+            contentColor = TextMid,
         )
         ComposerRailButton(
             label = "Send",
             onClick = onSend,
             enabled = controls.canSend,
-            icon = Icons.AutoMirrored.Outlined.Send,
-            top = RetroAmberTop,
-            bottom = RetroAmberBottom,
-            contentColor = RetroInk,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            fill = if (controls.canSend) BrandGradient else SolidColor(Purple400.copy(alpha = 0.12f)),
         )
     }
 }
@@ -123,27 +115,24 @@ private fun ComposerRailButton(
     label: String,
     onClick: () -> Unit,
     enabled: Boolean,
-    icon: ImageVector,
-    top: Color,
-    bottom: Color,
     contentColor: Color,
+    fill: Brush? = null,
 ) {
-    val color = if (enabled) contentColor else RetroMutedText
-    Column(
+    val color = if (enabled) contentColor else Gray400.copy(alpha = 0.34f)
+    val shape = RoundedCornerShape(12.dp)
+    val background = fill ?: Brush.verticalGradient(
+        listOf(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.surfaceContainer),
+    )
+    Box(
         Modifier
             .fillMaxWidth()
             .heightIn(min = ComposerRailActionMinHeight)
-            .retroPanel(
-                if (enabled) top else RetroInsetTop,
-                if (enabled) bottom else RetroInsetBottom,
-                accented = enabled && top == RetroAmberTop,
-            )
+            .clip(shape)
+            .background(background)
             .clickable(enabled = enabled, role = Role.Button, onClick = rememberHapticOnClick(onClick))
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = color)
         Text(
             label,
             maxLines = 1,
@@ -172,32 +161,40 @@ internal fun ComposerFastSwitch(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val toggle = rememberHapticOnClick { onCheckedChange(!checked) }
-    val color = if (!enabled) RetroMutedText else if (checked) RetroInk else RetroText
+    val color = when {
+        !enabled -> Gray400.copy(alpha = 0.34f)
+        checked -> Purple200
+        else -> TextMid
+    }
     Row(
         Modifier
             .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-            .retroPanel(
-                if (!enabled) RetroInsetTop else if (checked) RetroAmberTop else RetroSurfaceTop,
-                if (!enabled) RetroInsetBottom else if (checked) RetroAmberBottom else RetroSurfaceBottom,
-                accented = enabled && checked,
-            )
+            .padding(end = ComposerContentInset)
             .toggleable(value = checked, interactionSource = remember { MutableInteractionSource() },
                 indication = null, enabled = enabled, role = Role.Switch,
                 onValueChange = { toggle() })
             .semantics {
                 contentDescription = if (checked && !active) "Fast mode, currently inactive" else "Fast mode"
-            }
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(
-            if (checked) Icons.Outlined.Check else Icons.Outlined.Bolt,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = color,
+        Text("Fast", color = color, style = MaterialTheme.typography.labelMedium)
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Purple400,
+                checkedBorderColor = Color.Transparent,
+                uncheckedThumbColor = TextMid,
+                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                uncheckedBorderColor = Color.Transparent,
+                disabledCheckedBorderColor = Color.Transparent,
+                disabledUncheckedBorderColor = Color.Transparent,
+            ),
         )
-        Text("Fast", color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -210,17 +207,14 @@ internal fun ComposerModelButton(
     modifier: Modifier = Modifier,
 ) {
     val description = if (thinkingLevel == null) "Choose model: $label" else "Choose model: $label, thinking $thinkingLevel"
-    val color = if (enabled) RetroText else RetroMutedText
+    val color = if (enabled) Purple200 else Gray400.copy(alpha = 0.34f)
+    val thinkingColor = if (enabled) TextMid else Gray400.copy(alpha = 0.34f)
     Row(
         modifier
             .fillMaxWidth()
             .heightIn(min = 48.dp)
-            .retroPanel(
-                if (enabled) RetroSurfaceTop else RetroInsetTop,
-                if (enabled) RetroSurfaceBottom else RetroInsetBottom,
-            )
             .clickable(enabled = enabled, role = Role.Button, onClick = rememberHapticOnClick(onClick))
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .padding(horizontal = ComposerContentInset)
             .semantics { contentDescription = description },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -232,7 +226,6 @@ internal fun ComposerModelButton(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
             color = color,
         )
         if (thinkingLevel != null) {
@@ -243,7 +236,7 @@ internal fun ComposerModelButton(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelMedium,
-                color = color,
+                color = thinkingColor,
             )
         }
         Spacer(Modifier.width(4.dp))

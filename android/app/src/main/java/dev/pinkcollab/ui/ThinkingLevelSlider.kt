@@ -32,8 +32,8 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import dev.pinkcollab.ui.theme.TextMid
-import dev.pinkcollab.ui.theme.RetroAmberTop
-import dev.pinkcollab.ui.theme.RetroAmberBottom
+import dev.pinkcollab.ui.theme.BrandPurple
+import dev.pinkcollab.ui.theme.BrandPink
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -103,7 +103,7 @@ internal fun ThinkingLevelSlider(
                         val activeEnd = Offset(start.x + (end.x - start.x) * fraction, radius)
                         drawLine(
                             brush = Brush.linearGradient(
-                                colors = if (sliderEnabled) listOf(RetroAmberBottom, RetroAmberTop)
+                                colors = if (sliderEnabled) listOf(BrandPurple, BrandPink)
                                     else listOf(disabledColor, disabledColor),
                                 start = start,
                                 end = activeEnd,

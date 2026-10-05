@@ -8,13 +8,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.R
-import dev.pinkcollab.ui.theme.*
+import dev.pinkcollab.ui.theme.PrimaryButton
 
 @Composable
 internal fun EmptyState(
@@ -24,7 +23,7 @@ internal fun EmptyState(
     onAction: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Box(Modifier.fillMaxSize().retroBackdrop().verticalScroll(rememberScrollState()).padding(32.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp), contentAlignment = Alignment.Center) {
         Column(
             modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -33,7 +32,6 @@ internal fun EmptyState(
                 painter = painterResource(R.drawable.moon_robot),
                 contentDescription = null,
                 modifier = Modifier.size(120.dp),
-                colorFilter = ColorFilter.tint(RetroBrass),
             )
             Spacer(Modifier.height(24.dp))
             Text(

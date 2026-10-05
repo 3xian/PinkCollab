@@ -107,10 +107,9 @@ internal fun ModelPickerSheet(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .widthIn(max = BottomSheetDefaults.SheetMaxWidth)
                     .then(if (runtimeAttached) Modifier.fillMaxHeight(0.93f) else Modifier)
-                    .retroPanel()
                     .semantics { paneTitle = "Model settings" },
-                shape = RoundedCornerShape(3.dp),
-                color = Color.Transparent,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                color = MaterialTheme.colorScheme.surface,
             ) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
                     ModelPickerHeader({ showUsage = true; loadUsage() }, refresh, runtimeAttached, runtimeAttached &&
@@ -161,7 +160,7 @@ internal fun ModelPickerSheet(
                     } else {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             when {
-                                state == null || state == LoadState.Loading -> CircularProgressIndicator(color = RetroBrass)
+                                state == null || state == LoadState.Loading -> CircularProgressIndicator(color = Purple400)
                                 state is LoadState.Failed -> Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -230,7 +229,7 @@ private fun DefaultModelContent(starting: Boolean, canStart: Boolean, start: () 
     ) {
         if (starting) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator(Modifier.size(20.dp), color = RetroBrass, strokeWidth = 2.dp)
+                CircularProgressIndicator(Modifier.size(20.dp), color = Purple400, strokeWidth = 2.dp)
                 Text("Starting OMP…", style = MaterialTheme.typography.bodyMedium, color = TextMid)
             }
         } else if (error != null) {
@@ -254,8 +253,7 @@ private fun ModelSearchField(query: String, onQueryChange: (String) -> Unit) {
     TextField(
         value = query,
         onValueChange = onQueryChange,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-            .retroPanel(inset = true).semantics { contentDescription = "Search models" },
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Search models" },
         textStyle = MaterialTheme.typography.bodyMedium,
         placeholder = { Text("Search models…", style = MaterialTheme.typography.bodyMedium) },
         leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(20.dp)) },
@@ -264,10 +262,10 @@ private fun ModelSearchField(query: String, onQueryChange: (String) -> Unit) {
             focusedContainerColor = Color.Transparent,
             unfocusedContainerColor = Color.Transparent,
             disabledContainerColor = Color.Transparent,
-            focusedIndicatorColor = RetroBrass,
+            focusedIndicatorColor = Purple400,
             unfocusedIndicatorColor = MaterialTheme.colorScheme.outlineVariant,
             disabledIndicatorColor = MaterialTheme.colorScheme.outlineVariant,
-            cursorColor = RetroBrass,
+            cursorColor = Purple400,
             focusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             unfocusedLeadingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
             focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -282,7 +280,7 @@ private fun ModelProviderHeader(provider: String, count: Int, expanded: Boolean,
     Column {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp)
-                .retroPanel()
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .clickable(role = Role.Button, onClick = rememberHapticOnClick(onToggle))
                 .semantics {
                     contentDescription = "$provider models"
@@ -295,13 +293,13 @@ private fun ModelProviderHeader(provider: String, count: Int, expanded: Boolean,
             Text(provider.uppercase(), modifier = Modifier.weight(1f), maxLines = 1,
                 overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall,
                 color = TextHigh, fontWeight = FontWeight.SemiBold)
-            Surface(modifier = Modifier.retroPanel(inset = true), shape = RoundedCornerShape(3.dp), color = Color.Transparent) {
+            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
                 Text(count.toString(), modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelSmall, color = TextMid)
             }
             Spacer(Modifier.width(8.dp))
             Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                contentDescription = null, modifier = Modifier.size(20.dp), tint = RetroBrass)
+                contentDescription = null, modifier = Modifier.size(20.dp), tint = Purple200)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
@@ -309,38 +307,41 @@ private fun ModelProviderHeader(provider: String, count: Int, expanded: Boolean,
 
 @Composable
 private fun CompactModelRow(model: ModelInfo, selected: Boolean, current: Boolean, enabled: Boolean, onSelect: () -> Unit) {
-    TextButton(
-        onClick = rememberHapticOnClick(onSelect),
-        enabled = enabled,
-        modifier = Modifier.fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 2.dp)
-            .heightIn(min = SmallButtonHeight)
-            .then(if (selected) Modifier.retroPanel(accented = true) else Modifier)
-            .semantics {
-                this.selected = selected
-                contentDescription = "${model.name}, ${model.provider}"
-                if (current) stateDescription = "Current model"
-            },
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-        colors = ButtonDefaults.textButtonColors(
-            containerColor = Color.Transparent,
-            contentColor = RetroText,
-            disabledContainerColor = Color.Transparent,
-        ),
-    ) {
-        val markerColor = if (!enabled) LocalContentColor.current
-            else if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-        Box(Modifier.size(5.dp).clip(CircleShape).background(markerColor))
-        Spacer(Modifier.width(8.dp))
-        Text(model.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.bodySmall)
-        if (current) {
+    SmallButtons {
+        TextButton(
+            onClick = rememberHapticOnClick(onSelect),
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 2.dp)
+                .heightIn(min = SmallButtonHeight)
+                .semantics {
+                    this.selected = selected
+                    contentDescription = "${model.name}, ${model.provider}"
+                    if (current) stateDescription = "Current model"
+                },
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            colors = ButtonDefaults.textButtonColors(
+                containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
+                disabledContainerColor = if (selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                    else Color.Transparent,
+            ),
+        ) {
+            val markerColor = if (!enabled) LocalContentColor.current
+                else if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+            Box(Modifier.size(5.dp).clip(CircleShape).background(markerColor))
             Spacer(Modifier.width(8.dp))
-            Text("Current", style = MaterialTheme.typography.labelSmall)
-        }
-        if (selected) {
-            Spacer(Modifier.width(8.dp))
-            Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp), tint = markerColor)
+            Text(model.name, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall)
+            if (current) {
+                Spacer(Modifier.width(8.dp))
+                Text("Current", style = MaterialTheme.typography.labelSmall)
+            }
+            if (selected) {
+                Spacer(Modifier.width(8.dp))
+                Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp), tint = markerColor)
+            }
         }
     }
 }
@@ -354,23 +355,25 @@ private fun ModelPickerActions(dismiss: () -> Unit, apply: () -> Unit, unchanged
             Text(message, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = rememberHapticOnClick(dismiss),
-                modifier = Modifier.height(SmallButtonHeight),
-                contentPadding = SmallButtonPadding,
-            ) { Text("Cancel") }
-            PrimaryButton(
-                onClick = if (done) dismiss else apply,
-                enabled = available,
-                modifier = Modifier.height(SmallButtonHeight),
-                contentPadding = SmallButtonPadding,
+        SmallButtons {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(if (done) "Done" else "Apply")
+                TextButton(
+                    onClick = rememberHapticOnClick(dismiss),
+                    modifier = Modifier.height(SmallButtonHeight),
+                    contentPadding = SmallButtonPadding,
+                ) { Text("Cancel") }
+                Button(
+                    onClick = rememberHapticOnClick(if (done) dismiss else apply),
+                    enabled = available,
+                    modifier = Modifier.height(SmallButtonHeight),
+                    contentPadding = SmallButtonPadding,
+                ) {
+                    Text(if (done) "Done" else "Apply")
+                }
             }
         }
     }

@@ -8,7 +8,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -66,7 +69,7 @@ internal fun recoveryPrimaryAction(hosts: List<HostState>, actions: TasksScreenA
 @Composable
 internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenActions) {
     val primaryAction = recoveryPrimaryAction(hosts, actions)
-    BoxWithConstraints(Modifier.fillMaxSize().retroBackdrop()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -75,8 +78,19 @@ internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenA
             Image(
                 painter = painterResource(R.drawable.disconnected_robot),
                 contentDescription = null,
-                modifier = Modifier.widthIn(max = 140.dp).fillMaxWidth().aspectRatio(1.25f),
-                colorFilter = ColorFilter.tint(RetroBrass),
+                modifier = Modifier.widthIn(max = 140.dp).fillMaxWidth().aspectRatio(1.25f)
+                    .drawWithCache {
+                        val radius = size.width * 0.7f
+                        val glowCenter = Offset(size.width / 2f, size.height / 2f)
+                        val glow = Brush.radialGradient(
+                            0f to Teal300.copy(alpha = 0.30f),
+                            0.45f to Teal300.copy(alpha = 0.14f),
+                            1f to Color.Transparent,
+                            center = glowCenter,
+                            radius = radius,
+                        )
+                        onDrawBehind { drawCircle(glow, radius = radius, center = glowCenter) }
+                    },
                 contentScale = ContentScale.Fit,
             )
             Spacer(Modifier.height(20.dp))
@@ -97,7 +111,7 @@ internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenA
             Spacer(Modifier.height(24.dp))
             Column(Modifier.widthIn(max = 440.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 hosts.forEach { host ->
-                    Column(Modifier.fillMaxWidth().retroPanel().padding(16.dp)) {
+                    Column(Modifier.fillMaxWidth().glassPanel(CardShape).padding(16.dp)) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
                                 host.paired.host.name,
@@ -105,12 +119,12 @@ internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenA
                                 style = MaterialTheme.typography.titleSmall,
                             )
                             val (label, color) = when (host.connection) {
-                                ConnectionState.Connecting -> "Reconnecting" to BrandBronze
-                                ConnectionState.Synchronizing -> "Syncing" to BrandBronze
-                                is ConnectionState.Online -> "Connected" to SuccessOlive
-                                is ConnectionState.Offline -> "Offline" to MutedText
-                                ConnectionState.AuthenticationRequired -> "Reconnect required" to ErrorRed
-                                ConnectionState.UpgradeRequired -> "Update required" to ErrorRed
+                                ConnectionState.Connecting -> "Reconnecting" to BrandPink
+                                ConnectionState.Synchronizing -> "Syncing" to BrandPink
+                                is ConnectionState.Online -> "Connected" to Teal300
+                                is ConnectionState.Offline -> "Offline" to Gray400
+                                ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
+                                ConnectionState.UpgradeRequired -> "Update required" to Red400
                             }
                             Text(label, style = MaterialTheme.typography.labelSmall, color = color)
                         }

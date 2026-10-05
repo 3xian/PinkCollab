@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -20,8 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import dev.pinkcollab.ui.theme.*
-import androidx.compose.ui.graphics.Color
+import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import dev.pinkcollab.data.UsageAccount
 import dev.pinkcollab.data.UsageLimit
 import dev.pinkcollab.data.UsageSnapshot
@@ -35,8 +35,8 @@ internal fun UsageSheet(state: LoadState<UsageSnapshot>?, reload: () -> Unit, ba
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
             Surface(Modifier.fillMaxWidth().widthIn(max = 640.dp).fillMaxHeight(0.93f)
-                .retroPanel().semantics { paneTitle = "Provider usage" },
-                color = Color.Transparent, shape = RoundedCornerShape(3.dp)) {
+                .semantics { paneTitle = "Provider usage" },
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)) {
                 Column(Modifier.fillMaxSize().navigationBarsPadding()) {
                     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically) {
@@ -82,7 +82,7 @@ internal fun UsageSheet(state: LoadState<UsageSnapshot>?, reload: () -> Unit, ba
 
 @Composable
 private fun UsageAccountCard(account: UsageAccount) {
-    Surface(Modifier.fillMaxWidth().retroPanel(), color = Color.Transparent, shape = RoundedCornerShape(3.dp)) {
+    OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top) {
@@ -108,7 +108,7 @@ private fun UsageLimitRow(limit: UsageLimit) {
     val color = when (limit.status) {
         "exhausted" -> MaterialTheme.colorScheme.error
         "warning" -> MaterialTheme.colorScheme.tertiary
-        else -> Color(0xFFAAB77A)
+        else -> MaterialTheme.colorScheme.primary
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(listOfNotNull(limit.label, limit.modelId, limit.tier).distinct().joinToString(" · "),
@@ -123,12 +123,13 @@ private fun UsageLimitRow(limit: UsageLimit) {
         limit.usedFraction?.let { fraction ->
             val progress = fraction.toFloat().coerceIn(0f, 1f)
             val fillColor = when (limit.status) {
-                "exhausted" -> RetroDangerBottom
-                "warning" -> RetroAmberBottom
-                else -> RetroGreenBottom
+                "exhausted" -> MaterialTheme.colorScheme.errorContainer
+                "warning" -> MaterialTheme.colorScheme.tertiaryContainer
+                else -> MaterialTheme.colorScheme.primaryContainer
             }
             Box(
-                Modifier.fillMaxWidth().heightIn(min = 32.dp).retroPanel(inset = true)
+                Modifier.fillMaxWidth().heightIn(min = 32.dp).clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     .semantics(mergeDescendants = true) {
                         progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f)
                     },

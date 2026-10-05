@@ -5,6 +5,7 @@ import dev.pinkcollab.data.TodoStatus
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -18,24 +19,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.ui.theme.*
 
-internal val TodoInk = RetroText
-internal val TodoMutedInk = RetroMutedText
-internal val TodoActiveInk = Color(0xFFE4BD7C)
-internal val TodoCompletedInk = Color(0xFFA8BB79)
-internal val TodoBlockedInk = Color(0xFFE39B86)
 
-internal val TodoPanelCollapsedHeight = 72.dp
+internal val TodoPanelCollapsedHeight = 60.dp
 
 @Composable
 internal fun todoPanelHeaderHeight(): Dp =
@@ -72,78 +69,65 @@ internal fun FloatingTodoPanel(
         }
     }
     val accent by animateColorAsState(when {
-        settled -> TodoCompletedInk
-        focus?.status == TodoStatus.Blocked -> TodoBlockedInk
-        else -> TodoActiveInk
+        settled -> Teal300
+        focus?.status == TodoStatus.Blocked -> Amber300
+        else -> Purple400
     }, tween(420), label = "todoAccent")
     val quiet = settled && !completionFlash
+    val emphasis by animateFloatAsState(if (quiet) 0.10f else 0.26f, tween(500), label = "todoEmphasis")
     val progress by animateFloatAsState(if (tasks.isEmpty()) 0f else closed.toFloat() / tasks.size,
         tween(650, easing = FastOutSlowInEasing), label = "todoProgress")
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(260), label = "todoArrow")
     val headerHeight = todoPanelHeaderHeight()
-    Column(modifier.fillMaxWidth().heightIn(max = maxHeight).testTag("floatingTodoPanel"),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Column(Modifier.fillMaxWidth().height(headerHeight)
-            .retroPanel(accented = !quiet)
-            .testTag("todoHeader")
+    val shape = RoundedCornerShape(13.dp)
+    Column(modifier.fillMaxWidth().heightIn(max = maxHeight).shadow(10.dp, shape).clip(shape)
+        .background(Color(0xFF14111B))
+        .background(Brush.horizontalGradient(listOf(accent.copy(alpha = emphasis * 0.28f), Color.Transparent)))
+        .border(1.dp, accent.copy(alpha = emphasis), shape).testTag("floatingTodoPanel")) {
+        Column(Modifier.fillMaxWidth().height(headerHeight).testTag("todoHeader")
             .semantics {
                 stateDescription = if (expanded) "Expanded" else "Collapsed"
                 contentDescription = "Task plan, $closed of ${tasks.size} settled"
             }
             .clickable(role = Role.Button, onClick = rememberHapticOnClick { onExpandedChange(!expanded) })
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(if (settled) Icons.Outlined.CheckCircle else Icons.Outlined.Checklist,
-                    null, Modifier.size(18.dp), tint = RetroBrass)
-                Text("TASK PLAN", Modifier.weight(1f), color = RetroBrass,
-                    style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Default)
-                Text("$closed/${tasks.size}", color = RetroText,
-                    style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Default)
-                Icon(Icons.Outlined.ExpandMore, null, Modifier.size(20.dp).rotate(arrow), tint = RetroText)
-            }
+            .padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (focus?.status == TodoStatus.Active) GlowDot(accent,
-                    modifier = Modifier.todoDotBreathing(live), size = 5.dp)
+                    modifier = Modifier.todoDotBreathing(live), size = 6.dp)
+                else Icon(if (settled) Icons.Outlined.CheckCircle else Icons.Outlined.Checklist,
+                    null, Modifier.size(18.dp), tint = accent)
                 Text(if (settled) "Plan settled" else focus?.content ?: "Task plan",
                     Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, color = if (quiet) TodoMutedInk else TodoInk)
+                    style = MaterialTheme.typography.bodySmall, color = if (quiet) TextMid else TextHigh)
+                Text("$closed/${tasks.size}", color = accent.copy(alpha = if (quiet) 0.7f else 1f),
+                    style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Default)
+                Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp).rotate(arrow), tint = TextMid)
             }
-            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(1.dp))
-                .background(RetroInk)
+            Box(Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(99.dp))
+                .background(accent.copy(alpha = 0.1f))
                 .semantics { progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f) }) {
-                if (progress > 0f) Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(accent))
+                if (progress > 0f) Box(Modifier.fillMaxWidth(progress).fillMaxHeight()
+                    .background(Brush.horizontalGradient(listOf(Purple400, accent, Teal300))))
             }
         }
-        AnimatedVisibility(expanded,
-            enter = expandVertically(tween(420, easing = FastOutSlowInEasing), expandFrom = Alignment.Top),
-            exit = shrinkVertically(tween(320, easing = FastOutSlowInEasing), shrinkTowards = Alignment.Top)) {
-            Box(Modifier.fillMaxWidth(0.96f)
-                .heightIn(max = (maxHeight - headerHeight).coerceAtLeast(1.dp))
-                .retroPanel(inset = true)) {
-                Column(Modifier.fillMaxWidth().testTag("todoScrollBody")
-                    .verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    item.phases.forEachIndexed { phaseIndex, phase ->
-                        key(phaseIndex, phase.name) {
-                            Row(Modifier.fillMaxWidth().retroPanel()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Text((phaseIndex + 1).toString().padStart(2, '0'), color = accent,
-                                    style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 6.dp))
-                                Text(phase.name, color = TodoInk, style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                Text("${phase.tasks.count { it.status == TodoStatus.Completed || it.status == TodoStatus.Abandoned }}/${phase.tasks.size}",
-                                    color = TodoMutedInk, style = MaterialTheme.typography.labelSmall)
-                            }
-                            phase.tasks.forEachIndexed { index, task ->
-                                key(index, task.content) { QuestTaskRow(task, live) }
-                            }
+        AnimatedVisibility(expanded, enter = fadeIn(tween(180)) + expandVertically(tween(300)),
+            exit = fadeOut(tween(120)) + shrinkVertically(tween(260))) {
+            Column(Modifier.fillMaxWidth().heightIn(max = (maxHeight - headerHeight).coerceAtLeast(1.dp))
+                .testTag("todoScrollBody").verticalScroll(rememberScrollState()).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                item.phases.forEachIndexed { phaseIndex, phase ->
+                    key(phaseIndex, phase.name) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text((phaseIndex + 1).toString().padStart(2, '0'), color = accent,
+                                style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 6.dp))
+                            Text(phase.name, color = TextHigh, style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.weight(1f))
+                            Text("${phase.tasks.count { it.status == TodoStatus.Completed || it.status == TodoStatus.Abandoned }}/${phase.tasks.size}",
+                                color = TextMid, style = MaterialTheme.typography.labelSmall)
+                        }
+                        phase.tasks.forEachIndexed { index, task ->
+                            key(index, task.content) { QuestTaskRow(task, live) }
                         }
                     }
                 }

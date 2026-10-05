@@ -28,7 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.InitialSyncState
-import dev.pinkcollab.ui.theme.RetroMutedText
+import dev.pinkcollab.ui.theme.TextMid
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 
@@ -92,12 +92,12 @@ internal fun StartupProgress(app: NavigationState, modifier: Modifier = Modifier
             .verticalScroll(scroll)
             .padding(vertical = 40.dp),
     ) {
-        entries.forEach { step ->
+        entries.forEachIndexed { index, step ->
             Text(
                 step.text,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 5.dp),
                 style = MaterialTheme.typography.bodySmall,
-                color = RetroMutedText,
+                color = TextMid.copy(alpha = if (index == entries.lastIndex) 0.8f else 0.55f),
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

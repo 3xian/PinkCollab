@@ -3,20 +3,18 @@ package dev.pinkcollab.ui
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Matrix
-import dev.pinkcollab.ui.theme.RetroBrass
-import dev.pinkcollab.ui.theme.RetroInk
-import dev.pinkcollab.ui.theme.RetroMutedText
 import java.util.Locale
 
 internal fun workspaceIconColor(os: String): Color = when (os.lowercase(Locale.ROOT)) {
-    "windows" -> RetroMutedText
-    "macos", "darwin" -> Color(0xFFD8C9AE)
-    "linux" -> RetroBrass
-    else -> RetroBrass
+    "windows" -> Color(0xFF69B9FF)
+    "macos", "darwin" -> Color(0xFFDCE5F3)
+    "linux" -> Color(0xFFFFB763)
+    else -> Color(0xFFA78BFA)
 }
 
 /** Scalable wallpaper art, kept faint so host details and workspace rows stay readable. */
@@ -24,7 +22,17 @@ internal fun Modifier.workspaceBackdrop(os: String): Modifier = drawWithCache {
     val width = size.width
     val height = size.height
     val platform = os.lowercase(Locale.ROOT)
-    val accent = workspaceIconColor(platform)
+    val accent = when (platform) {
+        "windows" -> Color(0xFF38A5FF)
+        "macos", "darwin" -> Color(0xFFB9C9EE)
+        "linux" -> Color(0xFFE99845)
+        else -> Color(0xFFA78BFA)
+    }
+    val glow = Brush.radialGradient(
+        listOf(accent.copy(alpha = 0.15f), Color.Transparent),
+        center = Offset(width * 0.88f, height * 0.24f),
+        radius = width * 0.9f,
+    )
     val artwork = when (platform) {
         "windows" -> {
             val pane = width * 0.16f
@@ -80,19 +88,20 @@ internal fun Modifier.workspaceBackdrop(os: String): Modifier = drawWithCache {
     }
     val artBrush = Brush.linearGradient(
         if (platform == "macos" || platform == "darwin") {
-            listOf(RetroMutedText.copy(alpha = 0.12f), accent.copy(alpha = 0.05f))
+            listOf(Color(0xFFE5EBF5).copy(alpha = 0.19f), accent.copy(alpha = 0.08f))
         } else {
-            listOf(accent.copy(alpha = 0.10f), RetroBrass.copy(alpha = 0.035f))
+            listOf(accent.copy(alpha = 0.13f), Color(0xFF7C63DB).copy(alpha = 0.035f))
         },
         start = Offset(width, 0f),
         end = Offset(width * 0.4f, height * 0.7f),
     )
     // Fade the artwork before the directory list so long cards retain a quiet background.
     val shade = Brush.verticalGradient(
-        listOf(Color.Transparent, RetroInk.copy(alpha = 0.3f)),
+        listOf(Color.Transparent, Color(0xFF13111B).copy(alpha = 0.3f)),
         endY = height * 0.65f,
     )
     onDrawBehind {
+        drawRect(glow, size = Size(width, height))
         drawPath(artwork, artBrush)
         drawRect(shade)
     }
