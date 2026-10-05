@@ -194,16 +194,16 @@ internal fun ModelPickerSheet(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, showRefresh: Boolean, canRefresh: Boolean) {
-    Column(
+    Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Models", modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text("Models", Modifier.width(IntrinsicSize.Max), style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold)
         FlowRow(
-            Modifier.fillMaxWidth(),
+            Modifier.weight(1f).padding(start = 8.dp),
             horizontalArrangement = Arrangement.End,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {

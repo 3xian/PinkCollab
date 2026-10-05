@@ -87,7 +87,7 @@ internal fun ResourcesScreen(
                 ConnectionState.UpgradeRequired -> "App update required" to Red400
             }
             Card(
-                Modifier.fillMaxWidth().glassPanel(CardShape).clip(CardShape).workspaceBackdrop(host.host.os),
+                Modifier.fillMaxWidth().glassPanel(CardShape, borderAlpha = 0f).clip(CardShape).workspaceBackdrop(host.host.os),
                 shape = CardShape,
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
             ) {
@@ -249,23 +249,17 @@ private fun HostUrlRow(url: String) {
 
 @Composable
 private fun WorkspaceRow(workspace: Workspace, enabled: Boolean, onClick: () -> Unit) {
-
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(12.dp)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(Color.White.copy(alpha = if (enabled) 0.055f else 0.025f), shape)
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Outlined.FolderOpen, null, Modifier.size(21.dp), tint = if (enabled) Purple400 else Gray400)
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(workspace.name, style = MaterialTheme.typography.titleSmall, color = if (enabled) TextHigh else Gray400)
-            Text(workspace.path, style = MaterialTheme.typography.bodySmall, color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = Gray400)
+        Text(workspace.path, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
+            color = if (enabled) TextHigh else Gray400)
     }
 }

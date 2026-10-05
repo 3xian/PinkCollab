@@ -44,7 +44,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.stateDescription
-
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -409,12 +408,15 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
                     Text(group.summary, style = MaterialTheme.typography.bodySmall, color = Red400, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Icon(
-                Icons.Outlined.ExpandMore,
-                contentDescription = null,
-                modifier = Modifier.size(22.dp).rotate(arrow),
-                tint = TextMid,
-            )
+            // Mirrors the copy action's 32dp bounds and 8dp overhang so both align on one column.
+            Box(Modifier.size(32.dp).offset(x = 8.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp).rotate(arrow),
+                    tint = TextMid,
+                )
+            }
         }
         if (expanded) {
             group.operations.forEach { operation ->
