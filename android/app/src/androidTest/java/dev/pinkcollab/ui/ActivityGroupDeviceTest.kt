@@ -119,7 +119,7 @@ class ActivityGroupDeviceTest {
             click(Offset(width - 2f, height - 2f))
         }
         compose.onNodeWithText("Command 0", useUnmergedTree = true).assertIsDisplayed()
-        compose.onAllNodesWithText("Arguments & output").onFirst().performClick()
+        compose.onAllNodes(hasStateDescription("Collapsed") and hasClickAction(), useUnmergedTree = true).onFirst().performClick()
         compose.onNodeWithText("Output 0", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
         compose.onNodeWithText(item.action, useUnmergedTree = true).performTouchInput { click() }
@@ -127,7 +127,7 @@ class ActivityGroupDeviceTest {
         compose.onNodeWithText("Output 0", useUnmergedTree = true).assertDoesNotExist()
     }
 
-    @Test fun single_operation_keeps_title_once_and_parameters_collapsed_until_requested() {
+    @Test fun single_operation_card_directly_toggles_parameters_without_duplicate_title() {
         val operation = ActivityOperation(
             "read-config", "functions.read", "Reading configuration",
             ActivityStatus.Succeeded, "Arguments\npath: /private/config\n\nOutput\nconfiguration content",
@@ -149,12 +149,11 @@ class ActivityGroupDeviceTest {
         compose.onNodeWithText("/private/config", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithContentDescription("Expand activity").performClick()
         compose.onAllNodesWithText(operation.action, useUnmergedTree = true).assertCountEquals(1)
-        compose.onNodeWithText(operation.name, useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText(operation.details, useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText("Arguments & output").performClick()
         compose.onAllNodesWithText(operation.name, useUnmergedTree = true).assertCountEquals(1)
         compose.onNodeWithText(operation.details, useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Collapse activity").performClick()
+        compose.onNodeWithText(operation.details, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun operations_without_details_keep_outcomes_visible_without_empty_expanders() {
@@ -179,7 +178,6 @@ class ActivityGroupDeviceTest {
         compose.onNodeWithText("Access denied", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Checking state, Completed", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Reading configuration, Failed", useUnmergedTree = true).assertIsDisplayed()
-        compose.onAllNodesWithText("Details").assertCountEquals(0)
-        compose.onAllNodesWithText("Arguments & output").assertCountEquals(0)
+        compose.onAllNodes(hasStateDescription("Collapsed") and hasClickAction(), useUnmergedTree = true).assertCountEquals(0)
     }
 }

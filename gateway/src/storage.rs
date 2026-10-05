@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
+mod history_policy;
 mod references;
 use references::{claim_reference, reference_key};
 
@@ -87,7 +88,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 6,
+            schema_version <= 7,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -146,6 +147,14 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
                 }
             }
         }
+        if schema_version < 7 {
+            history_policy::migrate_file_expectation(&db)?;
+        }
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS response_feedback
+             ON operation_records(session_id)
+             WHERE command_type='respond' AND status='succeeded';",
+        )?;
         Ok(Self {
             db: Mutex::new(db),
             blocking_slots: Arc::new(Semaphore::new(4)),
@@ -345,7 +354,7 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         if let Some(existing) = read_v2_session(&tx, &session.id)? {
             return Ok(existing);
         }
-        tx.execute("INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref,history_may_have_been_written) VALUES (?1,?2,?3,?4,0,?5,?6,?7,1)", params![session.id, session.host_id, session.cwd, session.title, session.created_at.to_rfc3339(), session.updated_at.to_rfc3339(), reference])?;
+        tx.execute("INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref,history_may_have_been_written,history_file_expected) VALUES (?1,?2,?3,?4,0,?5,?6,?7,1,1)", params![session.id, session.host_id, session.cwd, session.title, session.created_at.to_rfc3339(), session.updated_at.to_rfc3339(), reference])?;
         claim_reference(&tx, &session.id, &references::canonical_key(&source.path))?;
         tx.execute(
             "INSERT INTO omp_adoptions (omp_id,session_id,reference) VALUES (?1,?2,?3)",
@@ -401,8 +410,8 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
     pub fn v2_session(&self, id: &str) -> Result<Option<SessionRecord>> {
         read_v2_session(&self.db.lock(), id)
     }
-    /// Only a mapped reference with no possible prompt write may be treated as an
-    /// absent, never-written OMP file. The marker is committed before prompt RPC.
+    /// A true no-write mapping check. Responses protect the mapping even when OMP has
+    /// not created its transcript; missing-file permission is a separate persisted policy.
     pub fn reference_is_unwritten(&self, id: &str, reference: &str) -> Result<bool> {
         Ok(self.db.lock().query_row(
             "SELECT EXISTS(SELECT 1 FROM session_records WHERE id=?1 AND engine_session_ref=?2 AND history_may_have_been_written=0)",
@@ -411,35 +420,11 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         )?)
     }
 
-    pub fn mark_prompt_may_write(&self, id: &str, reference: &str) -> Result<bool> {
+    pub fn mark_history_may_write(&self, id: &str, reference: &str) -> Result<bool> {
         Ok(self.db.lock().execute(
-            "UPDATE session_records SET history_may_have_been_written=1 WHERE id=?1 AND engine_session_ref=?2",
+            "UPDATE session_records SET history_may_have_been_written=1,history_file_expected=1 WHERE id=?1 AND engine_session_ref=?2",
             params![id, reference],
         )? == 1)
-    }
-
-    pub fn replace_unwritten_engine_ref(
-        &self,
-        id: &str,
-        expected_revision: i64,
-        old_reference: &str,
-        reference: &str,
-    ) -> Result<bool> {
-        let key = reference_key(Path::new(reference));
-        let mut db = self.db.lock();
-        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let changed = tx.execute(
-            "UPDATE session_records SET engine_session_ref=?1,metadata_revision=metadata_revision+1,updated_at=?2
-             WHERE id=?3 AND metadata_revision=?4 AND engine_session_ref=?5
-             AND history_may_have_been_written=0",
-            params![reference, Utc::now().to_rfc3339(), id, expected_revision, old_reference],
-        )? == 1;
-        if changed {
-            tx.execute("DELETE FROM engine_references WHERE session_id=?1", [id])?;
-            claim_reference(&tx, id, &key)?;
-        }
-        tx.commit()?;
-        Ok(changed)
     }
 
     pub fn set_engine_ref(
@@ -537,13 +522,7 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
     }
 
     pub fn update_operation(&self, op: &OperationRecord) -> Result<bool> {
-        let changed=self.db.lock().execute(
-            "UPDATE operation_records SET runtime_generation=?1,status=?2,result=?3,error=?4,updated_at=?5 WHERE client_id=?6 AND session_id=?7 AND command_id=?8 AND (CASE ?2 WHEN 'dispatching' THEN status='accepted' WHEN 'running' THEN status IN ('accepted','dispatching') ELSE 1 END)",
-            params![op.runtime_generation,op.status,op.result.as_ref().map(serde_json::to_string).transpose()?,
-                op.error.as_ref().map(serde_json::to_string).transpose()?,op.updated_at.to_rfc3339(),
-                op.client_id,op.session_id,op.command_id],
-        )?;
-        Ok(changed == 1)
+        write_operation(&self.db.lock(), op)
     }
     pub fn bind_operation_generation(
         &self,
@@ -554,6 +533,34 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
             "UPDATE operation_records SET runtime_generation=?1,updated_at=?2 WHERE client_id=?3 AND session_id=?4 AND command_id=?5 AND status='dispatching'",
             params![generation,Utc::now().to_rfc3339(),op.client_id,op.session_id,op.command_id],
         )?==1)
+    }
+
+    /// Commit transport-delivered feedback and its receipt together, assigning order by
+    /// delivery commit rather than wall-clock timestamps or command admission order.
+    pub(crate) fn complete_response(
+        &self,
+        mut receipt: OperationRecord,
+        mut feedback: crate::history::FeedbackRecord,
+        input_request_id: &str,
+    ) -> Result<Option<OperationRecord>> {
+        let mut db = self.db.lock();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        feedback.sequence = tx.query_row(
+            "SELECT COUNT(*)+1 FROM operation_records
+             WHERE session_id=?1 AND command_type='respond' AND status='succeeded'",
+            [&receipt.session_id],
+            |row| row.get(0),
+        )?;
+        receipt.status = "succeeded".into();
+        receipt.updated_at = feedback.item.timestamp;
+        receipt.error = None;
+        receipt.result = Some(serde_json::json!({
+            "inputRequestId":input_request_id,
+            "feedback":feedback,
+        }));
+        let saved = write_operation(&tx, &receipt)?;
+        tx.commit()?;
+        Ok(saved.then_some(receipt))
     }
 
     pub fn recent_operations(
@@ -576,6 +583,36 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
                     .context("operation disappeared")
             })
             .collect()
+    }
+
+    /// Successful Respond receipts are also the durable authority for Gateway feedback.
+    /// These records are not subject to the bounded recent-operations display window.
+    pub fn feedback_records(
+        &self,
+        session_id: &str,
+        reference: &str,
+    ) -> Result<Vec<crate::history::FeedbackRecord>> {
+        #[derive(serde::Deserialize)]
+        struct ResponseResult {
+            feedback: Option<crate::history::FeedbackRecord>,
+        }
+        let db = self.db.lock();
+        let mut query = db.prepare(
+            "SELECT result FROM operation_records
+             WHERE session_id=?1 AND command_type='respond' AND status='succeeded' AND result IS NOT NULL
+             ORDER BY rowid",
+        )?;
+        let rows = query.query_map([session_id], |row| row.get::<_, String>(0))?;
+        let mut records = Vec::new();
+        for row in rows {
+            let result: ResponseResult = serde_json::from_str(&row?)?;
+            if let Some(record) = result.feedback
+                && record.reference == reference
+            {
+                records.push(record);
+            }
+        }
+        Ok(records)
     }
 
     pub fn mark_generation_unknown(&self, session_id: &str, generation: &str) -> Result<()> {
@@ -632,11 +669,31 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
     }
 
     pub fn recover_operations(&self) -> Result<()> {
-        let db = self.db.lock();
-        db.execute("UPDATE operation_records SET status='cancelled',error='{\"code\":\"gateway_restarted_before_dispatch\"}',updated_at=?1 WHERE status='accepted'",[Utc::now().to_rfc3339()])?;
-        db.execute("UPDATE operation_records SET status='outcome_unknown',error='{\"code\":\"gateway_restarted_after_dispatch\"}',updated_at=?1 WHERE status IN ('dispatching','running')",[Utc::now().to_rfc3339()])?;
+        let mut db = self.db.lock();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // A crash can interrupt Respond after delivery but before its durable feedback.
+        // Those sessions must not treat missing OMP content as successful feedback-only history.
+        tx.execute_batch(
+            "UPDATE session_records SET history_file_expected=1
+             WHERE EXISTS(SELECT 1 FROM operation_records
+                 WHERE session_id=session_records.id AND command_type='respond'
+                 AND status IN ('dispatching','running'));",
+        )?;
+        tx.execute("UPDATE operation_records SET status='cancelled',error='{\"code\":\"gateway_restarted_before_dispatch\"}',updated_at=?1 WHERE status='accepted'",[Utc::now().to_rfc3339()])?;
+        tx.execute("UPDATE operation_records SET status='outcome_unknown',error='{\"code\":\"gateway_restarted_after_dispatch\"}',updated_at=?1 WHERE status IN ('dispatching','running')",[Utc::now().to_rfc3339()])?;
+        tx.commit()?;
         Ok(())
     }
+}
+
+fn write_operation(db: &Connection, op: &OperationRecord) -> Result<bool> {
+    let changed = db.execute(
+        "UPDATE operation_records SET runtime_generation=?1,status=?2,result=?3,error=?4,updated_at=?5 WHERE client_id=?6 AND session_id=?7 AND command_id=?8 AND (CASE ?2 WHEN 'dispatching' THEN status='accepted' WHEN 'running' THEN status IN ('accepted','dispatching') ELSE 1 END)",
+        params![op.runtime_generation,op.status,op.result.as_ref().map(serde_json::to_string).transpose()?,
+            op.error.as_ref().map(serde_json::to_string).transpose()?,op.updated_at.to_rfc3339(),
+            op.client_id,op.session_id,op.command_id],
+    )?;
+    Ok(changed == 1)
 }
 
 type SessionColumns = (

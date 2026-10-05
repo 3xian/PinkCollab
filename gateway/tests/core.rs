@@ -409,7 +409,7 @@ fn v3_migration_protects_legacy_and_aborted_prompt_history() {
     );
     assert!(
         !store
-            .replace_unwritten_engine_ref("aborted", 2, "aborted.jsonl", "new.jsonl")
+            .replace_missing_engine_ref_with_feedback("aborted", 2, "aborted.jsonl", "new.jsonl")
             .unwrap()
     );
     assert!(
@@ -419,7 +419,7 @@ fn v3_migration_protects_legacy_and_aborted_prompt_history() {
     );
     assert!(
         store
-            .replace_unwritten_engine_ref("empty", 2, "empty.jsonl", "new.jsonl")
+            .replace_missing_engine_ref_with_feedback("empty", 2, "empty.jsonl", "new.jsonl")
             .unwrap()
     );
 }

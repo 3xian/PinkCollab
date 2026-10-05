@@ -118,6 +118,7 @@ A timeline `ToolTrace` contains `callId`, `name`, `isError`, `completed`, `summa
 | `tool`, structured trace present | Live tool start/end; historical tool call/result | One operation inside `ActivityGroup` | Groups by activity stage; completion updates the same call |
 | `tool`, trace absent | Tolerated partial or older input; not the normal structured producer | `Raw` fallback | Ends the preceding group; does not invent structured status |
 | `error` | History reconstruction of an assistant error with array content; also accepted by Android | `Error` | Ends the preceding group |
+| `feedback` | Gateway's successfully delivered attention response, restored from its durable command receipt | `Feedback`, original question and user's answer | Ends the preceding activity group, including empty answers; stable source identity joins live and saved history |
 | `user` / `assistant`, blank text | Accepted input | Omitted | Does not end a group |
 | Any other kind | Not currently emitted as a dedicated timeline kind by the inspected live/history producers | Omitted in concise mode | Does not end a group |
 
@@ -142,8 +143,9 @@ A timeline `ToolTrace` contains `callId`, `name`, `isError`, `completed`, `summa
 | Display type | Default content | Expandable content | Interpretation |
 | --- | --- | --- | --- |
 | `Message` | Speaker, local time, text; assistant text uses Markdown | No activity expander | User/assistant content, not a runtime status |
-| `ActivityGroup` | Focus operation's intent, status icons, supplied failure summary when applicable | Individual intents and independently expandable tool details | A compact group of tools, not a plan step |
+| `ActivityGroup` | Focus operation's intent, status icons, supplied failure summary when applicable | Single-operation details open with the card; multi-operation details expand independently | A compact group of tools, not a plan step |
 | `Error` | Error heading and concise text | Nonblank detail that differs from the summary | A supplied error; not automatically the whole session's outcome |
+| `Feedback` | Your response heading, local time, original question and exact selected/submitted answer; only zero-length text displays `(Empty response)`. Nonempty whitespace is preserved and copyable | None | Transport-delivered user response, not model acknowledgement |
 | `Raw` | Generic kind label and supplied text; assistant text uses Markdown | Tool/subagent details when available | Fallback without inferred structured semantics |
 
 Error summaries use the last nonblank line, capped at 180 characters, falling back to `Failed`. The standalone error expander uses the supplied `detail`; it is not a reconstructed full error log.
@@ -206,13 +208,13 @@ Targets, commands and file paths remain in the complete arguments shown in detai
 
 ### 5.5 Detail types
 
-Each tool operation with available details has an independent detail control. Operations with neither remote details nor nonblank inline content have no expander; their intents, status icons and supplied errors remain visible. Expanding a group shows operation intents; expanding an operation requests its details. Successful operations show a check without repeated completion text; running and failed states retain explicit labels. A single-operation group does not repeat its outer title. Tool names are shown only within opened details. The debug/raw renderer uses the same loader.
+In multi-operation groups, each tool operation with available details has an independent detail control; generic argument/output controls are labeled `Details`. Operations with neither remote details nor nonblank inline content have no expander; their intents, status icons and supplied errors remain visible. Expanding a multi-operation group shows operation intents; expanding an operation requests its details. A single-operation group opens its details directly when the card expands, without a redundant inner control or repeated outer title. Successful operations show a check without repeated completion text; running and failed states retain explicit labels. Tool names are shown only within opened details. The debug/raw renderer uses the same loader.
 
 Details come from authenticated `GET /api/v4/sessions/:id/tools/:callId?cursor=...`: current calls use Gateway memory and retired calls use the active OMP history branch. Each page carries complete UTF-8 text up to 32 KiB, an opaque prefix-hash/byte-offset cursor and a content version. Android caches by session, runtime generation, call ID and version, deduplicates requests, limits refreshes to two per second per call, and retains opened panels while evicting idle cached content over 4 MiB. In-flight failures appear locally with Retry. Load more and running-tail polling append only after the server validates the received prefix; a rewritten prefix reloads the first page. Completion reuses the resume cursor without duplicating arguments. Ordinary output progress keeps the summary version stable; start/availability changes and final status update summaries without folded payloads. Expanded running tails poll at 500 ms intervals; collapse or disposal stops polling.
 
 The expanded detail stream shows pretty-printed argument JSON followed by full output. Patch and file content remain lossless within their arguments. Inline full-payload details likewise retain the complete arguments and output once, without appending derived copies of patch, write content or output. Old/new edits with a supplied file path additionally show a synthesized diff. Gateway summary file extraction accepts direct/list arguments and recognized unified or patch-header paths; it is not a filesystem audit.
 
-Groups and all operation detail controls start collapsed, including single-operation groups and failures. Supplied failure evidence remains visible without fetching full details: the collapsed group shows the latest supplied error, and expanded multi-operation groups show each operation's error. Tool names appear once inside opened details; targets are part of the complete arguments rather than a duplicate derived row. Expanded output is selectable and vertically scrollable within a bounded height.
+Groups and independent multi-operation detail controls start collapsed, including failures. Single-operation details follow their card's expanded state. Supplied failure evidence remains visible without fetching full details: the collapsed group shows the latest supplied error, and expanded multi-operation groups show each operation's error. Tool names appear once inside opened details; targets are part of the complete arguments rather than a duplicate derived row. Expanded output is selectable and vertically scrollable within a bounded height.
 
 ### 5.6 Todo panel
 
@@ -234,7 +236,9 @@ The sole status row is mounted above the input card, not inside it, including wh
 
 `sessionWorkStatus` derives `kind`, `title`, `active`, and optional `timing` from `SessionDetail` and host connection state. The renderer contains one line: icon, ellipsized title and optional duration. Auxiliary target, command, file-name and request-text lines are removed; attention cards retain actionable request content. Model, thinking-level and Fast controls are separate and unchanged.
 
-`SessionPage` displays `Loading session` while detail is pending or an online host's subscription snapshot is missing. Once subscribed, an empty initial history wait replaces only Ready or History with `Loading messages`; known work, attention, sending, and host connection statuses retain precedence. Loading uses the same neutral text shimmer as sending, with an animated download arrow above a stationary tray and no work timer or progress bar. The 16dp icon keeps fixed layout bounds; only the arrow moves, and system animation-duration settings remain respected. Starting and stopping retain their static hourglass icons. Loading never enables actions from summary or cached detail, and a detail failure removes the loading row.
+When the work-status title changes, the old text slides upward out of the single-line clipped viewport and the new text enters from below over 260ms, with a short fade. The transition is keyed only by title text: unchanged titles, icon changes and elapsed-time ticks do not trigger replacement. Icons and durations do not slide, the row height stays stable, and platform animation-duration settings are respected. Only the current title remains exposed to accessibility during replacement.
+
+`SessionPage` uses the same user-facing label, `Loading conversation`, while detail is pending, an online host's subscription snapshot is missing, or an empty conversation is waiting for its initial history. Internal loading stages remain distinct without asking users to interpret them. Initial history loading replaces only Ready or History; known work, attention, sending, and host connection statuses retain precedence. Loading uses the same neutral text shimmer as sending, with an animated download arrow above a stationary tray and no work timer or progress bar. The 16dp icon keeps fixed layout bounds; only the arrow moves, and system animation-duration settings remain respected. Starting and stopping retain their static hourglass icons. Loading never enables actions from summary or cached detail, and a detail failure removes the loading row.
 
 ### 6.2 Precedence table
 
@@ -288,6 +292,8 @@ The Gateway currently admits `select`, `confirm`, `input`, and `editor` requests
 
 Attention requests use an inset, neutral card with proportional reading text and a distinct question heading. Select options are full-width, left-aligned rows with wrapping labels and at least 48 dp touch targets; tapping still submits the original option string immediately. Cancel is a secondary, trailing action. Connection and operation gating apply to every response control.
 
+Successfully delivered selections, confirmations, text/editor submissions and cancellations leave a `feedback` entry in the conversation. It displays the original question with the exact selected/submitted text, `Confirmed`, `Declined`, or `Cancelled`, under `Your response`. Empty text remains a visible response boundary. Replayed commands do not duplicate entries; rejected, expired or failed deliveries create no answered record. Gateway stores feedback in its successful command receipt, anchors it to the active OMP branch, and merges it into live/history ordering. Records survive reconnect, reopening and Gateway restart without modifying OMP's transcript or claiming that the model acknowledged the answer. Existing responses from before this feature are not reconstructed.
+
 ### 7.2 Command receipt notices
 
 Only the last receipt is considered for the page's notice:
@@ -305,9 +311,9 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 
 | Condition | Presentation rule |
 | --- | --- |
-| Session detail loading | Gently pulsing conversation skeleton centered above the composer; show Loading session in the existing composer status row; preserve composer/draft and keep runtime actions disabled |
+| Session detail loading | Gently pulsing conversation skeleton centered above the composer; show Loading conversation in the existing composer status row; preserve composer/draft and keep runtime actions disabled |
 | Session detail failed | Failure surface without a Retry button; preserve draft |
-| Initial history loading with no visible content | The same centered skeleton; show Loading messages in the existing composer status row instead of Ready or History, without hiding known current work or connection status; never claim “no saved messages” |
+| Initial history loading with no visible content | The same centered skeleton; show Loading conversation in the existing composer status row instead of Ready or History, without hiding known current work or connection status; never claim “no saved messages” |
 | Initial content becomes available | Fade the conversation layer in over 300ms after the loading wait ends; keep the composer and status row outside the fade |
 | Earlier history available | Pull down at the top, or invoke the timeline's “Load earlier messages” accessibility action; both preserve reading position and are unavailable while loading, disconnected, or inactive |
 | History failed or refresh error present | Error notice without a Retry button; retained messages remain available |
@@ -327,10 +333,11 @@ Timeline loading and failure surfaces contain no Retry buttons. The conversation
 | User message | Distinct leading rail and static tint; plain text |
 | Agent message | Quiet static band; Markdown body |
 | Timeline card spacing | Messages, tool groups, errors, retained entries and streaming replies use 12dp content padding; their content edges align with the floating Todo panel's 12dp outer inset |
+| Floating Todo panel | Borderless 13dp rounded surface with a raised graphite-purple base (`#211D2B`), shadow and a stronger left-to-right status-tinted gradient; violet while active, amber when blocked, and subdued teal after settlement. Collapsed and expanded states share the same background |
 | Message copy action | Body text uses the full content width, without a reserved right-hand column. A short 20dp footer separates the final line from the bottom-right copy action; its icon is 14dp with the existing 32dp button bounds and copy feedback retained |
 | Running tool | Violet status icon beside the header title; small spinner only when live-qualified; explicit status in accessibility/details |
 | Completed tool | Teal check; Completed status remains accessible without repeated visible text |
-| Failed tool | Red error icon beside the header title; Failed status in accessibility/details |
+| Failed tool | Red cross beside the header title; Failed status in accessibility/details |
 | Unconfirmed unfinished tool | Hourglass beside the header title; Last seen running in accessibility/details; no spinner |
 | Work-status row | Above the input card in the fixed composer area; icon, single-line action and optional duration are vertically centered; ellipsis for title overflow; no auxiliary line |
 | Attention | Amber status cue and explicit response controls |
@@ -339,8 +346,8 @@ Timeline loading and failure surfaces contain no Retry buttons. The conversation
 | Conversation loading skeleton | 24dp top inset; each placeholder breathes in sequence on a shared 2.4-second cycle with 240ms phase spacing; only opacity changes, not layout |
 
 - Color is supplementary; state remains distinguishable through text and icons.
-- The Android app uses only the platform default font and the bundled Maple Mono face. UI labels, speaker titles, model chips, timestamps, tool status labels, and detail toggles use the default font. Session body text and Markdown code blocks use Maple; native Markdown font fallback uses the platform default, never a separate system monospace face.
-- Conversation bodyLarge, bodyMedium and bodySmall styles share an 11sp font size, so You, Agent, retained/raw messages, streaming replies and tool details do not use different body sizes. Native Markdown updates its TextView size when conversation typography changes instead of retaining its creation-time size. Markdown heading semantics retain their relative styling; composer controls and session cards keep their existing typography.
+- The Android app uses only the platform default font and the bundled Maple Mono face. UI labels, speaker titles, model chips, timestamps, tool status labels and detail toggles use the default font. Session body text, tool activity titles and Markdown code blocks use Maple; native Markdown font fallback uses the platform default, never a separate system monospace face.
+- Conversation bodyLarge, bodyMedium and bodySmall styles share a 12sp font size, so You, Agent, retained/raw messages, streaming replies and tool details do not use different body sizes. Collapsed tool titles (including Read and Run command) inherit the conversation bodyMedium style; detail toggles use the same bodyMedium size with the platform default font. Native Markdown updates its TextView size when conversation typography changes instead of retaining its creation-time size. Markdown heading semantics retain their relative styling; composer controls and session cards keep their existing typography.
 - Agent Markdown strong emphasis uses the theme's high-contrast foreground. Inline code inherits the surrounding font and size and uses the brand accent unless nested inside strong emphasis, where it inherits the same high-contrast foreground, including through a link. Heading weight alone does not imply strong emphasis. The timeline renderer resolves this color from Markdown ancestry, not mutable paint state, without adding spaces around inline code; surrounding source whitespace is preserved. Neither has an inline background; adjacent or wrapped lines must not form joined highlight bands. Fenced code blocks keep their separate block styling.
 - The work-status title is a polite accessibility live region. Streaming tokens and tool output are not individually announced through it.
 - The timeline follows new content while at the end. Scrolling backward suspends following; reaching the end or returning to the session re-enables it.

@@ -138,10 +138,10 @@ internal fun SessionPage(
     }
     // Loading is presentation only; subscription readiness still gates runtime actions.
     val workStatus = when {
-        load == LoadState.Loading -> SessionWorkStatus(WorkStatusKind.Loading, "Loading session")
+        load == LoadState.Loading -> SessionWorkStatus(WorkStatusKind.Loading, "Loading conversation")
         load !is LoadState.Ready -> null
         detail.snapshotToken == null && state.host?.connected == true ->
-            SessionWorkStatus(WorkStatusKind.Loading, "Loading session")
+            SessionWorkStatus(WorkStatusKind.Loading, "Loading conversation")
         else -> {
             val current = remember(session, detail.liveItems, detail.streaming.isNotBlank(),
                 state.host?.connection, state.sendProgress) {
@@ -149,7 +149,7 @@ internal fun SessionPage(
             }
             if (awaitingHistory &&
                 (current.kind == WorkStatusKind.Ready || current.kind == WorkStatusKind.History)) {
-                SessionWorkStatus(WorkStatusKind.Loading, "Loading messages")
+                SessionWorkStatus(WorkStatusKind.Loading, "Loading conversation")
             } else current
         }
     }

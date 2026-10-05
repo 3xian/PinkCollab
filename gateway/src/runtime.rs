@@ -172,6 +172,8 @@ pub struct SessionController {
     state: Mutex<ControllerState>,
     ordinary_dispatch: Mutex<()>,
     prompt_interrupt_admission: Arc<Mutex<()>>,
+    // Orders feedback delivery/history capture without blocking lifecycle control.
+    feedback_order: Mutex<()>,
     store: Arc<Store>,
     browser: Arc<Browser>,
     bus: Arc<Bus>,
@@ -192,6 +194,7 @@ pub struct SessionDirectory {
 }
 
 mod directory;
+mod response;
 mod settings;
 mod startup;
 mod title;
@@ -200,6 +203,7 @@ mod work_timing;
 enum CommandResult {
     Running,
     Succeeded(Value),
+    Recorded,
 }
 #[derive(Debug)]
 struct CommandFailure {
@@ -320,6 +324,7 @@ impl SessionController {
                     .advance(&mut receipt, "succeeded", Some(value), None)
                     .await;
             }
+            Ok(CommandResult::Recorded) => {}
             Err(err) => {
                 let status = if err.uncertain {
                     "outcome_unknown"
@@ -397,7 +402,7 @@ impl SessionController {
                 let mark_session = receipt.session_id.clone();
                 let marked = self
                     .store
-                    .run(move |store| store.mark_prompt_may_write(&mark_session, &reference))
+                    .run(move |store| store.mark_history_may_write(&mark_session, &reference))
                     .await
                     .map_err(|_| {
                         CommandFailure::failed(
@@ -488,64 +493,15 @@ impl SessionController {
                 confirmed,
                 cancelled,
             } => {
-                let (_, runtime) = self.dispatchable_runtime(&generation).await?;
-                self.bind_generation(receipt, &generation).await?;
-                let attention = {
-                    let mut state = self.state.lock().await;
-                    let snapshot = state.projection.as_mut().ok_or_else(|| {
-                        CommandFailure::failed("runtime_required", "Runtime is unavailable")
-                    })?;
-                    let Some(index) = snapshot
-                        .pending_inputs
-                        .iter()
-                        .position(|input| input.id == input_request_id)
-                    else {
-                        return Err(CommandFailure::failed(
-                            "input_expired",
-                            "Input request is no longer pending",
-                        ));
-                    };
-                    let attention = snapshot.pending_inputs[index].clone();
-                    if attention.kind == "select"
-                        && !cancelled
-                        && !value
-                            .as_ref()
-                            .is_some_and(|value| attention.options.contains(value))
-                    {
-                        return Err(CommandFailure::failed(
-                            "invalid_answer",
-                            "Answer must match a select option",
-                        ));
-                    }
-                    if attention.kind == "confirm" && !cancelled && confirmed.is_none() {
-                        return Err(CommandFailure::failed(
-                            "invalid_answer",
-                            "Confirmed boolean required",
-                        ));
-                    }
-                    snapshot.pending_inputs.remove(index);
-                    state.update_work_timing(false);
-                    attention
-                };
-                {
-                    let mut state = self.state.lock().await;
-                    self.publish_state(&mut state);
-                }
-                let mut frame = json!({"type":"extension_ui_response","id":attention.id});
-                if cancelled {
-                    frame["cancelled"] = json!(true)
-                } else if attention.kind == "confirm" {
-                    frame["confirmed"] = json!(confirmed)
-                } else {
-                    frame["value"] = json!(value.unwrap_or_default())
-                };
-                runtime
-                    .write(frame)
-                    .await
-                    .map_err(|err| CommandFailure::uncertain(err.to_string()))?;
-                Ok(CommandResult::Succeeded(
-                    json!({"inputRequestId":input_request_id}),
-                ))
+                self.deliver_response(
+                    receipt,
+                    &generation,
+                    &input_request_id,
+                    value,
+                    confirmed,
+                    cancelled,
+                )
+                .await
             }
             Command::SelectModel {
                 generation,

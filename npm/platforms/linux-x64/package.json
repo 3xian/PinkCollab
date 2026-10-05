@@ -1,6 +1,6 @@
 {
   "name": "@pinkcollab/gateway-linux-x64",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "description": "PinkCollab Gateway binary for Linux x64",
   "license": "MIT",
   "repository": {

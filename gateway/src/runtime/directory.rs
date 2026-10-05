@@ -64,6 +64,7 @@ impl SessionDirectory {
             }),
             ordinary_dispatch: Mutex::new(()),
             prompt_interrupt_admission: Arc::new(Mutex::new(())),
+            feedback_order: Mutex::new(()),
             store: self.store.clone(),
             browser: self.browser.clone(),
             bus: self.bus.clone(),
@@ -147,6 +148,92 @@ impl SessionDirectory {
             }
         }
         Ok(view)
+    }
+
+    pub async fn history_page(
+        &self,
+        id: &str,
+        reference: &str,
+        cursor: Option<&str>,
+        limit: usize,
+        anchor: Option<&str>,
+        oldest: Option<&str>,
+    ) -> Result<Value> {
+        // Coordinate even detached sessions with concurrent runtime startup. History
+        // must not advance through a response write before its feedback commit.
+        let controller = self.controller(id).await?;
+        let _feedback = match controller.as_ref() {
+            Some(controller) => Some(controller.feedback_order.lock().await),
+            None => None,
+        };
+        let (feedback, allow_missing) = if controller.is_some() {
+            self.saved_feedback(id, reference).await?
+        } else {
+            (Vec::new(), false)
+        };
+        crate::history::history_page_with_anchor(
+            crate::history::HistorySource {
+                path: std::path::Path::new(reference),
+                allow_missing,
+            },
+            id,
+            cursor,
+            limit,
+            anchor,
+            oldest,
+            &feedback,
+        )
+        .await
+    }
+
+    pub async fn history_sync(
+        &self,
+        id: &str,
+        reference: &str,
+        request: &crate::history::HistorySync,
+    ) -> Result<Value> {
+        let controller = self.controller(id).await?;
+        let _feedback = match controller.as_ref() {
+            Some(controller) => Some(controller.feedback_order.lock().await),
+            None => None,
+        };
+        let (feedback, allow_missing) = if controller.is_some() {
+            self.saved_feedback(id, reference).await?
+        } else {
+            (Vec::new(), false)
+        };
+        crate::history::sync_history(
+            crate::history::HistorySource {
+                path: std::path::Path::new(reference),
+                allow_missing,
+            },
+            id,
+            request,
+            &feedback,
+        )
+        .await
+    }
+
+    async fn saved_feedback(
+        &self,
+        id: &str,
+        reference: &str,
+    ) -> Result<(Vec<crate::history::FeedbackRecord>, bool)> {
+        let file_exists = match tokio::fs::metadata(reference).await {
+            Ok(_) => true,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
+            Err(err) => return Err(err.into()),
+        };
+        let session_id = id.to_owned();
+        let reference = reference.to_owned();
+        self.store
+            .run(move |store| {
+                let allow_missing =
+                    store.history_read_policy(&session_id, &reference, file_exists)?;
+                let feedback = store.feedback_records(&session_id, &reference)?;
+                Ok((feedback, allow_missing))
+            })
+            .await
     }
 
     pub async fn live_tool(&self, id: &str, call_id: &str) -> Option<crate::model::ToolTrace> {

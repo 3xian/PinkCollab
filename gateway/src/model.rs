@@ -38,7 +38,7 @@ pub struct ModelInfo {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TimelineItem {
     pub id: String,
-    /// Identity shared by the final RPC message and its persisted OMP entry.
+    /// Identity shared by live and durable history (OMP messages or Gateway feedback).
     #[serde(default, rename = "sourceId", skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
     #[serde(
@@ -57,7 +57,7 @@ pub struct TimelineItem {
 }
 
 /// Structured tool data is part of the wire timeline only. OMP's session JSONL remains the
-/// canonical, lossless transcript and PinkCollab still does not persist conversation content.
+/// canonical, lossless tool transcript; Gateway feedback is persisted separately in receipts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolTrace {

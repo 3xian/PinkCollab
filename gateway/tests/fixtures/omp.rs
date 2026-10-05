@@ -186,6 +186,12 @@ fn main() {
     let mut pending_prompt_id: Option<Value> = None;
     let mut pending_prompt_ack: Option<Value> = None;
     emit(json!({"type":"ready","protocolVersion":1}));
+    if args.iter().any(|arg| arg == "--attention-on-start") {
+        emit(
+            json!({"type":"extension_ui_request","id":"question-1","method":"select",
+            "title":"Which API?","options":["compatibility","new"]}),
+        );
+    }
     // `--stall-stdin` announces itself and then never drains its pipe, so a write larger than the
     // pipe buffer stays blocked exactly as a wedged OMP would leave it.
     if args.iter().any(|arg| arg == "--stall-stdin") {
@@ -321,10 +327,33 @@ fn main() {
                 );
                 emit(json!({"type":"agent_start"}));
                 pending_prompt_id = frame.get("id").cloned();
-                if message == "need input" || message == "need input before ack" {
+                let request = match message {
+                    "need input" | "need input before ack" | "need expired input" => {
+                        Some(("select", "Which API?"))
+                    }
+                    "need confirm" => Some(("confirm", "Continue?")),
+                    "need text" => Some(("input", "What should I write?")),
+                    "need editor" => Some(("editor", "Edit the note")),
+                    _ => None,
+                };
+                if let Some((method, title)) = request {
                     emit(
-                        json!({"type":"extension_ui_request","id":"question-1","method":"select","title":"Which API?","options":["compatibility","new"]}),
+                        json!({"type":"extension_ui_request","id":"question-1","method":method,
+                        "title":title,"options":["compatibility","new"]}),
                     );
+                    if message == "need expired input" {
+                        emit(
+                            json!({"type":"extension_ui_request","method":"cancel","targetId":"question-1"}),
+                        );
+                        finish("Input expired", &log, &mut parent);
+                        emit(
+                            json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,
+                            "status":"completed","sessionSettled":true}),
+                        );
+                        pending_prompt_id = None;
+                    } else if args.iter().any(|arg| arg == "--stall-input-on-attention") {
+                        std::thread::sleep(std::time::Duration::from_secs(300));
+                    }
                 } else if message == "hold" {
                 } else if message == "steer" {
                     if frame["streamingBehavior"] != "steer" {
@@ -391,6 +420,16 @@ fn main() {
                 }
             }
             "extension_ui_response" => {
+                std::fs::write(
+                    std::env::current_dir()
+                        .unwrap()
+                        .join("last-input-response.json"),
+                    frame.to_string(),
+                )
+                .unwrap();
+                if args.iter().any(|arg| arg == "--ignore-input-response") {
+                    continue;
+                }
                 if let Some(id) = pending_prompt_ack.take() {
                     emit(
                         json!({"type":"response","id":id,"command":"prompt","success":true,"data":{}}),

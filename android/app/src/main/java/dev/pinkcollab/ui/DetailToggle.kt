@@ -41,7 +41,7 @@ internal fun DetailToggle(
     ) {
         Text(
             label,
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.bodyMedium,
             fontFamily = FontFamily.Default,
             color = tint,
             modifier = Modifier.weight(1f, fill = false),

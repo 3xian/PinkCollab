@@ -13,6 +13,100 @@ fn identity(item: &TimelineItem) -> &str {
     item.source_id.as_deref().unwrap_or(&item.id)
 }
 
+/// Gateway-owned input delivery, stored in the command receipt rather than OMP's JSONL.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct FeedbackRecord {
+    pub reference: String,
+    pub anchor: String,
+    pub sequence: u64,
+    pub item: TimelineItem,
+}
+
+/// A mapped transcript and its persisted missing-file policy.
+#[derive(Clone, Copy)]
+pub struct HistorySource<'a> {
+    pub path: &'a Path,
+    pub allow_missing: bool,
+}
+
+/// Missing transcripts are valid only when the caller has checked the persisted mapping policy.
+async fn transcript_metadata(
+    path: &Path,
+    allow_missing: bool,
+) -> Result<Option<std::fs::Metadata>> {
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) => {
+            ensure!(metadata.len() <= 128 * 1024 * 1024, "history_unavailable");
+            Ok(Some(metadata))
+        }
+        Err(error) if allow_missing && error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+async fn transcript_file(path: &Path, allow_missing: bool) -> Result<Option<tokio::fs::File>> {
+    match tokio::fs::File::open(path).await {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if allow_missing && error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn transcript_unchanged(
+    before: &Option<std::fs::Metadata>,
+    after: &Option<std::fs::Metadata>,
+) -> Result<bool> {
+    Ok(match (before, after) {
+        (Some(before), Some(after)) => {
+            before.len() == after.len() && before.modified()? == after.modified()?
+        }
+        (None, None) => true,
+        _ => false,
+    })
+}
+
+fn transcript_length(metadata: &Option<std::fs::Metadata>) -> u64 {
+    metadata.as_ref().map_or(0, std::fs::Metadata::len)
+}
+
+/// Capture the insertion boundary before writing a response. Only entry identities are
+/// needed here; reconstructing tools/messages would do unnecessary work on the control path.
+pub(crate) async fn response_anchor(source: HistorySource<'_>) -> Result<(String, bool)> {
+    let HistorySource {
+        path,
+        allow_missing,
+    } = source;
+    use futures_util::StreamExt;
+    use tokio_util::codec::{FramedRead, LinesCodec};
+    #[derive(serde::Deserialize)]
+    struct EntryId {
+        #[serde(default)]
+        id: Option<String>,
+    }
+    let before = transcript_metadata(path, allow_missing)
+        .await
+        .context("history_unavailable")?;
+    let file = transcript_file(path, allow_missing).await?;
+    let mut lines =
+        file.map(|file| FramedRead::new(file, LinesCodec::new_with_max_length(16 * 1024 * 1024)));
+    let mut leaf = String::new();
+    while let Some(line) = match lines.as_mut() {
+        Some(lines) => lines.next().await,
+        None => None,
+    } {
+        let entry: EntryId = serde_json::from_str(&line?)?;
+        if let Some(id) = entry.id.filter(|id| !id.is_empty()) {
+            leaf = id;
+        }
+    }
+    let after = transcript_metadata(path, allow_missing).await?;
+    ensure!(
+        transcript_unchanged(&before, &after)?,
+        "history_unavailable: transcript changed before response"
+    );
+    Ok((leaf, after.is_some()))
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistorySync {
@@ -23,26 +117,32 @@ pub struct HistorySync {
     pub cursor: Option<String>,
 }
 
-pub async fn sync_history(path: &Path, session_id: &str, request: &HistorySync) -> Result<Value> {
+pub async fn sync_history(
+    source: HistorySource<'_>,
+    session_id: &str,
+    request: &HistorySync,
+    feedback: &[FeedbackRecord],
+) -> Result<Value> {
+    let HistorySource {
+        path,
+        allow_missing,
+    } = source;
     ensure!(request.known.len() <= 512, "invalid_sync");
     let permit = HISTORY_READERS
         .try_acquire()
         .context("history_unavailable")?;
-    let before = tokio::fs::metadata(path).await?;
-    ensure!(before.len() <= 128 * 1024 * 1024, "history_unavailable");
-    let (timeline, leaf, _, ancestors, positions) = build_history(path, true).await?;
-    let after = tokio::fs::metadata(path).await?;
-    ensure!(
-        before.len() == after.len() && before.modified()? == after.modified()?,
-        "stale_cursor"
-    );
+    let before = transcript_metadata(path, allow_missing).await?;
+    let (timeline, leaf, revision, ancestors, positions) =
+        build_history(path, true, feedback, allow_missing).await?;
+    let after = transcript_metadata(path, allow_missing).await?;
+    ensure!(transcript_unchanged(&before, &after)?, "stale_cursor");
     let Some(anchor) = request
         .anchor
         .as_deref()
         .filter(|anchor| ancestors.contains(*anchor))
     else {
         drop(permit);
-        return history_page_with_anchor(path, session_id, None, 10, None, None).await;
+        return history_page_with_anchor(source, session_id, None, 10, None, None, feedback).await;
     };
     let mut start = *positions.get(anchor).context("stale_cursor")?;
     if let Some(cursor) = &request.cursor {
@@ -51,7 +151,8 @@ pub async fn sync_history(path: &Path, session_id: &str, request: &HistorySync) 
         ensure!(
             decoded["leaf"] == leaf
                 && decoded["sessionId"] == session_id
-                && decoded["anchor"] == anchor,
+                && decoded["anchor"] == anchor
+                && decoded["revision"] == revision,
             "stale_cursor"
         );
         start = decoded["index"].as_u64().context("stale_cursor")? as usize;
@@ -97,7 +198,7 @@ pub async fn sync_history(path: &Path, session_id: &str, request: &HistorySync) 
         order.push(identity(&item).to_owned());
         updates.push(item);
     }
-    let sync_cursor = (next < timeline.len()).then(|| hex::encode(serde_json::to_vec(&serde_json::json!({"leaf":leaf,"sessionId":session_id,"anchor":anchor,"index":next})).unwrap()));
+    let sync_cursor = (next < timeline.len()).then(|| hex::encode(serde_json::to_vec(&serde_json::json!({"leaf":leaf,"sessionId":session_id,"anchor":anchor,"index":next,"revision":revision})).unwrap()));
     let oldest = request.oldest.as_deref().and_then(|oldest| {
         timeline
             .iter()
@@ -106,7 +207,7 @@ pub async fn sync_history(path: &Path, session_id: &str, request: &HistorySync) 
     let next_cursor = oldest.filter(|index| *index > 0).map(|index| hex::encode(serde_json::to_vec(&serde_json::json!({"sessionId":session_id,"branchLeaf":leaf,"before":identity(&timeline[index])})).unwrap()));
     let source = hex::encode(Sha256::digest(format!("{session_id}:{leaf}").as_bytes()));
     Ok(
-        serde_json::json!({"items":updates,"confirmed":confirmed,"order":order,"source":{"id":source,"branchLeaf":if sync_cursor.is_some(){anchor}else{&leaf},"continues":true,"byteLength":after.len()},"nextCursor":next_cursor,"syncCursor":sync_cursor}),
+        serde_json::json!({"items":updates,"confirmed":confirmed,"order":order,"source":{"id":source,"branchLeaf":if sync_cursor.is_some(){anchor}else{&leaf},"continues":true,"byteLength":transcript_length(&after)},"nextCursor":next_cursor,"syncCursor":sync_cursor}),
     )
 }
 pub async fn tool_detail(path: &Path, call_id: &str) -> Result<Option<crate::model::ToolTrace>> {
@@ -115,7 +216,7 @@ pub async fn tool_detail(path: &Path, call_id: &str) -> Result<Option<crate::mod
         .context("history_unavailable")?;
     let before = tokio::fs::metadata(path).await?;
     ensure!(before.len() <= 128 * 1024 * 1024, "history_unavailable");
-    let (items, _, _, _, _) = build_history(path, true).await?;
+    let (items, _, _, _, _) = build_history(path, true, &[], false).await?;
     let after = tokio::fs::metadata(path).await?;
     ensure!(
         before.len() == after.len() && before.modified()? == after.modified()?,
@@ -127,7 +228,7 @@ pub async fn tool_detail(path: &Path, call_id: &str) -> Result<Option<crate::mod
         .find(|tool| tool.call_id == call_id))
 }
 pub async fn history(path: &Path) -> Result<Vec<TimelineItem>> {
-    let (mut timeline, _, _, _, _) = build_history(path, false).await?;
+    let (mut timeline, _, _, _, _) = build_history(path, false, &[], false).await?;
     trim_timeline(&mut timeline, TIMELINE_LIMIT);
     Ok(timeline)
 }
@@ -138,39 +239,49 @@ pub async fn history_page(
     cursor: Option<&str>,
     limit: usize,
 ) -> Result<Value> {
-    history_page_with_anchor(path, session_id, cursor, limit, None, None).await
+    history_page_with_anchor(
+        HistorySource {
+            path,
+            allow_missing: false,
+        },
+        session_id,
+        cursor,
+        limit,
+        None,
+        None,
+        &[],
+    )
+    .await
 }
 
 pub async fn history_page_with_anchor(
-    path: &Path,
+    source: HistorySource<'_>,
     session_id: &str,
     cursor: Option<&str>,
     limit: usize,
     anchor: Option<&str>,
     oldest: Option<&str>,
+    feedback: &[FeedbackRecord],
 ) -> Result<Value> {
+    let HistorySource {
+        path,
+        allow_missing,
+    } = source;
     ensure!((1..=100).contains(&limit), "invalid_page_limit");
     let _permit = HISTORY_READERS
         .try_acquire()
         .context("history_unavailable: history readers busy")?;
-    let before = tokio::fs::metadata(path)
+    let before = transcript_metadata(path, allow_missing)
         .await
         .context("history_unavailable")?;
-    ensure!(
-        before.len() <= 128 * 1024 * 1024,
-        "history_unavailable: file exceeds read budget"
-    );
-    let (timeline, leaf, _content_hash, ancestors, _) = build_history(path, true)
+    let (timeline, leaf, _revision, ancestors, _) =
+        build_history(path, true, feedback, allow_missing)
+            .await
+            .context("history_unavailable")?;
+    let after = transcript_metadata(path, allow_missing)
         .await
         .context("history_unavailable")?;
-    let after = tokio::fs::metadata(path)
-        .await
-        .context("history_unavailable")?;
-    ensure!(
-        before.len() == after.len() && before.modified()? == after.modified()?,
-        "stale_cursor"
-    );
-    let source = hex::encode(Sha256::digest(format!("{session_id}:{leaf}").as_bytes()));
+    ensure!(transcript_unchanged(&before, &after)?, "stale_cursor");
     let end = match cursor {
         Some(raw) => {
             let decoded: Value = serde_json::from_slice(&hex::decode(raw).context("stale_cursor")?)
@@ -214,8 +325,13 @@ pub async fn history_page_with_anchor(
     };
     let cursor_start = retained_start.map_or(start, |index| index.min(start));
     let next_cursor = (cursor_start > 0).then(|| hex::encode(serde_json::to_vec(&serde_json::json!({"sessionId":session_id,"branchLeaf":leaf,"before":identity(&timeline[cursor_start])})).unwrap()));
-    let page = serde_json::json!({"items":items,"source":{"id":source,"branchLeaf":leaf,"byteLength":after.len(),
-        "continues":continues},"nextCursor":next_cursor});
+    let source = (after.is_some() || !timeline.is_empty()).then(|| {
+        serde_json::json!({
+            "id":hex::encode(Sha256::digest(format!("{session_id}:{leaf}").as_bytes())),
+            "branchLeaf":leaf,"byteLength":transcript_length(&after),"continues":continues,
+        })
+    });
+    let page = serde_json::json!({"items":items,"source":source,"nextCursor":next_cursor});
     ensure!(
         serde_json::to_vec(&page)?.len() <= 8 * 1024 * 1024,
         "history_unavailable: page exceeds response budget; request a smaller limit"
@@ -226,6 +342,8 @@ pub async fn history_page_with_anchor(
 async fn build_history(
     path: &Path,
     strict: bool,
+    feedback: &[FeedbackRecord],
+    allow_missing: bool,
 ) -> Result<(
     Vec<TimelineItem>,
     String,
@@ -235,12 +353,16 @@ async fn build_history(
 )> {
     use futures_util::StreamExt;
     use tokio_util::codec::{FramedRead, LinesCodec};
-    let file = tokio::fs::File::open(path).await?;
-    let mut lines = FramedRead::new(file, LinesCodec::new_with_max_length(16 * 1024 * 1024));
+    let file = transcript_file(path, allow_missing).await?;
+    let mut lines =
+        file.map(|file| FramedRead::new(file, LinesCodec::new_with_max_length(16 * 1024 * 1024)));
     let mut digest = Sha256::new();
     let mut entries = HashMap::<String, Value>::new();
     let mut leaf = String::new();
-    while let Some(line) = lines.next().await {
+    while let Some(line) = match lines.as_mut() {
+        Some(lines) => lines.next().await,
+        None => None,
+    } {
         let line = line?;
         digest.update(line.as_bytes());
         digest.update(b"\n");
@@ -276,105 +398,30 @@ async fn build_history(
     chain.reverse();
     let mut timeline: Vec<TimelineItem> = vec![];
     let mut positions = HashMap::new();
-    let mut previous_entry: Option<String> = None;
-    for entry in chain {
-        if let Some(previous) = previous_entry.replace(omp::string(entry, "id").into()) {
-            positions.insert(previous, timeline.len());
-        }
-        if entry["type"] != "message" {
-            continue;
-        }
-        let m = &entry["message"];
-        let role = omp::string(m, "role");
-        let timestamp = omp::string(entry, "timestamp")
-            .parse()
-            .unwrap_or_else(|_| Utc::now());
-        if role == "toolResult" || role == "tool" {
-            let call_id = omp::string(m, "toolCallId");
-            if call_id.is_empty() {
-                continue;
-            }
-            let result = omp::text_content(m);
-            upsert_tool(
-                &mut timeline,
-                TimelineItem::tool_completed(
-                    call_id,
-                    omp::string(m, "toolName"),
-                    result,
-                    m["isError"] == true,
-                    timestamp,
-                )
-                .with_todo_details(&m["details"]),
-            );
-            continue;
-        }
-        if !["user", "assistant"].contains(&role) {
-            continue;
-        }
-        let entry_id = omp::string(entry, "id");
-        if role == "assistant"
-            && let Some(parts) = m["content"].as_array()
-        {
-            let text = omp::text_content(m);
-            if !text.trim().is_empty() {
-                timeline.push(TimelineItem {
-                    id: entry_id.into(),
-                    source_id: Some(crate::tool_details::message_source(m, entry_id)),
-                    message_key: crate::tool_details::message_key(m),
-                    kind: "assistant".into(),
-                    text,
-                    detail: String::new(),
-                    tool: None,
-                    timestamp,
-                });
-            }
-            for part in parts {
-                if omp::string(part, "type") == "toolCall" {
-                    let call_id = omp::string(part, "id");
-                    let name = omp::string(part, "name");
-                    if call_id.is_empty() || name.is_empty() {
-                        continue;
-                    }
-                    let arguments = part["arguments"].clone();
-                    upsert_tool(
-                        &mut timeline,
-                        TimelineItem::tool_started(call_id, name, arguments, timestamp),
-                    );
-                }
-            }
-            if omp::string(m, "stopReason") == "error" {
-                timeline.push(TimelineItem {
-                    id: format!("{entry_id}:error"),
-                    source_id: None,
-                    message_key: None,
-                    kind: "error".into(),
-                    text: omp::string(m, "errorMessage").into(),
-                    detail: String::new(),
-                    tool: None,
-                    timestamp,
-                });
-            }
-            continue;
-        }
-        let text = m["content"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| omp::text_content(m));
-        if !text.is_empty() {
-            timeline.push(TimelineItem {
-                id: entry_id.into(),
-                source_id: Some(crate::tool_details::message_source(m, entry_id)),
-                message_key: crate::tool_details::message_key(m),
-                kind: role.into(),
-                text,
-                detail: String::new(),
-                tool: None,
-                timestamp,
-            });
-        }
+    let mut deliveries: HashMap<&str, Vec<&FeedbackRecord>> = HashMap::new();
+    for record in feedback
+        .iter()
+        .filter(|record| Path::new(&record.reference) == path)
+    {
+        deliveries.entry(&record.anchor).or_default().push(record);
     }
-    if let Some(previous) = previous_entry {
-        positions.insert(previous, timeline.len());
+    for items in deliveries.values_mut() {
+        items.sort_unstable_by(|a, b| {
+            a.sequence
+                .cmp(&b.sequence)
+                .then_with(|| a.item.id.cmp(&b.item.id))
+        });
+    }
+    // A response before the first OMP entry belongs to the common root.
+    visited.insert(String::new());
+    positions.insert(String::new(), 0);
+    append_feedback(&mut timeline, deliveries.remove(""), &mut digest);
+    for entry in chain {
+        append_entry(&mut timeline, entry);
+        let id = omp::string(entry, "id");
+        // Sync from a leaf must include feedback added there without another OMP entry.
+        positions.insert(id.into(), timeline.len());
+        append_feedback(&mut timeline, deliveries.remove(id), &mut digest);
     }
     Ok((
         timeline,
@@ -383,6 +430,114 @@ async fn build_history(
         visited,
         positions,
     ))
+}
+
+fn append_feedback(
+    timeline: &mut Vec<TimelineItem>,
+    items: Option<Vec<&FeedbackRecord>>,
+    digest: &mut Sha256,
+) {
+    if let Some(items) = items {
+        for record in items {
+            digest.update(record.item.id.as_bytes());
+            digest.update(b"\n");
+            timeline.push(record.item.clone());
+        }
+    }
+}
+
+fn append_entry(timeline: &mut Vec<TimelineItem>, entry: &Value) {
+    if entry["type"] != "message" {
+        return;
+    }
+    let m = &entry["message"];
+    let role = omp::string(m, "role");
+    let timestamp = omp::string(entry, "timestamp")
+        .parse()
+        .unwrap_or_else(|_| Utc::now());
+    if role == "toolResult" || role == "tool" {
+        let call_id = omp::string(m, "toolCallId");
+        if call_id.is_empty() {
+            return;
+        }
+        let result = omp::text_content(m);
+        upsert_tool(
+            timeline,
+            TimelineItem::tool_completed(
+                call_id,
+                omp::string(m, "toolName"),
+                result,
+                m["isError"] == true,
+                timestamp,
+            )
+            .with_todo_details(&m["details"]),
+        );
+        return;
+    }
+    if !["user", "assistant"].contains(&role) {
+        return;
+    }
+    let entry_id = omp::string(entry, "id");
+    if role == "assistant"
+        && let Some(parts) = m["content"].as_array()
+    {
+        let text = omp::text_content(m);
+        if !text.trim().is_empty() {
+            timeline.push(TimelineItem {
+                id: entry_id.into(),
+                source_id: Some(crate::tool_details::message_source(m, entry_id)),
+                message_key: crate::tool_details::message_key(m),
+                kind: "assistant".into(),
+                text,
+                detail: String::new(),
+                tool: None,
+                timestamp,
+            });
+        }
+        for part in parts {
+            if omp::string(part, "type") == "toolCall" {
+                let call_id = omp::string(part, "id");
+                let name = omp::string(part, "name");
+                if call_id.is_empty() || name.is_empty() {
+                    continue;
+                }
+                let arguments = part["arguments"].clone();
+                upsert_tool(
+                    timeline,
+                    TimelineItem::tool_started(call_id, name, arguments, timestamp),
+                );
+            }
+        }
+        if omp::string(m, "stopReason") == "error" {
+            timeline.push(TimelineItem {
+                id: format!("{entry_id}:error"),
+                source_id: None,
+                message_key: None,
+                kind: "error".into(),
+                text: omp::string(m, "errorMessage").into(),
+                detail: String::new(),
+                tool: None,
+                timestamp,
+            });
+        }
+        return;
+    }
+    let text = m["content"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(|| omp::text_content(m));
+    if !text.is_empty() {
+        timeline.push(TimelineItem {
+            id: entry_id.into(),
+            source_id: Some(crate::tool_details::message_source(m, entry_id)),
+            message_key: crate::tool_details::message_key(m),
+            kind: role.into(),
+            text,
+            detail: String::new(),
+            tool: None,
+            timestamp,
+        });
+    }
 }
 
 /// Upserts a tool item by call id. A transcript can hold the result of a call in a different entry
@@ -395,7 +550,10 @@ fn upsert_tool(timeline: &mut Vec<TimelineItem>, item: TimelineItem) {
 }
 
 fn is_visible_timeline_boundary(item: &TimelineItem) -> bool {
-    matches!(item.kind.as_str(), "user" | "assistant" | "error")
+    matches!(
+        item.kind.as_str(),
+        "user" | "assistant" | "error" | "feedback"
+    )
 }
 
 /// Drops the oldest hidden bookkeeping before the oldest visible message, so a burst of tool calls
@@ -408,5 +566,37 @@ pub(crate) fn trim_timeline(timeline: &mut Vec<TimelineItem>, limit: usize) {
             .position(|item| !is_visible_timeline_boundary(item))
             .unwrap_or(0);
         timeline.remove(index);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blank_feedback_is_retained_as_a_visible_boundary_before_hidden_tools() {
+        let feedback = TimelineItem {
+            id: "feedback".into(),
+            source_id: Some("feedback".into()),
+            message_key: None,
+            kind: "feedback".into(),
+            text: String::new(),
+            detail: "What should I write?".into(),
+            tool: None,
+            timestamp: Utc::now(),
+        };
+        let mut timeline = vec![feedback];
+        for index in 0..TIMELINE_LIMIT {
+            timeline.push(TimelineItem::tool_started(
+                format!("tool-{index}"),
+                "bash",
+                serde_json::json!({}),
+                Utc::now(),
+            ));
+        }
+        trim_timeline(&mut timeline, TIMELINE_LIMIT);
+        assert_eq!(timeline.len(), TIMELINE_LIMIT);
+        assert_eq!(timeline[0].kind, "feedback");
+        assert!(timeline.iter().all(|item| item.id != "tool-0"));
     }
 }

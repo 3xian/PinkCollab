@@ -24,7 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.*
@@ -133,6 +133,7 @@ internal fun DisplayItem(item: SessionDisplayItem, renderer: SessionMarkdownRend
         is SessionDisplayItem.Message -> MessageCard(item, renderer)
         is SessionDisplayItem.ActivityGroup -> ActivityGroupCard(item, liveActivity, toolDetails)
         is SessionDisplayItem.Error -> ErrorCard(item)
+        is SessionDisplayItem.Feedback -> FeedbackCard(item)
         is SessionDisplayItem.Raw -> RawTimelineCard(item.item, renderer, toolDetails)
     }
 }
@@ -164,6 +165,29 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
             } else {
                 MarkdownBody(item.id, item.text, color = contentColor, renderer)
             }
+        }
+    }
+}
+
+@Composable
+private fun FeedbackCard(item: SessionDisplayItem.Feedback) {
+    Column(
+        Modifier.fillMaxWidth().userMessageBand(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        SpeakerLine(messageTimeLabel(item.timestamp)) {
+            SpeakerTitle("Your response", Purple400)
+        }
+        if (item.question.isNotBlank()) {
+            Text(item.question, style = MaterialTheme.typography.bodyMedium, color = TextMid)
+        }
+        TimelineMessageBody(item.answer, copyable = item.answer.isNotEmpty()) {
+            Text(
+                item.answer.ifEmpty { "(Empty response)" },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
         }
     }
 }
@@ -369,7 +393,6 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
                         group.action,
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Default,
                         fontWeight = FontWeight.Medium,
                         color = TextHigh,
                         maxLines = 2,
@@ -490,8 +513,10 @@ private fun ActivityOperationDetails(
             Text(operation.error, style = MaterialTheme.typography.bodySmall, color = Red400)
         }
         operation.detailKind?.let { kind ->
-            DetailToggle(kind.action, expanded, onClick = { expanded = !expanded })
-            if (expanded) {
+            if (showSummary) {
+                DetailToggle(kind.action, expanded, onClick = { expanded = !expanded })
+            }
+            if (!showSummary || expanded) {
                 Text(operation.name, style = MaterialTheme.typography.labelSmall, color = TextMid)
                 if (operation.detailsAvailable && toolDetails != null) {
                     ToolDetailPanel(operation.callId, operation.detailsVersion, toolDetails)
@@ -519,7 +544,7 @@ private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, ac
         )
     } else {
         val icon = when (status) {
-            ActivityStatus.Failed -> Icons.Outlined.ErrorOutline
+            ActivityStatus.Failed -> Icons.Outlined.Close
             ActivityStatus.Succeeded -> Icons.Outlined.Check
             ActivityStatus.Running -> Icons.Outlined.HourglassEmpty
         }
@@ -554,7 +579,7 @@ private val ActivityDetailKind.action: String
         ActivityDetailKind.Content -> "Content"
         ActivityDetailKind.Changes -> "Changes"
         ActivityDetailKind.Error -> "Error details"
-        ActivityDetailKind.Operation -> "Arguments & output"
+        ActivityDetailKind.Operation -> "Details"
     }
 
 @Composable
@@ -582,6 +607,10 @@ private fun ErrorCard(item: SessionDisplayItem.Error) {
 
 @Composable
 private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRenderer, toolDetails: ToolDetailsController?) {
+    if (item.kind == "feedback") {
+        FeedbackCard(SessionDisplayItem.Feedback(item.id, item.detail, item.text, item.timestamp))
+        return
+    }
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
     val isUser = item.kind == "user"
     val colors = MaterialTheme.colorScheme

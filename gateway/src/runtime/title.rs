@@ -108,6 +108,7 @@ mod tests {
             }),
             ordinary_dispatch: Mutex::new(()),
             prompt_interrupt_admission: Arc::new(Mutex::new(())),
+            feedback_order: Mutex::new(()),
             store: store.clone(),
             browser: Arc::new(Browser::new(&[dir.path().to_path_buf()]).unwrap()),
             bus,

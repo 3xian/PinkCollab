@@ -1,6 +1,8 @@
 package dev.pinkcollab.ui
 
 import android.os.Build
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +12,7 @@ import androidx.compose.foundation.background
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -31,6 +34,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
@@ -60,6 +64,37 @@ class SessionHistoryDeviceTest {
         null, "", "", true, "generation")
     private val saved = TimelineItem("saved", "user", "Earlier question", "", "2026-09-20T00:00:00Z")
     private val live = TimelineItem("live", "user", "Current question", "", "2026-09-20T00:00:01Z")
+
+    @Test fun feedback_preserves_and_copies_whitespace_but_not_an_empty_answer() {
+        val whitespace = " \t\n "
+        val answer = mutableStateOf(whitespace)
+        lateinit var context: Context
+        compose.setContent {
+            context = LocalContext.current
+            PinkCollabTheme {
+                val feedback = TimelineItem(
+                    "feedback", "feedback", answer.value, "What should I write?", saved.timestamp,
+                )
+                val detail = SessionDetail(session, snapshotToken = "sub", liveItems = listOf(feedback))
+                SessionPage(
+                    SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
+                        SessionActivity(), null, null),
+                    onAction = {}, onApplyModelSettings = { true },
+                )
+            }
+        }
+        compose.onNodeWithText(whitespace, useUnmergedTree = true).assertTextEquals(whitespace)
+        compose.onNodeWithText("(Empty response)").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Copy message").assertIsEnabled().performClick()
+        compose.runOnIdle {
+            val copied = context.getSystemService(ClipboardManager::class.java)
+                .primaryClip?.getItemAt(0)?.text?.toString()
+            assertEquals(whitespace, copied)
+            answer.value = ""
+        }
+        compose.onNodeWithContentDescription("Copy message").assertDoesNotExist()
+        compose.onNodeWithText("(Empty response)").assertIsDisplayed()
+    }
 
     @Test fun retained_messages_remain_readable_while_subscription_refreshes() {
         val detail = SessionDetail(session, snapshotToken = null, savedHistory = SavedHistory.Loading)

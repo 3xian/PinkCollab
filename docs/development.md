@@ -70,6 +70,8 @@ node .github/actions/check-website/check-site.mjs
 
 API changes must match the [protocol](protocol.md).
 
+Website layout changes also need a browser check at desktop and mobile widths. The setup-guide button and release APK link use a wrapping action row with a 16px horizontal gap and a 12px gap between rows; verify both side-by-side and wrapped layouts without horizontal overflow. After changing `website/styles.css`, update its SHA-256 prefix in the `styles.css?v=...` references in `website/index.html` and `website/404.html` so cached pages load the new styling.
+
 ## Discovery regression checks
 
 Run `cargo test --all-features --locked --test discovery` for the discovery/adoption regressions. If the debug Gateway executable is running on Windows, add `--target-dir target-discovery` instead of stopping the service.

@@ -50,6 +50,13 @@ sealed interface SessionDisplayItem {
         val details: String = "",
     ) : SessionDisplayItem
 
+    data class Feedback(
+        override val id: String,
+        val question: String,
+        val answer: String,
+        val timestamp: String,
+    ) : SessionDisplayItem
+
     data class Raw(override val id: String, val item: TimelineItem) : SessionDisplayItem
 }
 
@@ -104,6 +111,10 @@ fun projectSessionTimeline(
             "error" -> {
                 flushGroup()
                 output += SessionDisplayItem.Error(item.id, conciseError(item.text), item.detail)
+            }
+            "feedback" -> {
+                flushGroup()
+                output += SessionDisplayItem.Feedback(item.id, item.detail, item.text, item.timestamp)
             }
             // Thinking, compaction, subagent bookkeeping, metadata and successful raw results
             // intentionally have no concise representation and do not split a visible group.

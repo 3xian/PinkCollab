@@ -146,7 +146,7 @@ mod tests {
         assert!(store.set_engine_ref("two", 1, &second).unwrap());
         assert!(
             store
-                .replace_unwritten_engine_ref("one", 2, &first, &second)
+                .replace_missing_engine_ref_with_feedback("one", 2, &first, &second)
                 .is_err()
         );
         assert_eq!(

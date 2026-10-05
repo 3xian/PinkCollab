@@ -62,6 +62,35 @@ impl Harness {
             server,
         }
     }
+    #[allow(dead_code)]
+    pub(crate) async fn restart(&mut self, max: usize, args: Vec<String>) {
+        self.server.abort();
+        let _ = (&mut self.server).await;
+        self.store = Arc::new(Store::open(&self.dir.path().join("data")).unwrap());
+        self.store.recover_operations().unwrap();
+        let browser = Arc::new(Browser::new(&[self.dir.path().join("projects")]).unwrap());
+        self.bus = Arc::new(Bus::default());
+        let sessions = pinkcollab_gateway::runtime::SessionDirectory::new(
+            self.store.clone(),
+            browser.clone(),
+            self.bus.clone(),
+            env!("CARGO_BIN_EXE_omp-fixture").into(),
+            args,
+            max,
+        );
+        let app = api::router(App {
+            host: self.host.clone(),
+            store: self.store.clone(),
+            browser,
+            bus: self.bus.clone(),
+            sessions,
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        self.url = format!("http://{}", listener.local_addr().unwrap());
+        self.server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+    }
     pub(crate) fn cwd(&self, name: &str) -> String {
         let path = self.dir.path().join("projects").join(name);
         std::fs::create_dir_all(&path).unwrap();

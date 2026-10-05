@@ -55,7 +55,7 @@ private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
                 copyCount++
             },
             modifier = Modifier.fillMaxSize(),
-            enabled = text.isNotBlank(),
+            enabled = text.isNotEmpty(),
         ) {
             Icon(
                 imageVector = Icons.Outlined.ContentCopy,

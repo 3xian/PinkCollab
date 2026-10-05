@@ -144,6 +144,27 @@ async fn response_reaches_omp_while_prompt_ack_is_pending() {
     )
     .await;
     assert_eq!(prompt["state"], "succeeded");
+    let page: Value = client
+        .get(format!("{session}/history"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let feedback: Vec<_> = page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["kind"] == "feedback")
+        .collect();
+    assert_eq!(feedback.len(), 1);
+    assert_eq!(feedback[0]["detail"], "Which API?");
+    assert_eq!(feedback[0]["text"], "new");
+    assert_eq!(feedback[0]["id"], feedback[0]["sourceId"]);
 }
 
 #[tokio::test]

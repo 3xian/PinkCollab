@@ -157,28 +157,30 @@ impl SessionController {
         });
         let started = async {
             runtime.wait_ready().await?;
-            let missing_unwritten = if let Some(reference) = session.engine_session_ref.as_deref() {
-                let missing = matches!(
-                    std::fs::metadata(reference),
-                    Err(err) if err.kind() == std::io::ErrorKind::NotFound
-                );
-                if missing {
-                    let lookup_session = session.id.clone();
-                    let lookup_reference = reference.to_owned();
-                    self.store
-                        .run(move |store| {
-                            store.reference_is_unwritten(&lookup_session, &lookup_reference)
-                        })
-                        .await?
-                } else {
-                    false
-                }
+            let _feedback_order = self.feedback_order.lock().await;
+            let missing_allowed = if let Some(reference) = session.engine_session_ref.as_deref() {
+                let file_exists = match tokio::fs::metadata(reference).await {
+                    Ok(metadata) => {
+                        ensure!(metadata.is_file(), "stored OMP session is unavailable");
+                        true
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                    Err(error) => return Err(error.into()),
+                };
+                let lookup_session = session.id.clone();
+                let lookup_reference = reference.to_owned();
+                let allow_missing = self.store
+                    .run(move |store| {
+                        store.history_read_policy(&lookup_session, &lookup_reference, file_exists)
+                    })
+                    .await?;
+                !file_exists && allow_missing
             } else {
                 false
             };
             let mut startup_model = None;
             if let Some(reference) = session.engine_session_ref.as_deref()
-                && !missing_unwritten
+                && !missing_allowed
             {
                 ensure!(
                     Path::new(reference).is_file(),
@@ -238,14 +240,14 @@ impl SessionController {
                     "session mapping changed during startup"
                 );
             } else if session.engine_session_ref.as_deref() != Some(reference) {
-                ensure!(missing_unwritten, "OMP loaded a different session");
+                ensure!(missing_allowed, "OMP loaded a different session");
                 let replace_session = session.id.clone();
                 let old_reference = session.engine_session_ref.as_deref().unwrap().to_owned();
                 let new_reference = reference.to_owned();
                 let revision = session.metadata_revision;
                 ensure!(
                     self.store
-                        .run(move |store| store.replace_unwritten_engine_ref(
+                        .run(move |store| store.replace_missing_engine_ref_with_feedback(
                             &replace_session,
                             revision,
                             &old_reference,
@@ -261,6 +263,10 @@ impl SessionController {
                 .run(move |store| store.v2_session(&reload_session))
                 .await?
                 .context("session disappeared during startup")?;
+            ensure!(
+                saved.engine_session_ref.as_deref() == Some(reference),
+                "session mapping changed during startup"
+            );
             let mut state = self.state.lock().await;
             ensure!(
                 state

@@ -5,7 +5,6 @@ import dev.pinkcollab.data.TodoStatus
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -81,9 +80,9 @@ internal fun FloatingTodoPanel(
     val headerHeight = todoPanelHeaderHeight()
     val shape = RoundedCornerShape(13.dp)
     Column(modifier.fillMaxWidth().heightIn(max = maxHeight).shadow(10.dp, shape).clip(shape)
-        .background(Color(0xFF14111B))
-        .background(Brush.horizontalGradient(listOf(accent.copy(alpha = emphasis * 0.28f), Color.Transparent)))
-        .border(1.dp, accent.copy(alpha = emphasis), shape).testTag("floatingTodoPanel")) {
+        .background(Color(0xFF211D2B))
+        .background(Brush.horizontalGradient(listOf(accent.copy(alpha = emphasis), Color.Transparent)))
+        .testTag("floatingTodoPanel")) {
         Column(Modifier.fillMaxWidth().height(headerHeight).testTag("todoHeader")
             .semantics {
                 stateDescription = if (expanded) "Expanded" else "Collapsed"

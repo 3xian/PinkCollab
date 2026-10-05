@@ -59,6 +59,19 @@ class SessionDisplayProjectionTest {
         assertTrue(execute.operations.single().details.contains("3 tests passed"))
     }
 
+    @Test fun feedbackSeparatesToolGroupsEvenWhenTheAnswerIsEmpty() {
+        val projected = projectSessionTimeline(listOf(
+            tool("before", "read"),
+            TimelineItem("response", "feedback", "", "Additional instructions?", "2026-10-05T10:00:00Z"),
+            tool("after", "read"),
+        ))
+
+        assertEquals(3, projected.size)
+        assertEquals(listOf("before"), (projected[0] as SessionDisplayItem.ActivityGroup).operations.map { it.id })
+        assertTrue(projected[1] is SessionDisplayItem.Feedback)
+        assertEquals(listOf("after"), (projected[2] as SessionDisplayItem.ActivityGroup).operations.map { it.id })
+    }
+
     @Test fun unknownToolsRetainTheirOwnOperationAndErrorsRemainAccessible() {
         val projected = projectSessionTimeline(
             listOf(

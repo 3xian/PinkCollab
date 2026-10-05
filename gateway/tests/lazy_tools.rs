@@ -161,24 +161,32 @@ async fn history_summaries_and_details_follow_only_the_active_branch() {
             .is_none()
     );
     let continued = history::history_page_with_anchor(
-        &file,
+        history::HistorySource {
+            path: &file,
+            allow_missing: false,
+        },
         "session",
         None,
         1,
         Some("current"),
         Some("entry:root"),
+        &[],
     )
     .await
     .unwrap();
     assert_eq!(continued["source"]["continues"], true);
     assert!(continued["nextCursor"].is_null());
     let switched = history::history_page_with_anchor(
-        &file,
+        history::HistorySource {
+            path: &file,
+            allow_missing: false,
+        },
         "session",
         None,
         1,
         Some("abandoned"),
         Some("entry:root"),
+        &[],
     )
     .await
     .unwrap();
@@ -245,10 +253,10 @@ async fn history_sync_confirms_cached_text_without_retransmitting_it_and_keeps_o
         .await
         .unwrap();
     let latest = &saved["items"][0];
-    let page = history::sync_history(&file,"session",&history::HistorySync {
+    let page = history::sync_history(history::HistorySource { path: &file, allow_missing: false }, "session", &history::HistorySync {
         anchor:Some("e4".into()),oldest:first["items"][0]["sourceId"].as_str().map(str::to_owned),cursor:None,
         known:vec![json!({"id":"live-key","sourceId":latest["sourceId"],"textHash":hex::encode(Sha256::digest(latest["text"].as_str().unwrap().as_bytes()))})],
-    }).await.unwrap();
+    }, &[]).await.unwrap();
     assert_eq!(page["items"], json!([]));
     assert_eq!(page["confirmed"][0]["id"], "live-key");
     assert_eq!(page["confirmed"][0]["item"]["text"], "");
@@ -267,7 +275,10 @@ async fn history_sync_confirms_cached_text_without_retransmitting_it_and_keeps_o
         "stale_cursor"
     );
     let reset = history::sync_history(
-        &file,
+        history::HistorySource {
+            path: &file,
+            allow_missing: false,
+        },
         "session",
         &history::HistorySync {
             anchor: Some("e5".into()),
@@ -275,6 +286,7 @@ async fn history_sync_confirms_cached_text_without_retransmitting_it_and_keeps_o
             cursor: None,
             known: vec![],
         },
+        &[],
     )
     .await
     .unwrap();

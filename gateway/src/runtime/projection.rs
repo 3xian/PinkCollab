@@ -2,6 +2,9 @@ use super::*;
 
 impl SessionController {
     pub(super) async fn apply_frame(self: &Arc<Self>, generation: &str, frame: Value) {
+        // Answer-triggered frames follow durable feedback publication. Exit/Stop
+        // bypass this gate, so a stalled writer cannot delay termination.
+        let _feedback = self.feedback_order.lock().await;
         let kind = omp::string(&frame, "type").to_owned();
         if kind == "prompt_result" {
             let (session_id, key, status, error) = {

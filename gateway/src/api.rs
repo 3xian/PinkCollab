@@ -443,7 +443,8 @@ async fn api_history_sync(
     let Some(path) = view.session.engine_session_ref else {
         return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
     };
-    crate::history::sync_history(FsPath::new(&path), &id, &request)
+    app.sessions
+        .history_sync(&id, &path, &request)
         .await
         .map(|mut page| {
             crate::wire::share_todos(&mut page, &mut Default::default());
@@ -559,61 +560,42 @@ async fn read_history(app: &App, id: &str, query: &ApiHistoryQuery) -> Result<Va
     let Some(reference) = session.session.engine_session_ref else {
         return Ok(json!({"items":[],"source":null,"nextCursor":null}));
     };
-    if tokio::fs::metadata(&reference)
+    let page = app
+        .sessions
+        .history_page(
+            id,
+            &reference,
+            query.cursor.as_deref(),
+            query.limit.unwrap_or(50),
+            query.anchor.as_deref(),
+            query.oldest.as_deref(),
+        )
         .await
-        .err()
-        .is_some_and(|err| err.kind() == std::io::ErrorKind::NotFound)
-    {
-        let prompt_session = id.to_owned();
-        let missing_reference = reference.clone();
-        let unwritten = app
-            .store
-            .run(move |store| store.reference_is_unwritten(&prompt_session, &missing_reference))
-            .await
-            .map_err(|_| {
+        .map_err(|err| {
+            let raw = format!("{err:#}");
+            if raw.contains("stale_cursor") {
+                ApiError(
+                    StatusCode::CONFLICT,
+                    "stale_cursor",
+                    "History changed; reload from the first page".into(),
+                )
+            } else if raw.contains("invalid_page_limit") {
+                ApiError(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_page_limit",
+                    "Limit must be 1..100".into(),
+                )
+            } else {
                 ApiError(
                     StatusCode::SERVICE_UNAVAILABLE,
-                    "persistence_unavailable",
-                    "Session record unavailable".into(),
+                    "history_unavailable",
+                    "OMP history is unavailable".into(),
                 )
-            })?;
-        if unwritten {
-            return Ok(json!({"items":[],"source":null,"nextCursor":null}));
-        }
-    }
-    let page = crate::history::history_page_with_anchor(
-        FsPath::new(&reference),
-        id,
-        query.cursor.as_deref(),
-        query.limit.unwrap_or(50),
-        query.anchor.as_deref(),
-        query.oldest.as_deref(),
-    )
-    .await
-    .map_err(|err| {
-        let raw = format!("{err:#}");
-        if raw.contains("stale_cursor") {
-            ApiError(
-                StatusCode::CONFLICT,
-                "stale_cursor",
-                "History changed; reload from the first page".into(),
-            )
-        } else if raw.contains("invalid_page_limit") {
-            ApiError(
-                StatusCode::BAD_REQUEST,
-                "invalid_page_limit",
-                "Limit must be 1..100".into(),
-            )
-        } else {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "history_unavailable",
-                "OMP history is unavailable".into(),
-            )
-        }
-    })?;
+            }
+        })?;
     Ok(page)
 }
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ApiCreate {

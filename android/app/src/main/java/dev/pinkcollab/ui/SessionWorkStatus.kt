@@ -1,5 +1,11 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -36,6 +42,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -208,15 +215,29 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // Only the stable action label announces changes, never streaming tokens or tool output.
-            Text(
-                status.title,
-                modifier = Modifier.weight(1f, fill = false).then(sendingTextEffect)
+            AnimatedContent(
+                targetState = status.title,
+                modifier = Modifier.weight(1f, fill = false).clipToBounds()
                     .semantics { liveRegion = LiveRegionMode.Polite },
-                color = TextHigh,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+                transitionSpec = {
+                    (slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(180)))
+                        .togetherWith(slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180)))
+                        .using(null)
+                },
+                contentAlignment = Alignment.CenterStart,
+                label = "workStatusTitle",
+            ) { title ->
+                Text(
+                    title,
+                    modifier = sendingTextEffect.then(
+                        if (title == status.title) Modifier else Modifier.clearAndSetSemantics { },
+                    ),
+                    color = TextHigh,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             status.timing?.let { timing ->
                 val elapsed by produceState(timing.elapsedAt(), timing) {
                     value = timing.elapsedAt()
