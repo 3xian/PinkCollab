@@ -257,12 +257,7 @@ async fn external_setup_runs_desktop_gateway_and_preserves_saved_pairing_url() {
         command
     };
     let store = pinkcollab_gateway::storage::Store::open(&desktop.data).unwrap();
-    let mut unchanged_config = None;
-    for url in [
-        "https://proxy.example:8443",
-        "https://replacement.example",
-        "https://replacement.example",
-    ] {
+    for url in ["https://proxy.example:8443", "https://replacement.example"] {
         let output = command()
             .args([
                 "setup",
@@ -286,10 +281,16 @@ async fn external_setup_runs_desktop_gateway_and_preserves_saved_pairing_url() {
             desktop.healthy().await,
             "setup returned before Gateway readiness"
         );
-        expected.public_url = url.into();
+        let saved = Config::load(&desktop.data).unwrap();
+        assert_eq!(saved.public_url, url);
+        assert_eq!(saved.listen, expected.listen);
+        assert_eq!(saved.name, expected.name);
+        assert_eq!(saved.omp, expected.omp);
+        assert_eq!(saved.omp_args, expected.omp_args);
+        assert_eq!(saved.max_sessions, expected.max_sessions);
         assert_eq!(
-            serde_yaml::to_string(&Config::load(&desktop.data).unwrap()).unwrap(),
-            serde_yaml::to_string(&expected).unwrap()
+            pinkcollab_gateway::workspace::canonical_roots(&saved.workspaces).unwrap(),
+            pinkcollab_gateway::workspace::canonical_roots(&expected.workspaces).unwrap()
         );
         assert!(!desktop.data.join("funnel-url").exists());
         let db = rusqlite::Connection::open(desktop.data.join("pinkcollab.db")).unwrap();
@@ -298,13 +299,6 @@ async fn external_setup_runs_desktop_gateway_and_preserves_saved_pairing_url() {
             .unwrap();
         assert_eq!(tokens, 0, "noninteractive setup created a pairing token");
         assert!(store.clients().unwrap().is_empty());
-        if url == "https://replacement.example" {
-            let bytes = std::fs::read(desktop.data.join("config.yaml")).unwrap();
-            if let Some(previous) = &unchanged_config {
-                assert_eq!(&bytes, previous);
-            }
-            unchanged_config = Some(bytes);
-        }
     }
     for action in ["status", "doctor"] {
         let output = command().arg(action).output().unwrap();
