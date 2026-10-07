@@ -58,7 +58,7 @@ internal fun DirectoryBrowserScreen(
     select: (String) -> Unit,
     refresh: () -> Unit,
 ) {
-    Box(Modifier.fillMaxSize().padding(bottom = 12.dp)) {
+    Box(Modifier.fillMaxSize().imePadding().padding(bottom = 12.dp)) {
         val ready = state as? LoadState.Ready
         when {
             ready != null -> DirectoryListing(

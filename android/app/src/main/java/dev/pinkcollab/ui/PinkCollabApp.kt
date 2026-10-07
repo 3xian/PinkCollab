@@ -14,7 +14,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -27,7 +26,6 @@ import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val app by vm.navigationState.collectAsStateWithLifecycle()
@@ -134,41 +132,11 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
             if (!ready) {
                 StartupLoadingScreen(app)
             } else Box(Modifier.fillMaxSize().background(Base0)) {
-            Scaffold(
-                containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.onBackground,
-                contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                topBar = {
-                    secondaryTitle?.let { title ->
-                        TopAppBar(
-                            title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            navigationIcon = {
-                                IconButton(onClick = rememberHapticOnClick(goBack)) {
-                                    Icon(
-                                        Icons.AutoMirrored.Outlined.ArrowBack,
-                                        contentDescription = if (browserBackTarget != null) "Parent directory" else "Back",
-                                    )
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
-                                scrolledContainerColor = MaterialTheme.colorScheme.background,
-                                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                                titleContentColor = MaterialTheme.colorScheme.onSurface,
-                            ),
-                        )
-                    }
-                },
-            ) { padding ->
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .consumeWindowInsets(padding)
-                        .then(if (secondary) Modifier else Modifier.statusBarsPadding())
-                        .navigationBarsPadding()
-                        .then(if (route is AppRoute.Browser) Modifier.imeAboveNavigationBars() else Modifier),
-                ) {
+            AppScaffold(
+                title = secondaryTitle,
+                hasParentDirectory = browserBackTarget != null,
+                onBack = goBack,
+            ) {
                     when (val current = route) {
                         AppRoute.Tasks -> TasksRoute(
                             retainedDisplay = sessionDisplayCache,
@@ -226,7 +194,6 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
 
                     }
                 }
-            }
 
             PairHostModal(
                 state = pairHost,
@@ -313,11 +280,46 @@ private fun BrowserRoute(
     )
 }
 
+/** Scaffold owns system-bar insets; screens consume only their remaining IME inset. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Modifier.imeAboveNavigationBars(): Modifier {
-    val density = LocalDensity.current
-    val extra = with(density) {
-        (WindowInsets.ime.getBottom(this) - WindowInsets.navigationBars.getBottom(this)).coerceAtLeast(0).toDp()
+internal fun AppScaffold(
+    title: String?,
+    hasParentDirectory: Boolean,
+    onBack: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Scaffold(
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+        topBar = {
+            title?.let {
+                TopAppBar(
+                    title = { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    navigationIcon = {
+                        IconButton(onClick = rememberHapticOnClick(onBack)) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.ArrowBack,
+                                contentDescription = if (hasParentDirectory) "Parent directory" else "Back",
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
+                        scrolledContainerColor = MaterialTheme.colorScheme.background,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    ),
+                )
+            }
+        },
+    ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding),
+            content = content,
+        )
     }
-    return padding(bottom = extra)
 }

@@ -51,6 +51,8 @@ On Windows, `cargo test --all-features --locked --test windows_background` check
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.
 
+`AppScaffold` uses Material3 Scaffold's default system-bar insets and applies and consumes its content padding once. Do not disable those insets and add route-dependent status-bar or navigation-bar padding afterward: the shell must handle both the presence and removal of its top app bar. The directory browser adds only the remaining IME padding and a 12dp bottom gap. Run `DirectoryBrowserDeviceTest` on an edge-to-edge emulator in both gesture and three-button navigation modes. It uses the same transparent dark system-bar styles as `MainActivity`, checks the create-session button gap and lower-edge touch delivery through keyboard transitions, and verifies the home header remains below the status bar after visiting Workspaces and the directory browser and returning. Also inspect that round trip and the browser button in the installed signed Release APK on the target phone; debug fixture results alone do not verify the production activity's inset behavior.
+
 Run the optimized Android rendering regression on an attached device or emulator:
 
 ```sh
