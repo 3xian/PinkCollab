@@ -294,25 +294,31 @@ pub async fn doctor(dir: &Path) -> Result<()> {
             problems.push("OMP");
         }
     }
+    let remote = config
+        .as_ref()
+        .map(|config| crate::remote::inspect(dir, config));
     println!("Tailscale");
-    match funnel::tailscale_binary() {
-        Some(binary) => {
-            println!("  binary: {}", binary.display());
-            match funnel::state(&binary) {
-                Ok(state) => println!(
-                    "  backend: {}\n  dns: {}",
-                    state.backend_state,
-                    state.dns_name.as_deref().unwrap_or("unavailable")
-                ),
-                Err(error) => println!("  unavailable: {error:#}"),
+    if matches!(remote, Some(crate::remote::Access::External)) {
+        println!("  not required for externally managed access");
+    } else {
+        match funnel::tailscale_binary() {
+            Some(binary) => {
+                println!("  binary: {}", binary.display());
+                match funnel::state(&binary) {
+                    Ok(state) => println!(
+                        "  backend: {}\n  dns: {}",
+                        state.backend_state,
+                        state.dns_name.as_deref().unwrap_or("unavailable")
+                    ),
+                    Err(error) => println!("  unavailable: {error:#}"),
+                }
             }
+            None => println!("  binary: unavailable (optional for externally managed access)"),
         }
-        None => println!("  binary: unavailable (optional for externally managed access)"),
     }
     println!("Funnel");
 
-    if let Some(config) = &config {
-        let remote = crate::remote::inspect(dir, config);
+    if let (Some(config), Some(remote)) = (&config, &remote) {
         println!("  public URL: {}\n  {}", config.public_url, remote.label());
         if let crate::remote::Access::Failed(error) = &remote {
             println!("  {error}");

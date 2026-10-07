@@ -21,7 +21,7 @@ impl Desktop {
         std::fs::create_dir_all(&base).unwrap();
         std::fs::create_dir_all(&data).unwrap();
         let executable = base.join("pinkcollab-gateway.exe");
-        std::fs::copy(env!("CARGO_BIN_EXE_pinkcollab-gateway"), &executable).unwrap();
+        std::fs::copy(env!("CARGO_BIN_EXE_gateway-fixture"), &executable).unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let config = Config {
@@ -225,4 +225,107 @@ async fn occupied_listener_is_a_start_failure_and_can_be_retried() {
         "start returned before HTTP readiness"
     );
     assert!(desktop.service("stop").status.success());
+}
+
+#[tokio::test]
+async fn external_setup_runs_desktop_gateway_and_preserves_saved_pairing_url() {
+    let desktop = Desktop::new();
+    let tools = desktop.root.path().join("tools");
+    std::fs::create_dir(&tools).unwrap();
+    let omp = tools.join("omp.cmd");
+    std::fs::write(&omp, "@echo 0.1.0\r\n").unwrap();
+    let mut expected = Config::load(&desktop.data).unwrap();
+    expected.omp = omp.to_string_lossy().into_owned();
+    expected.name = "External desktop gateway".into();
+    expected.max_sessions = 19;
+    expected.public_url = "https://old-host.ts.net".into();
+    std::fs::write(
+        desktop.data.join("config.yaml"),
+        serde_yaml::to_string(&expected).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(desktop.data.join("funnel-url"), &expected.public_url).unwrap();
+    // Retain only Windows system tools and the isolated OMP fixture in PATH.
+    let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+    let path = std::env::join_paths([tools, system]).unwrap();
+    let command = || {
+        let mut command = desktop.command();
+        command
+            .env("HOME", desktop.root.path())
+            .env("USERPROFILE", desktop.root.path())
+            .env("PATH", &path);
+        command
+    };
+    let store = pinkcollab_gateway::storage::Store::open(&desktop.data).unwrap();
+    let mut unchanged_config = None;
+    for url in [
+        "https://proxy.example:8443",
+        "https://replacement.example",
+        "https://replacement.example",
+    ] {
+        let output = command()
+            .args([
+                "setup",
+                "--non-interactive",
+                "--transport",
+                "external",
+                "--public-url",
+                url,
+                "--workspace",
+            ])
+            .arg(desktop.root.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            desktop.healthy().await,
+            "setup returned before Gateway readiness"
+        );
+        expected.public_url = url.into();
+        assert_eq!(
+            serde_yaml::to_string(&Config::load(&desktop.data).unwrap()).unwrap(),
+            serde_yaml::to_string(&expected).unwrap()
+        );
+        assert!(!desktop.data.join("funnel-url").exists());
+        let db = rusqlite::Connection::open(desktop.data.join("pinkcollab.db")).unwrap();
+        let tokens: i64 = db
+            .query_row("SELECT COUNT(*) FROM pairing", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tokens, 0, "noninteractive setup created a pairing token");
+        assert!(store.clients().unwrap().is_empty());
+        if url == "https://replacement.example" {
+            let bytes = std::fs::read(desktop.data.join("config.yaml")).unwrap();
+            if let Some(previous) = &unchanged_config {
+                assert_eq!(&bytes, previous);
+            }
+            unchanged_config = Some(bytes);
+        }
+    }
+    for action in ["status", "doctor"] {
+        let output = command().arg(action).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{action}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Externally managed"));
+    }
+    let output = command().arg("pair").output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["version"], 1);
+    assert_eq!(payload["url"], "https://replacement.example");
+    store
+        .pair(payload["token"].as_str().unwrap(), "External Windows phone")
+        .unwrap();
 }

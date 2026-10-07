@@ -5,9 +5,12 @@ use windows_service::{
     service::{ServiceAccess, ServiceState},
     service_manager::{ServiceManager as Scm, ServiceManagerAccess},
 };
+pub type LegacyLookup =
+    fn(&Installation, ServiceAccess) -> Result<Option<windows_service::service::Service>>;
 
 pub struct Manager<'a> {
     pub installation: &'a Installation,
+    pub legacy_lookup: LegacyLookup,
 }
 
 enum Backend {
@@ -48,31 +51,7 @@ impl Manager<'_> {
         ))
     }
     fn legacy(&self, access: ServiceAccess) -> Result<Option<windows_service::service::Service>> {
-        let result = Scm::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?
-            .open_service(
-                "PinkCollab",
-                ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | access,
-            );
-        match result {
-            Ok(service) => {
-                let config = service.query_config()?;
-                let identity = checked(&SystemRunner, "whoami", &[])?;
-                let computer = checked(&SystemRunner, "hostname", &[])?;
-                windows_ux::local_account(
-                    &config.account_name.context("legacy service account missing")?.to_string_lossy(),
-                    String::from_utf8_lossy(&identity.stdout).trim(),
-                    String::from_utf8_lossy(&computer.stdout).trim(),
-                )?;
-                windows_ux::legacy_command(
-                    config.executable_path.as_os_str(),
-                    &self.installation.binary,
-                    &self.installation.dir,
-                )?;
-                Ok(Some(service))
-            }
-            Err(windows_service::Error::Winapi(error)) if error.raw_os_error() == Some(1060) => Ok(None),
-            Err(error) => Err(error).context("Cannot migrate the old Windows service. Run pinkcollab service install once in an Administrator terminal as the same user. Future installs need no elevation or password."),
-        }
+        (self.legacy_lookup)(self.installation, access)
     }
     fn migrate(&self) -> Result<()> {
         if let Some(service) = self.legacy(ServiceAccess::STOP | ServiceAccess::DELETE)? {
@@ -81,6 +60,36 @@ impl Manager<'_> {
             service.delete()?;
         }
         Ok(())
+    }
+}
+
+pub fn system_legacy(
+    installation: &Installation,
+    access: ServiceAccess,
+) -> Result<Option<windows_service::service::Service>> {
+    let result = Scm::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?.open_service(
+        "PinkCollab",
+        ServiceAccess::QUERY_STATUS | ServiceAccess::QUERY_CONFIG | access,
+    );
+    match result {
+        Ok(service) => {
+            let config = service.query_config()?;
+            let identity = checked(&SystemRunner, "whoami", &[])?;
+            let computer = checked(&SystemRunner, "hostname", &[])?;
+            windows_ux::local_account(
+                &config.account_name.context("legacy service account missing")?.to_string_lossy(),
+                String::from_utf8_lossy(&identity.stdout).trim(),
+                String::from_utf8_lossy(&computer.stdout).trim(),
+            )?;
+            windows_ux::legacy_command(
+                config.executable_path.as_os_str(),
+                &installation.binary,
+                &installation.dir,
+            )?;
+            Ok(Some(service))
+        }
+        Err(windows_service::Error::Winapi(error)) if error.raw_os_error() == Some(1060) => Ok(None),
+        Err(error) => Err(error).context("Cannot migrate the old Windows service. Run pinkcollab service install once in an Administrator terminal as the same user. Future installs need no elevation or password."),
     }
 }
 

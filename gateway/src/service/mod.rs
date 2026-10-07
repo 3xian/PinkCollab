@@ -361,7 +361,19 @@ pub fn manager(installation: &Installation) -> Box<dyn ServiceManager + '_> {
     }
     #[cfg(windows)]
     {
-        Box::new(windows::Manager { installation })
+        let legacy_lookup = windows::system_legacy;
+        // Only the dedicated fixture binary omits machine-wide SCM discovery.
+        // Building the production binary with test-fixtures keeps its normal checks.
+        #[cfg(feature = "test-fixtures")]
+        let legacy_lookup: windows::LegacyLookup = if env!("CARGO_BIN_NAME") == "gateway-fixture" {
+            |_, _| Ok(None)
+        } else {
+            legacy_lookup
+        };
+        Box::new(windows::Manager {
+            installation,
+            legacy_lookup,
+        })
     }
 }
 pub fn execute(dir: &Path, action: Action) -> Result<()> {

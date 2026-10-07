@@ -15,6 +15,53 @@ use std::{
 
 const OMP_HELP: &str = "OMP was not found or could not start.\n\nInstall OMP first and make sure this works:\n\n  omp --version";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum Transport {
+    Tailscale,
+    External,
+}
+
+impl Transport {
+    fn validate(self, public_url: Option<&str>) -> Result<()> {
+        match self {
+            Self::Tailscale => ensure!(
+                public_url.is_none(),
+                "--public-url is only supported with --transport external"
+            ),
+            Self::External => {
+                let url = public_url
+                    .context("--transport external requires --public-url <https://...>")?;
+                let parsed = config::root_url(url).context("invalid --public-url")?;
+                ensure!(parsed.scheme() == "https", "--public-url requires HTTPS");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn configure_external(
+    dir: &Path,
+    config: &mut Config,
+    url: &str,
+    save_required: bool,
+) -> Result<()> {
+    let url_changed = config.public_url != url;
+    if url_changed {
+        config.public_url = url.to_owned();
+    }
+    if save_required || url_changed {
+        save(dir, config)?;
+    }
+    // Relinquish diagnostic ownership only after persistence succeeds, even for the same URL.
+    // The externally managed endpoint may still use the existing Funnel mapping.
+    match std::fs::remove_file(dir.join("funnel-url")) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("cannot clear managed Funnel marker"),
+    }
+    Ok(())
+}
+
 fn requested_roots(
     requested: &[PathBuf],
     cwd: &Path,
@@ -83,12 +130,10 @@ pub async fn run(
     dir: &Path,
     requested: &[PathBuf],
     non_interactive: bool,
-    transport: &str,
+    transport: Transport,
+    public_url: Option<&str>,
 ) -> Result<()> {
-    ensure!(
-        transport == "tailscale",
-        "This version supports --transport tailscale only."
-    );
+    transport.validate(public_url)?;
     ensure!(
         non_interactive || std::io::stdin().is_terminal(),
         "Interactive setup needs a terminal. For automation use --non-interactive --workspace <directory>."
@@ -147,46 +192,23 @@ pub async fn run(
     );
     println!("✓ OMP {}", safe_text(&version));
     control.checkpoint().await?;
-    let changed = merge(&mut config, roots, &executable)?;
-    if changed || !exists {
-        save(dir, &config)?;
+    let save_required = merge(&mut config, roots, &executable)? || !exists;
+    match transport {
+        Transport::External => {
+            configure_external(dir, &mut config, public_url.unwrap(), save_required)?;
+        }
+        Transport::Tailscale if save_required => save(dir, &config)?,
+        Transport::Tailscale => {}
     }
     Store::open(dir)?;
     println!("✓ Workspaces configured");
-    let binary = funnel::tailscale_binary().with_context(|| {
-        format!(
-            "Tailscale wasn't found.\n\n{}\n\nThen run:\n  pinkcollab setup",
-            funnel::installation_help()
-        )
-    })?;
-    println!("Connecting Tailscale...");
-    crate::setup_connect::connect(&control, &binary, non_interactive).await?;
-    control.checkpoint().await?;
-    println!("✓ Tailscale connected");
-    println!("Configuring secure remote access...");
-    let remote_dir = dir.to_path_buf();
-    let remote_config = config.clone();
-    config.public_url = control
-        .blocking(
-            move || {
-                funnel::reconcile(
-                    &remote_dir,
-                    &remote_config,
-                    &binary,
-                    if non_interactive {
-                        funnel::Interaction::Forbidden
-                    } else {
-                        funnel::Interaction::Allowed
-                    },
-                )
-            },
-            None,
-        )
-        .await
-        .context(
-            "Secure remote access could not be configured. Run pinkcollab doctor for details.",
-        )?;
-    println!("✓ Secure remote access ready");
+    match transport {
+        Transport::Tailscale => {
+            config.public_url =
+                configure_tailscale(&mut control, dir, &config, non_interactive).await?;
+        }
+        Transport::External => println!("✓ Externally managed HTTPS access configured"),
+    }
     let install = installation.clone();
     let outcome = control
         .blocking(
@@ -227,6 +249,49 @@ pub async fn run(
     }
     println!("\nPinkCollab is ready.\nYou can close this terminal.");
     Ok(())
+}
+
+async fn configure_tailscale(
+    control: &mut Control,
+    dir: &Path,
+    config: &Config,
+    non_interactive: bool,
+) -> Result<String> {
+    let binary = funnel::tailscale_binary().with_context(|| {
+        format!(
+            "Tailscale wasn't found.\n\n{}\n\nThen run:\n  pinkcollab setup",
+            funnel::installation_help()
+        )
+    })?;
+    println!("Connecting Tailscale...");
+    crate::setup_connect::connect(control, &binary, non_interactive).await?;
+    control.checkpoint().await?;
+    println!("✓ Tailscale connected");
+    println!("Configuring secure remote access...");
+    let remote_dir = dir.to_path_buf();
+    let remote_config = config.clone();
+    let url = control
+        .blocking(
+            move || {
+                funnel::reconcile(
+                    &remote_dir,
+                    &remote_config,
+                    &binary,
+                    if non_interactive {
+                        funnel::Interaction::Forbidden
+                    } else {
+                        funnel::Interaction::Allowed
+                    },
+                )
+            },
+            None,
+        )
+        .await
+        .context(
+            "Secure remote access could not be configured. Run pinkcollab doctor for details.",
+        )?;
+    println!("✓ Secure remote access ready");
+    Ok(url)
 }
 fn should_pair(existing: usize, answer: Option<&str>) -> bool {
     existing == 0
@@ -298,6 +363,72 @@ async fn pair_and_wait(control: &Control, dir: &Path, config: &Config) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_requires_https_even_for_development_hosts() {
+        for url in [
+            "https://pink.example.com",
+            "https://1.2.3.4",
+            "https://pink.example.com:8443",
+            "https://pink.example.com/",
+        ] {
+            Transport::External.validate(Some(url)).unwrap();
+        }
+        for url in [
+            "http://1.2.3.4",
+            "http://127.0.0.1:8787",
+            "http://localhost",
+            "http://10.0.2.2:8787",
+        ] {
+            assert!(Transport::External.validate(Some(url)).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn external_persists_url_updates_and_relinquishes_managed_funnel() {
+        let data = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            workspaces: vec![workspace.path().to_path_buf()],
+            ..Config::default()
+        };
+        for url in ["https://pink.example.com", "https://new.example.com:8443"] {
+            Transport::External.validate(Some(url)).unwrap();
+            configure_external(data.path(), &mut config, url, false).unwrap();
+            config = Config::load(data.path()).unwrap();
+            assert_eq!(config.public_url, url);
+        }
+        std::fs::write(data.path().join("funnel-url"), &config.public_url).unwrap();
+        let before = std::fs::read(data.path().join("config.yaml")).unwrap();
+        let url = config.public_url.clone();
+        configure_external(data.path(), &mut config, &url, false).unwrap();
+        assert!(!data.path().join("funnel-url").exists());
+        assert!(matches!(
+            crate::remote::inspect(data.path(), &config),
+            crate::remote::Access::External
+        ));
+        assert_eq!(
+            std::fs::read(data.path().join("config.yaml")).unwrap(),
+            before
+        );
+    }
+    #[test]
+    fn failed_external_save_preserves_managed_funnel_ownership() {
+        let data = tempfile::tempdir().unwrap();
+        let old_url = "https://old-host.ts.net";
+        let marker = data.path().join("funnel-url");
+        std::fs::write(&marker, old_url).unwrap();
+        // A directory at the destination deterministically prevents atomic replacement.
+        std::fs::create_dir(data.path().join("config.yaml")).unwrap();
+        let mut config = Config {
+            public_url: old_url.into(),
+            ..Config::default()
+        };
+        assert!(
+            configure_external(data.path(), &mut config, "https://proxy.example", false).is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), old_url);
+    }
     #[test]
     fn pairing_decision() {
         assert!(should_pair(0, None));

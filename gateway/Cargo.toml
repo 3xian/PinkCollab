@@ -1,6 +1,6 @@
 [package]
 name = "pinkcollab-gateway"
-version = "3.0.5"
+version = "3.0.6"
 default-run = "pinkcollab-gateway"
 edition = "2024"
 rust-version = "1.89"
@@ -53,4 +53,9 @@ strip = true
 [[bin]]
 name = "omp-fixture"
 path = "tests/fixtures/omp.rs"
+required-features = ["test-fixtures"]
+
+[[bin]]
+name = "gateway-fixture"
+path = "tests/fixtures/gateway.rs"
 required-features = ["test-fixtures"]

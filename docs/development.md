@@ -46,7 +46,7 @@ cargo test --all-features --locked
 
 Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smoke -- --ignored`.
 
-On Windows, `cargo test --all-features --locked --test windows_background` checks the hidden login launcher, duplicate starts, graceful stop/restart, and preserved host identity using isolated temporary directories. It does not register real login startup or modify Windows services.
+On Windows, `cargo test --all-features --locked --test windows_background` checks the hidden login launcher, duplicate starts, graceful stop/restart, external setup, and preserved host identity using isolated temporary directories. It runs the dedicated `gateway-fixture` binary, which uses the real CLI and desktop lifecycle but injects an empty legacy SCM lookup at the service factory. It neither queries nor modifies machine-wide Windows services and does not register real login startup. The production `pinkcollab-gateway` binary retains legacy service discovery and ownership checks, including when built with `test-fixtures`.
 
 From `android/`: `sh ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug` (`gradlew.bat` on Windows).
 Android unit tests run offline; `:app:connectedDebugAndroidTest` needs an attached test device or emulator.

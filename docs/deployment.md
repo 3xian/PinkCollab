@@ -4,7 +4,7 @@ Use the same OS user that owns your OMP configuration and conversations. The Gat
 
 ## Install and pair
 
-Install Node.js 18+, [OMP](https://omp.sh/), and [Tailscale](https://tailscale.com/download) on the host. `omp --version` must work. Install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) on the phone, using the **same release** as the CLI.
+Install Node.js 18+ and [OMP](https://omp.sh/) on the host, plus [Tailscale](https://tailscale.com/download) for the default transport. `omp --version` must work. Install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) on the phone, using the **same release** as the CLI.
 
 ```sh
 npm install -g pinkcollab@latest
@@ -17,6 +17,25 @@ Run setup from your projects directory, or pass `--workspace <directory>` (repea
 The default connection uses **public HTTPS through Tailscale Funnel**. The phone does not need Tailscale. Your tailnet must permit Funnel; paired credentials protect access, and the URL is not a secret. For private access, use [Tailscale Serve or your own proxy](#other-https-front-ends).
 
 On an existing host, setup preserves settings, conversations, and pairings. At `Pair another phone? [y/N]`, press Enter to finish. You can run `pinkcollab pair` later.
+
+### External HTTPS setup
+
+For a fixed Linux server with an existing HTTPS reverse proxy, Tailscale is not required. Interactive setup uses the same workspace confirmation, background-service installation/update, local health check, and pairing flow:
+
+```sh
+pinkcollab setup \
+  --transport external \
+  --public-url https://pink.example.com \
+  --workspace /srv/projects
+```
+
+Both external setup modes require an explicit `--public-url`: an absolute HTTPS root with a host and optional port, no username/password, no path other than `/`, and no query or fragment. A trailing `/` is allowed. Setup validates this before making changes, saves it as `public_url`, and uses it for pairing; later `pinkcollab pair` defaults to that saved URL.
+
+The Gateway stays bound to loopback (by default `127.0.0.1:8787`). Configure your Caddy/nginx reverse proxy to forward HTTPS to `http://127.0.0.1:8787`, including WebSocket Upgrade and the `Authorization` header; substitute the configured port if different. Android production builds require a trusted HTTPS certificate. PinkCollab does not create or manage this endpoint, certificates, DNS, or external reachability; `public_url` must be the URL the phone can actually reach.
+
+External setup never invokes Tailscale and clears PinkCollab's managed-Funnel marker only after any configuration changes have been saved successfully; it does not remove an existing Tailscale mapping. A failed configuration save preserves the marker and its managed-Funnel diagnostics. It checks local Gateway health, **not the external endpoint**. Diagnostics report externally managed HTTPS as not verified; test the connection from the phone.
+
+For unattended setup, add `--non-interactive` and provide explicit workspace roots; see [automation](#automation). For upgrades or workspace changes, rerun the same external command, including `--transport external --public-url …`. Omitting the transport selects Tailscale, even when an external URL is already saved. External setup shares the [background-service behavior](#run-as-a-background-service), including Linux's user-lingering requirement for access after logout, and preserves settings, conversations, and pairings.
 
 ## Run as a background service
 
@@ -59,6 +78,8 @@ pinkcollab doctor
 ```
 
 For a specific APK release, use `pinkcollab@X.Y.Z` instead of `@latest`. `doctor` should show matching CLI and installed-binary hashes and a healthy Gateway. If an update fails, fix the error and rerun setup; do not delete configuration or pairings. Identical completed installs do not restart the Gateway.
+
+For an external HTTPS deployment, add `--transport external --public-url https://collab.example.com` to each `setup` command above and below, using your actual URL. The transport defaults to Tailscale on every invocation.
 
 If `pinkcollab --version` disagrees with `npm list -g pinkcollab --depth=0`, another installation may be ahead on PATH. Running its setup would install that older build again. Use the current npm package directly:
 
@@ -154,7 +175,7 @@ Use the Tailscale installation above and [build the Gateway](development.md#buil
 ### Other HTTPS front ends
 
 - **Tailscale Serve:** host and phone both join the tailnet. Run `tailscale serve --bg http://127.0.0.1:8787`, check `tailscale serve status`, and set `public_url` to its HTTPS root before pairing.
-- **Your own proxy:** forward HTTPS to `http://127.0.0.1:8787`, including WebSocket Upgrade and `Authorization`. Set `public_url` to the phone-reachable HTTPS root; Android must trust its certificate.
+- **Your own proxy:** use [external HTTPS setup](#external-https-setup) to save its URL and manage the background Gateway without Tailscale.
 
 Substitute the configured port if it differs. Debug Android builds also accept HTTP for `localhost`, `127.0.0.1`, and emulator host `10.0.2.2`.
 
@@ -163,7 +184,7 @@ Substitute the configured port if it differs. Debug Android builds also accept H
 | Report | Meaning |
 | --- | --- |
 | Managed Funnel | `setup`/`funnel` recorded a URL matching `public_url`; diagnostics verify Tailscale and the backend mapping |
-| Externally managed (not verified) | Manual Serve/proxy configuration, a changed URL, or an older configuration without a Funnel marker |
+| Externally managed (not verified) | External setup, manual Serve/proxy configuration, a changed URL, or an older configuration without a Funnel marker |
 | Local only | `public_url` is empty |
 
 These checks verify host configuration. Test public reachability from outside the tailnet: an unauthenticated request to `https://<hostname>.ts.net/api/v4/host` should return `401 authentication_required`. A host-side request may use a private route.
@@ -204,7 +225,7 @@ The default data directory is `~/.pinkcollab` (`./.pinkcollab` if no home direct
 
 | Command | Purpose |
 | --- | --- |
-| `setup [--workspace <dir>]...` | Configure, update, start, and pair; merges workspace roots. Default workspace is the current directory. |
+| `setup [--workspace <dir>]...` | Configure, update, start, and pair; merges workspace roots. Default workspace is the current directory. `--transport tailscale` (default) uses Funnel; `--transport external --public-url https://…` uses your HTTPS front end. |
 | `status` / `doctor` | Operational status / detailed diagnostics. Health and managed background state are checked independently; foreground-only operation is reported as degraded. |
 | `service <action>` | [Manage background startup](#run-as-a-background-service) |
 | `init --workspace <dir>...` | Manual bootstrap; requires existing directories and OMP. Fails if configuration already exists. |
@@ -220,11 +241,23 @@ On Windows, new runtime leases record a named Job Object. After a crash or reboo
 
 ### Automation
 
+Default Tailscale transport:
+
 ```sh
 pinkcollab setup --non-interactive --workspace /srv/projects
 ```
 
-Requires explicit workspace roots and an already connected Tailscale installation with Funnel/HTTPS enabled. It never prompts, starts a sign-in flow, prints pairing credentials, or waits for a phone. It succeeds after local health passes; failures exit nonzero. Use `pinkcollab pair` separately. Only `--transport tailscale` is supported.
+Requires an already connected Tailscale installation with Funnel/HTTPS enabled.
+
+External HTTPS transport:
+
+```sh
+pinkcollab setup --non-interactive --transport external --public-url https://collab.example.com --workspace /srv/projects
+```
+
+Requires your own HTTPS front end and the explicit root URL described in [external HTTPS setup](#external-https-setup), not Tailscale.
+
+Both modes require explicit workspace roots. They never prompt, start a sign-in flow, print pairing credentials, or wait for a phone. They succeed after local health passes; failures exit nonzero. External endpoint reachability is not verified. Use `pinkcollab pair` separately; it defaults to the saved `public_url`.
 
 ### Configuration
 

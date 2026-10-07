@@ -23,7 +23,7 @@
 
 On your phone, install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
 
-On your computer, you need a working [OMP](https://omp.sh/) installation, Node.js 18+, and [Tailscale](https://tailscale.com/download). Use the same OS user that owns your OMP configuration and conversations; `omp --version` must work for that user.
+On your computer, you need a working [OMP](https://omp.sh/) installation, Node.js 18+, and [Tailscale](https://tailscale.com/download) for the default setup. Use the same OS user that owns your OMP configuration and conversations; `omp --version` must work for that user.
 
 ```sh
 npm install -g pinkcollab@latest
@@ -43,6 +43,17 @@ pinkcollab setup
 Setup confirms that directory as a workspace root, guides Tailscale sign-in and Funnel approval, and starts the Gateway in the background. It does not install OMP or Tailscale. Scan the QR code with the Android app; you can then close the terminal.
 
 **The default connection is public HTTPS via Tailscale Funnel.** Your tailnet must permit Funnel; app access requires pairing credentials, not a secret URL. Your phone does not need Tailscale. For private access, see [Tailscale Serve or your own HTTPS proxy](docs/deployment.md#other-https-front-ends).
+
+For a fixed Linux server with your own HTTPS reverse proxy (Caddy/nginx), Tailscale is not needed:
+
+```sh
+pinkcollab setup \
+  --transport external \
+  --public-url https://pink.example.com \
+  --workspace /srv/projects
+```
+
+See [external HTTPS setup](docs/deployment.md#external-https-setup) for proxy requirements and automation.
 
 On Windows, use a normal terminal as your OMP user. The Gateway starts automatically when you log in; no Windows password or service login permission is needed. Signing out stops it, while closing the terminal or locking the screen does not. See [Windows login startup](docs/deployment.md#windows-login-startup) and [macOS Tailscale installation](docs/deployment.md#recommended-tailscale-installation-on-macos).
 
@@ -66,7 +77,7 @@ If connection or prompts fail, run `pinkcollab doctor` and see [setup troublesho
 | Pair another phone | `pinkcollab pair` |
 | Add project roots | `pinkcollab setup --workspace /path/to/code --workspace /path/to/work` |
 
-To upgrade, install the APK and CLI from the same release, then rerun `pinkcollab setup` to update the background Gateway. Existing settings, conversations, and pairings are preserved. **An update may stop active OMP runtimes**; finish current work first. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations).
+To upgrade, install the APK and CLI from the same release, then rerun `pinkcollab setup` to update the background Gateway. External HTTPS users must repeat `--transport external --public-url https://collab.example.com` to avoid the default Funnel flow. Existing settings, conversations, and pairings are preserved. **An update may stop active OMP runtimes**; finish current work first. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations).
 
 ## Keep in mind
 

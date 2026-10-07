@@ -179,7 +179,13 @@ fn setup_persists_the_absolute_omp_symlink_across_runs() {
     );
     let another = tempfile::tempdir().unwrap();
     let output = cli(home.path(), &data)
-        .args(["setup", "--non-interactive", "--workspace"])
+        .args([
+            "setup",
+            "--transport",
+            "tailscale",
+            "--non-interactive",
+            "--workspace",
+        ])
         .arg(another.path())
         .output()
         .unwrap();
@@ -453,4 +459,244 @@ fn bare_and_status_share_healthy_output() {
     assert!(status.status.success());
     assert_eq!(bare.stdout, status.stdout);
     assert!(String::from_utf8_lossy(&bare.stdout).contains("Service       Running"));
+}
+
+/// The listener stays owned by this fixture, not a real Gateway or user service.
+/// Nonblocking accepts and bounded reads make failed CLI assertions safe to unwind.
+struct HealthFixture {
+    address: std::net::SocketAddr,
+    requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    server: Option<std::thread::JoinHandle<()>>,
+}
+impl HealthFixture {
+    fn new() -> Self {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let stop = Arc::new(AtomicBool::new(false));
+        let requests = Arc::new(AtomicUsize::new(0));
+        let server_stop = stop.clone();
+        let server_requests = requests.clone();
+        let server = std::thread::spawn(move || {
+            while !server_stop.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut socket, _)) => {
+                        socket
+                            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                            .unwrap();
+                        socket
+                            .set_write_timeout(Some(std::time::Duration::from_secs(1)))
+                            .unwrap();
+                        let mut request = [0; 1024];
+                        let count = socket.read(&mut request).unwrap();
+                        assert!(request[..count].starts_with(b"GET /health HTTP/1.1\r\n"));
+                        socket
+                            .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\npinkcollab:ok")
+                            .unwrap();
+                        server_requests.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("health fixture accept failed: {error}"),
+                }
+            }
+        });
+        Self {
+            address,
+            requests,
+            stop,
+            server: Some(server),
+        }
+    }
+}
+impl Drop for HealthFixture {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(server) = self.server.take() {
+            let result = server.join();
+            if !std::thread::panicking() {
+                result.unwrap();
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+fn external_setup_reuses_service_flow_updates_url_and_pairs_without_tailscale() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    executable(
+        &home.path().join("bin/tailscale"),
+        r#"printf '%s\n' "$*" >> "$HOME/tailscale-commands"
+exit 99"#,
+    );
+    let health = HealthFixture::new();
+    let data = home.path().join("data");
+    let store = Store::open(&data).unwrap();
+    let mut expected = Config {
+        listen: health.address,
+        public_url: "https://old-host.ts.net".into(),
+        name: "Custom gateway name".into(),
+        omp: home.path().join("bin/omp").to_string_lossy().into_owned(),
+        omp_args: vec!["--custom-argument".into()],
+        max_sessions: 17,
+        workspaces: vec![home.path().canonicalize().unwrap()],
+        ..Config::default()
+    };
+    std::fs::write(
+        data.join("config.yaml"),
+        serde_yaml::to_string(&expected).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(data.join("funnel-url"), &expected.public_url).unwrap();
+    #[cfg(target_os = "macos")]
+    let (base, definition) = (
+        home.path().join("Library/Application Support/PinkCollab"),
+        home.path()
+            .join("Library/LaunchAgents/dev.pinkcollab.gateway.plist"),
+    );
+    #[cfg(target_os = "linux")]
+    let (base, definition) = (
+        home.path().join(".local/share/pinkcollab"),
+        home.path().join(".config/systemd/user/pinkcollab.service"),
+    );
+    // A managed running fixture allows the reserved health port through preflight.
+    // Installation still replaces the fake definition and stages the actual binary.
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    std::fs::create_dir_all(definition.parent().unwrap()).unwrap();
+    std::fs::write(&definition, "fake old definition").unwrap();
+    std::fs::write(
+        base.join("bin/data-dir"),
+        data.canonicalize().unwrap().to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    executable(&home.path().join("bin/id"), "echo 501");
+    executable(
+        &home.path().join("bin/systemctl"),
+        r#"printf '%s\n' "systemctl $*" >> "$HOME/service-commands"
+case "$2" in
+ show) echo active ;;
+ start)
+  while IFS= read -r line; do
+   case "$line" in public_url:*) printf '%s\n' "$line" >> "$HOME/service-commands" ;; esac
+  done < "$HOME/data/config.yaml" ;;
+esac"#,
+    );
+    executable(
+        &home.path().join("bin/launchctl"),
+        r#"printf '%s\n' "launchctl $*" >> "$HOME/service-commands"
+case "$1" in
+ print) [ ! -s "$HOME/service-stopped" ] || exit 1; echo 'state = running' ;;
+ bootout) echo stopped > "$HOME/service-stopped" ;;
+ bootstrap)
+  while IFS= read -r line; do
+   case "$line" in public_url:*) printf '%s\n' "$line" >> "$HOME/service-commands" ;; esac
+  done < "$HOME/data/config.yaml"
+  : > "$HOME/service-stopped" ;;
+esac"#,
+    );
+    let mut unchanged_config = None;
+    for url in [
+        "https://proxy.example:8443",
+        "https://replacement.example",
+        "https://replacement.example",
+    ] {
+        let before = health.requests.load(std::sync::atomic::Ordering::Relaxed);
+        let output = cli(home.path(), &data)
+            .args([
+                "setup",
+                "--non-interactive",
+                "--transport",
+                "external",
+                "--public-url",
+                url,
+                "--workspace",
+            ])
+            .arg(home.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(health.requests.load(std::sync::atomic::Ordering::Relaxed) > before);
+        expected.public_url = url.into();
+        assert_eq!(
+            serde_yaml::to_string(&Config::load(&data).unwrap()).unwrap(),
+            serde_yaml::to_string(&expected).unwrap()
+        );
+        assert!(!data.join("funnel-url").exists());
+        assert!(!home.path().join("tailscale-commands").exists());
+        let db = rusqlite::Connection::open(data.join("pinkcollab.db")).unwrap();
+        let tokens: i64 = db
+            .query_row("SELECT COUNT(*) FROM pairing", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tokens, 0, "noninteractive setup created a pairing token");
+        assert!(store.clients().unwrap().is_empty());
+        if url == "https://replacement.example" {
+            let bytes = std::fs::read(data.join("config.yaml")).unwrap();
+            if let Some(previous) = &unchanged_config {
+                assert_eq!(&bytes, previous);
+            }
+            unchanged_config = Some(bytes);
+        }
+    }
+    assert!(base.join("bin/pinkcollab-gateway").is_file());
+    assert_ne!(
+        std::fs::read_to_string(&definition).unwrap(),
+        "fake old definition"
+    );
+    let calls = std::fs::read_to_string(home.path().join("service-commands")).unwrap();
+    #[cfg(target_os = "linux")]
+    for call in [
+        "systemctl --user daemon-reload",
+        "systemctl --user enable pinkcollab",
+        "systemctl --user start pinkcollab",
+    ] {
+        assert!(calls.contains(call), "{calls}");
+    }
+    #[cfg(target_os = "macos")]
+    for call in ["launchctl bootout", "launchctl bootstrap"] {
+        assert!(calls.contains(call), "{calls}");
+    }
+    assert!(
+        calls.contains("public_url: https://proxy.example:8443"),
+        "{calls}"
+    );
+    assert!(
+        calls.contains("public_url: https://replacement.example"),
+        "{calls}"
+    );
+    for action in ["status", "doctor"] {
+        let output = cli(home.path(), &data).arg(action).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{action}: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Externally managed"));
+    }
+    assert!(!home.path().join("tailscale-commands").exists());
+    let pair = cli(home.path(), &data).arg("pair").output().unwrap();
+    assert!(
+        pair.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pair.stderr)
+    );
+    let payload: serde_json::Value = serde_json::from_slice(&pair.stdout).unwrap();
+    assert_eq!(payload["version"], 1);
+    assert_eq!(payload["url"], "https://replacement.example");
+    store
+        .pair(payload["token"].as_str().unwrap(), "External phone")
+        .unwrap();
 }

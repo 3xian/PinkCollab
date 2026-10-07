@@ -43,8 +43,11 @@ enum Commands {
         workspace: Vec<PathBuf>,
         #[arg(long)]
         non_interactive: bool,
-        #[arg(long, default_value = "tailscale")]
-        transport: String,
+        #[arg(long, value_enum, default_value_t = setup::Transport::Tailscale)]
+        transport: setup::Transport,
+        /// Explicit HTTPS Gateway root URL for an externally managed reverse proxy.
+        #[arg(long)]
+        public_url: Option<String>,
     },
     /// Manage the background Gateway.
     #[command(display_order = 3)]
@@ -131,7 +134,16 @@ async fn main() -> Result<()> {
             workspace,
             non_interactive,
             transport,
-        } => match setup::run(&cli.data_dir, &workspace, non_interactive, &transport).await {
+            public_url,
+        } => match setup::run(
+            &cli.data_dir,
+            &workspace,
+            non_interactive,
+            transport,
+            public_url.as_deref(),
+        )
+        .await
+        {
             Ok(()) => Ok(()),
             Err(error) => {
                 eprintln!("{error:#}\n\nFor details, run pinkcollab doctor.");
@@ -258,5 +270,45 @@ async fn shutdown() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn setup_transport_defaults_to_tailscale_and_accepts_explicit_choices() {
+        for args in [
+            vec!["pinkcollab", "setup"],
+            vec!["pinkcollab", "setup", "--transport", "tailscale"],
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Setup {
+                    transport: setup::Transport::Tailscale,
+                    ..
+                })
+            ));
+        }
+        let cli = Cli::try_parse_from([
+            "pinkcollab",
+            "setup",
+            "--transport",
+            "external",
+            "--public-url",
+            "https://pink.example.com",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Setup {
+                transport: setup::Transport::External,
+                public_url,
+                ..
+            }) => assert_eq!(public_url.as_deref(), Some("https://pink.example.com")),
+            _ => panic!("expected external setup"),
+        }
+        assert!(Cli::try_parse_from(["pinkcollab", "setup", "--transport", "unknown"]).is_err());
     }
 }
