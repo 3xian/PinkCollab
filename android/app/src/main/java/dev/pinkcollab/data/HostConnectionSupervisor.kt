@@ -12,10 +12,8 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
-import kotlin.random.Random
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -122,11 +120,11 @@ internal class HostConnectionSupervisor(
             val currentGeneration = connectionGeneration.incrementAndGet()
             job?.cancel()
             job = scope.launch {
-                var failedAttempts = 0
                 var lastFailure: String? = null
-                while (isActive && isCurrent(currentGeneration)) {
+                for (attempt in 1..MaxConnectionAttempts) {
+                    if (!isActive || !isCurrent(currentGeneration)) return@launch
                     // Socket opening and host synchronization are separate connection stages.
-                    val progress = ConnectionProgress(failedAttempts + 1, lastFailure)
+                    val progress = ConnectionProgress(attempt, lastFailure)
                     emitState(currentGeneration, ConnectionState.Connecting, progress)
                     val disconnect = awaitSocket(currentGeneration, progress)
                     if (!isCurrent(currentGeneration)) return@launch
@@ -138,12 +136,10 @@ internal class HostConnectionSupervisor(
                         emitState(currentGeneration, ConnectionState.UpgradeRequired)
                         return@launch
                     }
-                    failedAttempts = if (disconnect.hadSnapshot) 1 else failedAttempts + 1
                     lastFailure = disconnect.failure.reason
-                    val retryDelay = retryDelayMillis(failedAttempts)
-                    emitState(currentGeneration, disconnect.failure,
-                        ConnectionProgress(failedAttempts + 1, lastFailure))
-                    delay(retryDelay)
+                    emitState(currentGeneration, disconnect.failure)
+                    if (attempt == MaxConnectionAttempts) return@launch
+                    delay(ReconnectIntervalMillis)
                 }
             }
         }
@@ -193,7 +189,6 @@ internal class HostConnectionSupervisor(
 
         private suspend fun awaitSocket(generation: Long, progress: ConnectionProgress): Disconnect =
             suspendCancellableCoroutine { continuation ->
-                val hadSnapshot = AtomicBoolean()
                 val known = cachedHost(paired.host.id)
                 val endpoint = (paired.url + "/api/v4/events").toHttpUrl().newBuilder().apply {
                     synchronized(lock) { desiredSessions[paired.host.id]?.firstOrNull() }?.let { addQueryParameter("focus", it) }
@@ -235,7 +230,6 @@ internal class HostConnectionSupervisor(
                             runCatching {
                                 val frame = JSONObject(text)
                                 handleFrame(generation, frame)
-                                if (frame.getString("type") in setOf("host_snapshot", "host_sync")) hadSnapshot.set(true)
                             }.onFailure { webSocket.close(1002, "Invalid protocol frame") }
                         }
 
@@ -246,7 +240,6 @@ internal class HostConnectionSupervisor(
                                     Disconnect(
                                         authenticationRequired = response?.code == 401,
                                         upgradeRequired = response?.code == 426,
-                                        hadSnapshot = hadSnapshot.get(),
                                         failure = connectionFailure(error, response?.code),
                                     ),
                                 )
@@ -262,7 +255,6 @@ internal class HostConnectionSupervisor(
                             if (continuation.isActive) {
                                 continuation.resume(
                                     Disconnect(
-                                        hadSnapshot = hadSnapshot.get(),
                                         failure = if (code == 1002)
                                             ConnectionState.Offline("Invalid connection data", ConnectionFailure.InvalidData)
                                         else ConnectionState.Offline("Host closed the connection", ConnectionFailure.HostClosed),
@@ -279,7 +271,6 @@ internal class HostConnectionSupervisor(
     private data class Disconnect(
         val authenticationRequired: Boolean = false,
         val upgradeRequired: Boolean = false,
-        val hadSnapshot: Boolean = false,
         val failure: ConnectionState.Offline = ConnectionState.Offline("Connection interrupted"),
     )
 }
@@ -293,12 +284,5 @@ internal fun connectionFailure(error: Throwable, httpCode: Int? = null): Connect
     else -> ConnectionState.Offline("Connection interrupted")
 }
 
-internal fun retryDelayMillis(attempt: Int, jitter: Double = Random.nextDouble(0.8, 1.2)): Long {
-    val base = when (attempt) {
-        1 -> 1_000L
-        2 -> 5_000L
-        3 -> 10_000L
-        else -> 15_000L
-    }
-    return (base * jitter).toLong().coerceAtMost(15_000L)
-}
+private const val MaxConnectionAttempts = 3
+private const val ReconnectIntervalMillis = 1_000L

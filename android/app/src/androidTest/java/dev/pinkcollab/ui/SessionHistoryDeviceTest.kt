@@ -36,6 +36,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -85,7 +86,8 @@ class SessionHistoryDeviceTest {
         }
         compose.onNodeWithText(whitespace, useUnmergedTree = true).assertTextEquals(whitespace)
         compose.onNodeWithText("(Empty response)").assertDoesNotExist()
-        compose.onNodeWithContentDescription("Copy message").assertIsEnabled().performClick()
+        compose.onNodeWithContentDescription("Copy message").assertDoesNotExist()
+        compose.onNodeWithText(whitespace, useUnmergedTree = true).performTouchInput { longClick() }
         compose.runOnIdle {
             val copied = context.getSystemService(ClipboardManager::class.java)
                 .primaryClip?.getItemAt(0)?.text?.toString()
@@ -93,7 +95,12 @@ class SessionHistoryDeviceTest {
             answer.value = ""
         }
         compose.onNodeWithContentDescription("Copy message").assertDoesNotExist()
-        compose.onNodeWithText("(Empty response)").assertIsDisplayed()
+        compose.onNodeWithText("(Empty response)").assertIsDisplayed().performTouchInput { longClick() }
+        compose.runOnIdle {
+            val copied = context.getSystemService(ClipboardManager::class.java)
+                .primaryClip?.getItemAt(0)?.text?.toString()
+            assertEquals(whitespace, copied)
+        }
     }
 
     @Test fun retained_messages_remain_readable_while_subscription_refreshes() {

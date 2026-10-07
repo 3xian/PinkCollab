@@ -72,6 +72,7 @@ internal suspend fun Flow<SessionListState>.followTaskFocus(
 
 internal data class NavigationHost(
     val host: Host,
+    val displayName: String,
     val url: String,
     val connection: ConnectionState,
     val initialSync: InitialSyncState,
@@ -90,7 +91,7 @@ internal data class NavigationState(
 /** Navigation has no transcripts, credentials, or socket revision counters. */
 internal fun navigationState(app: AppState) = NavigationState(
     hosts = app.hosts.mapValues { (_, host) ->
-        NavigationHost(host.paired.host, host.paired.url, host.connection, host.initialSync,
+        NavigationHost(host.paired.host, host.paired.displayName, host.paired.url, host.connection, host.initialSync,
             host.workspaces, host.sessions.count { it.isActive }, host.connectionProgress)
     },
     loadingCredentials = app.loadingCredentials,

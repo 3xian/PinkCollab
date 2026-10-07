@@ -15,10 +15,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.SemanticsActions
@@ -57,9 +58,12 @@ class SessionMarkdownDeviceTest {
         compose.runOnIdle {
             val view = requireNotNull(markdownView())
             val parsed = view.text as Spanned
-            assertTrue(view.isTextSelectable)
+            assertFalse(view.isTextSelectable)
             assertTrue(parsed.toString().contains("val answer = 42"))
             assertTrue(parsed.getSpans(0, parsed.length, io.noties.markwon.core.spans.LinkSpan::class.java).isNotEmpty())
+            assertTrue(view.performLongClick())
+            val clipboard = compose.activity.getSystemService(ClipboardManager::class.java)
+            assertEquals(text.value, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
             text.value = "**Updated** reply"
         }
         compose.waitUntil(10_000) {
@@ -108,12 +112,12 @@ class SessionMarkdownDeviceTest {
         }
     }
 
-    @Test fun narrow_message_uses_full_body_width_and_copies_without_covering_text() {
+    @Test fun narrow_message_uses_full_body_width_and_copies_on_long_press() {
         val message = "A longer message that wraps on a narrow screen.\nFinal line."
         compose.setContent {
             MaterialTheme {
                 Box(Modifier.width(200.dp).testTag("messageBody")) {
-                    TimelineMessageBody(message) {
+                    TimelineMessageBody(message) { _ ->
                         Text(message, Modifier.fillMaxWidth().testTag("bodyText"))
                     }
                 }
@@ -121,12 +125,12 @@ class SessionMarkdownDeviceTest {
         }
         val container = compose.onNodeWithTag("messageBody").fetchSemanticsNode().boundsInRoot
         val body = compose.onNodeWithTag("bodyText").fetchSemanticsNode().boundsInRoot
-        val copy = compose.onNodeWithContentDescription("Copy message")
-        val button = copy.fetchSemanticsNode().boundsInRoot
         assertEquals(container.left, body.left, 0.5f)
         assertEquals(container.right, body.right, 0.5f)
-        assertTrue("Copy action must not overlap the final text line", button.top >= body.bottom)
-        copy.performClick()
+        assertEquals(container.top, body.top, 0.5f)
+        assertEquals(container.bottom, body.bottom, 0.5f)
+        compose.onNodeWithContentDescription("Copy message").assertDoesNotExist()
+        compose.onNodeWithTag("bodyText").performTouchInput { longClick() }
         compose.runOnIdle {
             val clipboard = compose.activity.getSystemService(ClipboardManager::class.java)
             assertEquals(message, clipboard.primaryClip?.getItemAt(0)?.text?.toString())

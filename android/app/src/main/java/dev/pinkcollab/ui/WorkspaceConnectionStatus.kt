@@ -6,9 +6,7 @@ internal fun workspaceConnectionMessage(host: NavigationHost): String = when (va
     ConnectionState.Connecting -> "Opening connection to host"
     ConnectionState.Synchronizing -> "Connection established. Syncing sessions and directories"
     is ConnectionState.Online -> "No allowed directories"
-    is ConnectionState.Offline -> if (host.connectionProgress != null) {
-        "${connection.reason ?: "Host unavailable"}. Checking periodically. Refresh to retry now"
-    } else connection.reason ?: "Reconnect this host to load its directories"
+    is ConnectionState.Offline -> connection.reason ?: "Reconnect this host to load its directories"
     ConnectionState.AuthenticationRequired -> "Host sign-in expired. Pair this host again"
     ConnectionState.UpgradeRequired -> "Host requires a newer PinkCollab version"
 }

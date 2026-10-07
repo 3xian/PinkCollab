@@ -1,5 +1,11 @@
 package dev.pinkcollab.ui
 
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Shader
+import android.graphics.Typeface
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
@@ -72,18 +78,6 @@ internal fun Modifier.workspaceBackdrop(os: String): Modifier = drawWithCache {
                 scale(width * 0.0035f, width * 0.0035f)
             })
         }
-        "linux" -> Path().apply {
-            moveTo(width * 0.38f, height * 0.58f)
-            lineTo(width * 0.72f, height * 0.04f)
-            lineTo(width * 0.85f, height * 0.28f)
-            lineTo(width, height * 0.12f)
-            lineTo(width, height * 0.72f)
-            close()
-            moveTo(width * 0.72f, height * 0.04f)
-            lineTo(width * 0.66f, height * 0.43f)
-            lineTo(width * 0.85f, height * 0.28f)
-            close()
-        }
         else -> Path()
     }
     val artBrush = Brush.linearGradient(
@@ -100,9 +94,34 @@ internal fun Modifier.workspaceBackdrop(os: String): Modifier = drawWithCache {
         listOf(Color.Transparent, Color(0xFF13111B).copy(alpha = 0.3f)),
         endY = height * 0.65f,
     )
+    // The word itself, sized from card width so a tall card does not stretch it.
+    val linuxWord = if (platform == "linux") {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = width * 0.15f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            textAlign = Paint.Align.RIGHT
+            letterSpacing = 0.03f
+            shader = LinearGradient(
+                width,
+                0f,
+                width * 0.45f,
+                height * 0.55f,
+                accent.copy(alpha = 0.11f).toArgb(),
+                accent.copy(alpha = 0.04f).toArgb(),
+                Shader.TileMode.CLAMP,
+            )
+        }
+    } else {
+        null
+    }
     onDrawBehind {
         drawRect(glow, size = Size(width, height))
-        drawPath(artwork, artBrush)
+        val word = linuxWord
+        if (word != null) {
+            drawContext.canvas.nativeCanvas.drawText("Linux", width * 0.96f, width * 0.22f, word)
+        } else {
+            drawPath(artwork, artBrush)
+        }
         drawRect(shade)
     }
 }

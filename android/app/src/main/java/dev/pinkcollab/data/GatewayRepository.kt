@@ -92,6 +92,8 @@ internal class GatewayRepository(
         }
     }
 
+    suspend fun renameHost(id: String, name: String) = pairedHosts.rename(id, name)
+
     private fun disconnect(id: String) {
         connections.forget(id)
         directories.removeHost(id)

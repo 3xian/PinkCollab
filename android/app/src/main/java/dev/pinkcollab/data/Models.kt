@@ -4,7 +4,15 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class Host(val id: String, val name: String, val os: String, val ompVersion: String, val gatewayVersion: String)
-data class PairedHost(val host: Host, val url: String, val credential: String, val clientId: String)
+data class PairedHost(
+    val host: Host,
+    val url: String,
+    val credential: String,
+    val clientId: String,
+    val localName: String? = null,
+) {
+    val displayName: String get() = localName ?: host.name
+}
 data class SessionKey(val hostId: String, val sessionId: String) {
     /** HorizontalPager keys must be Bundle-saveable. The length prefix keeps the two IDs unambiguous. */
     fun pagerKey(): String = "${hostId.length}:$hostId$sessionId"

@@ -274,7 +274,7 @@ internal fun SessionPage(
                         ) {
                             AgentHeader(detail.model, replying = true)
                             Spacer(Modifier.height(4.dp))
-                            TimelineMessageBody(detail.streaming) {
+                            TimelineMessageBody(detail.streaming) { _ ->
                                 Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
                             }
                         }

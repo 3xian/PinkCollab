@@ -40,14 +40,28 @@ class CredentialStore(context: Context, private val ioDispatcher: CoroutineDispa
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         JSONArray(String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)).objects().map {
-            PairedHost(it.getJSONObject("host").host(), it.getString("url"), it.getString("credential"), it.getString("clientId"))
+            PairedHost(
+                it.getJSONObject("host").host(),
+                it.getString("url"),
+                it.getString("credential"),
+                it.getString("clientId"),
+                it.optString("localName").takeIf { name -> name.isNotBlank() },
+            )
         }
     }
     // Check commit's Boolean result so a failed durable write is reported to the caller.
     @SuppressLint("UseKtx")
     override suspend fun save(hosts: List<PairedHost>) = withContext(ioDispatcher) {
         val array = JSONArray()
-        hosts.forEach { array.put(JSONObject().put("host", it.host.json()).put("url", it.url).put("credential", it.credential).put("clientId", it.clientId)) }
+        hosts.forEach {
+            val record = JSONObject()
+                .put("host", it.host.json())
+                .put("url", it.url)
+                .put("credential", it.credential)
+                .put("clientId", it.clientId)
+            it.localName?.let { name -> record.put("localName", name) }
+            array.put(record)
+        }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         val bytes = cipher.iv + cipher.doFinal(array.toString().toByteArray(Charsets.UTF_8))
         check(prefs.edit().putString("encrypted", Base64.encodeToString(bytes, Base64.NO_WRAP)).commit()) { "Cannot save paired hosts" }

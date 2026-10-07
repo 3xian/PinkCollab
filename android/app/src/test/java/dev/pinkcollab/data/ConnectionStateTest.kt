@@ -20,15 +20,6 @@ class ConnectionStateTest {
         assertTrue(HostState(paired, ConnectionState.Online(0)).connected)
     }
 
-    @Test fun retryBackoffSlowsPersistentFailuresAndCapsAtFifteenSeconds() {
-        assertEquals(1_000, retryDelayMillis(1, jitter = 1.0))
-        assertEquals(5_000, retryDelayMillis(2, jitter = 1.0))
-        assertEquals(10_000, retryDelayMillis(3, jitter = 1.0))
-        assertEquals(15_000, retryDelayMillis(4, jitter = 1.0))
-        assertEquals(12_000, retryDelayMillis(20, jitter = 0.8))
-        assertEquals(15_000, retryDelayMillis(20, jitter = 1.2))
-    }
-
     @Test fun connectionFailuresDistinguishNetworkAndHostErrors() {
         assertEquals(ConnectionState.Offline("Cannot resolve host address", ConnectionFailure.HostNotFound),
             connectionFailure(java.net.UnknownHostException()))

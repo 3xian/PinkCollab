@@ -1,5 +1,6 @@
 package dev.pinkcollab.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -12,6 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -22,7 +26,6 @@ import dev.pinkcollab.BuildConfig
 import dev.pinkcollab.ui.theme.Base0
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,8 +42,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     var selectedSession by rememberSaveable(saver = SelectedSessionSaver) { mutableStateOf<SessionKey?>(null) }
     var startupReady by remember { mutableStateOf(false) }
     val sessionDisplayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
-    val snackbar = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner, vm) {
@@ -73,7 +75,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     LaunchedEffect(vm) {
         vm.effects.collect { effect ->
             when (effect) {
-                is UiEffect.ShowSnackbar -> launch { snackbar.showSnackbar(effect.message) }
+                is UiEffect.ShowToast -> Toast.makeText(context, effect.message, Toast.LENGTH_SHORT).show()
                 is UiEffect.HostPaired -> if (pairHost.attemptId == effect.attemptId) {
                     pairHost = PairHostSheetState()
                     route = AppRoute.Resources
@@ -89,13 +91,39 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
         }
     }
 
+    var knownDirectories by remember { mutableStateOf(emptyMap<String, List<String>>()) }
+    fun noteDirectory(hostId: String, path: String) {
+        val windows = hostUsesWindowsPaths(app.hosts[hostId]?.host?.os.orEmpty())
+        knownDirectories = knownDirectories + (hostId to noteServerPath(knownDirectories[hostId].orEmpty(), path, windows))
+    }
+
     val secondary = route != AppRoute.Tasks
-    val secondaryTitle = when (route) {
+    val browserBackTarget = (route as? AppRoute.Browser)?.let { current ->
+        val host = app.hosts[current.hostId]
+        val ready = directory?.takeIf { it.key == BrowserKey(current.hostId, current.path) }?.state as? LoadState.Ready
+        browserParentTarget(
+            path = current.path,
+            listingReady = ready != null,
+            listingParent = ready?.value?.parent,
+            roots = host?.workspaces?.map { it.path }.orEmpty(),
+            windows = hostUsesWindowsPaths(host?.host?.os.orEmpty()),
+        )
+    }
+    val goBack = {
+        val current = route
+        val parent = browserBackTarget
+        if (current is AppRoute.Browser && parent != null) {
+            val listingReady = directory?.takeIf { it.key == BrowserKey(current.hostId, current.path) }?.state is LoadState.Ready
+            if (listingReady) noteDirectory(current.hostId, parent)
+            route = current.copy(path = parent)
+        } else route = current.back()
+    }
+    val secondaryTitle = when (val current = route) {
         AppRoute.Tasks -> null
         AppRoute.Resources -> "Workspaces"
-        is AppRoute.Browser -> "Browse workspace"
+        is AppRoute.Browser -> browserTitle(app.hosts[current.hostId]?.displayName.orEmpty())
     }
-    BackHandler(secondary) { route = route.back() }
+    BackHandler(secondary) { goBack() }
 
     PinkCollabTheme {
         Crossfade(
@@ -113,12 +141,12 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                 topBar = {
                     secondaryTitle?.let { title ->
                         TopAppBar(
-                            title = { Text(title) },
+                            title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             navigationIcon = {
-                                IconButton(onClick = rememberHapticOnClick { route = route.back() }) {
+                                IconButton(onClick = rememberHapticOnClick(goBack)) {
                                     Icon(
                                         Icons.AutoMirrored.Outlined.ArrowBack,
-                                        contentDescription = "Back",
+                                        contentDescription = if (browserBackTarget != null) "Parent directory" else "Back",
                                     )
                                 }
                             },
@@ -131,7 +159,6 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                         )
                     }
                 },
-                snackbarHost = { SnackbarHost(snackbar, Modifier.navigationBarsPadding()) },
             ) { padding ->
                 Column(
                     Modifier
@@ -139,7 +166,8 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                         .padding(padding)
                         .consumeWindowInsets(padding)
                         .then(if (secondary) Modifier else Modifier.statusBarsPadding())
-                        .navigationBarsPadding(),
+                        .navigationBarsPadding()
+                        .then(if (route is AppRoute.Browser) Modifier.imeAboveNavigationBars() else Modifier),
                 ) {
                     when (val current = route) {
                         AppRoute.Tasks -> TasksRoute(
@@ -152,7 +180,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                 connectHost = { pairHost = PairHostSheetState(visible = true) },
                                 checkForUpdates = { vm.checkForUpdates(manual = true) },
                                 showVersion = {
-                                    scope.launch { snackbar.showSnackbar("Current version: v${BuildConfig.VERSION_NAME}") }
+                                    Toast.makeText(context, "Current version: v${BuildConfig.VERSION_NAME}", Toast.LENGTH_SHORT).show()
                                 },
                                 session = vm::onSessionAction,
                                 loadToolDetails = vm::loadToolDetails,
@@ -166,21 +194,35 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                         AppRoute.Resources -> ResourcesScreen(
                             app = app,
                             hostBusy = { OperationKey.Host(it) in operations },
-                            browse = { hostId, path -> route = AppRoute.Browser(hostId, path) },
+                            browse = { hostId, path ->
+                                noteDirectory(hostId, path)
+                                route = AppRoute.Browser(hostId, path)
+                            },
                             pair = { pairHost = PairHostSheetState(visible = true) },
                             refresh = vm::refreshHost,
+                            rename = vm::renameHost,
                             forget = vm::forgetHost,
                         )
 
-                        is AppRoute.Browser -> BrowserRoute(
-                            route = current,
-                            hostName = app.hosts[current.hostId]?.host?.name.orEmpty(),
-                            creating = OperationKey.CreateTask(current.hostId, current.path) in operations,
-                            state = directory?.takeIf { it.key == BrowserKey(current.hostId, current.path) }?.state,
-                            load = { forceRefresh -> vm.loadDirectory(BrowserKey(current.hostId, current.path), forceRefresh) },
-                            browse = { path -> route = current.copy(path = path) },
-                            select = { path -> vm.createSession(current.hostId, path) },
-                        )
+                        is AppRoute.Browser -> {
+                            val host = app.hosts[current.hostId]
+                            BrowserRoute(
+                                route = current,
+                                hostOs = host?.host?.os.orEmpty(),
+                                roots = host?.workspaces?.map { it.path }.orEmpty(),
+                                parentPath = browserBackTarget,
+                                knownPaths = knownDirectories[current.hostId].orEmpty(),
+                                creating = OperationKey.CreateTask(current.hostId, current.path) in operations,
+                                state = directory?.takeIf { it.key == BrowserKey(current.hostId, current.path) }?.state,
+                                load = { forceRefresh -> vm.loadDirectory(BrowserKey(current.hostId, current.path), forceRefresh) },
+                                browse = { path ->
+                                    noteDirectory(current.hostId, path)
+                                    route = current.copy(path = path)
+                                },
+                                select = { path -> vm.createSession(current.hostId, path) },
+                                note = { noteDirectory(current.hostId, it) },
+                            )
+                        }
 
                     }
                 }
@@ -238,20 +280,44 @@ private fun TasksRoute(
 @Composable
 private fun BrowserRoute(
     route: AppRoute.Browser,
-    hostName: String,
+    hostOs: String,
+    roots: List<String>,
+    parentPath: String?,
+    knownPaths: List<String>,
     creating: Boolean,
     state: LoadState<dev.pinkcollab.data.Listing>?,
     load: (forceRefresh: Boolean) -> Unit,
     browse: (String) -> Unit,
     select: (String) -> Unit,
+    note: (String) -> Unit,
 ) {
     LaunchedEffect(route.hostId, route.path) { load(false) }
+    val ready = state as? LoadState.Ready
+    LaunchedEffect(route.hostId, ready?.value) {
+        val listing = ready?.value ?: return@LaunchedEffect
+        note(listing.path)
+        listing.parent?.let(note)
+        listing.directories.forEach { note(it.path) }
+    }
     DirectoryBrowserScreen(
         state = state,
-        hostName = hostName,
+        hostOs = hostOs,
+        routePath = route.path,
+        roots = roots,
+        parentPath = parentPath,
+        knownPaths = knownPaths,
         creating = creating,
         browse = browse,
         select = select,
-        retry = { load(true) },
+        refresh = { load(true) },
     )
+}
+
+@Composable
+private fun Modifier.imeAboveNavigationBars(): Modifier {
+    val density = LocalDensity.current
+    val extra = with(density) {
+        (WindowInsets.ime.getBottom(this) - WindowInsets.navigationBars.getBottom(this)).coerceAtLeast(0).toDp()
+    }
+    return padding(bottom = extra)
 }

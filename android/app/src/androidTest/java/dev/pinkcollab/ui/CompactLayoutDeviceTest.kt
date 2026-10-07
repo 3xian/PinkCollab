@@ -74,7 +74,7 @@ class CompactLayoutDeviceTest {
                 Box(Modifier.width(280.dp)) {
                     ResourcesScreen(navigationState(AppState(hosts = mapOf("host" to host))),
                         hostBusy = { false }, browse = { id, directory -> opened = id to directory },
-                        pair = {}, refresh = {}, forget = {})
+                        pair = {}, refresh = {}, rename = { _, _ -> }, forget = {})
                 }
             }
         }

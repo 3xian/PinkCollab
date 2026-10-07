@@ -17,9 +17,9 @@ class WorkspaceConnectionStatusTest {
             workspaceConnectionMessage(navigation(ConnectionState.Synchronizing)))
     }
 
-    @Test fun offline_retry_reports_failure_then_clears_on_recovery() {
-        val retrying = navigation(ConnectionState.Offline("Connection timed out"), ConnectionProgress(3, "Connection timed out"))
-        assertEquals("Connection timed out. Checking periodically. Refresh to retry now", workspaceConnectionMessage(retrying))
+    @Test fun offline_reports_the_failure_without_claiming_periodic_checks() {
+        val waiting = navigation(ConnectionState.Offline("Connection timed out"), ConnectionProgress(2, "Connection timed out"))
+        assertEquals("Connection timed out", workspaceConnectionMessage(waiting))
         assertEquals("Network unavailable", workspaceConnectionMessage(navigation(ConnectionState.Offline("Network unavailable"))))
         assertEquals("No allowed directories", workspaceConnectionMessage(navigation(ConnectionState.Online(1))))
     }
@@ -35,13 +35,5 @@ class WorkspaceConnectionStatusTest {
         val stopped = after.copy(hosts = after.hosts.mapValues { (_, host) -> host.copy(connectionProgress = null) })
         assertFalse(sessionListState(after).samePresentation(sessionListState(stopped)))
     }
-
-    @Test fun offline_host_reports_periodic_checks_without_an_attempt_counter() {
-        val offline = navigation(ConnectionState.Offline("Host rejected the connection (HTTP 502)"),
-            ConnectionProgress(17, "Host rejected the connection (HTTP 502)"))
-        assertEquals("Host rejected the connection (HTTP 502). Checking periodically. Refresh to retry now",
-            workspaceConnectionMessage(offline))
-        assertEquals("Network unavailable",
-            workspaceConnectionMessage(navigation(ConnectionState.Offline("Network unavailable"))))
-    }
 }
+

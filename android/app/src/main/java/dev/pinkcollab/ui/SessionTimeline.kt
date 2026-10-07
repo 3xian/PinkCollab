@@ -6,7 +6,6 @@ import android.os.SystemClock
 import android.text.method.LinkMovementMethod
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
-import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
@@ -158,11 +157,11 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
         SpeakerLine(time) {
             if (isUser) YouLabel() else AgentHeader()
         }
-        TimelineMessageBody(item.text) {
+        TimelineMessageBody(item.text, captureTouch = isUser) { onCopy ->
             if (isUser) {
                 Text(item.text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
             } else {
-                MarkdownBody(item.id, item.text, color = contentColor, renderer)
+                MarkdownBody(item.id, item.text, color = contentColor, renderer, onCopy)
             }
         }
     }
@@ -181,7 +180,7 @@ private fun FeedbackCard(item: SessionDisplayItem.Feedback) {
         if (item.question.isNotBlank()) {
             Text(item.question, style = MaterialTheme.typography.bodyMedium, color = TextMid)
         }
-        TimelineMessageBody(item.answer, copyable = item.answer.isNotEmpty()) {
+        TimelineMessageBody(item.answer, copyable = item.answer.isNotEmpty()) { _ ->
             Text(
                 item.answer.ifEmpty { "(Empty response)" },
                 style = MaterialTheme.typography.bodyMedium,
@@ -309,23 +308,31 @@ internal fun createSessionMarkwon(context: Context): Markwon =
         .build()
 
 @Composable
-private fun MarkdownBody(messageId: String, markdown: String, color: Color, renderer: SessionMarkdownRenderer) {
+private fun MarkdownBody(
+    messageId: String,
+    markdown: String,
+    color: Color,
+    renderer: SessionMarkdownRenderer,
+    onCopy: (() -> Unit)?,
+) {
     var rendered by remember(renderer, messageId) { mutableStateOf<Spanned?>(null) }
     LaunchedEffect(renderer, messageId, markdown) { rendered = renderer.render(markdown) }
     val textColor = color.toArgb()
     val textSizeSp = MaterialTheme.typography.bodyMedium.fontSize.value
     AndroidView(
-        factory = {
-            TextView(it).apply {
+        factory = { context ->
+            MessageBodyTextView(context).apply {
                 includeFontPadding = false
-                typeface = ResourcesCompat.getFont(it, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
-                setTextIsSelectable(true)
+                typeface = ResourcesCompat.getFont(context, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
+                isLongClickable = onCopy != null
                 movementMethod = LinkMovementMethod.getInstance()
                 setLineSpacing(0f, 1.18f)
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
             }
         },
         update = { view ->
+            view.onCopy = onCopy
+            view.isLongClickable = onCopy != null
             if (view.currentTextColor != textColor) view.setTextColor(textColor)
             val textSizePx = android.util.TypedValue.applyDimension(
                 android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp, view.resources.displayMetrics,
@@ -408,7 +415,7 @@ private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActiv
                     Text(group.summary, style = MaterialTheme.typography.bodySmall, color = Red400, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
-            // Mirrors the copy action's 32dp bounds and 8dp overhang so both align on one column.
+            // 32dp target with an 8dp overhang past the content inset.
             Box(Modifier.size(32.dp).offset(x = 8.dp), contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Outlined.ExpandMore,
@@ -661,9 +668,9 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
         } else {
             SpeakerLine(time) { YouLabel() }
         }
-        TimelineMessageBody(item.text, copyable = isUser || item.kind == "assistant") {
+        TimelineMessageBody(item.text, copyable = isUser || item.kind == "assistant", captureTouch = item.kind != "assistant") { onCopy ->
             if (item.kind == "assistant") {
-                MarkdownBody(item.id, item.text, color = contentColor, renderer)
+                MarkdownBody(item.id, item.text, color = contentColor, renderer, onCopy)
             } else {
                 Text(
                     item.text,

@@ -2,85 +2,74 @@ package dev.pinkcollab.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import android.content.Context
+import android.view.accessibility.AccessibilityEvent
+import android.widget.TextView
+import android.widget.Toast
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import dev.pinkcollab.ui.theme.BrandPurple
-import dev.pinkcollab.ui.theme.rememberHapticOnClick
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 
-/** Keeps the body full-width and reserves a short footer for the copy action. */
+/** Full-width message body. A long press copies [text]; empty or non-copyable bodies do not. */
 @Composable
-internal fun TimelineMessageBody(text: String, copyable: Boolean = true, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxWidth()) {
-        Box(Modifier.fillMaxWidth().padding(bottom = if (copyable) 20.dp else 0.dp)) { content() }
-        if (copyable) {
-            Box(Modifier.matchParentSize()) {
-                CopyMessageButton(text, Modifier.align(Alignment.BottomEnd).offset(x = 8.dp, y = 12.dp))
+internal fun TimelineMessageBody(
+    text: String,
+    copyable: Boolean = true,
+    captureTouch: Boolean = true,
+    content: @Composable (onCopy: (() -> Unit)?) -> Unit,
+) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val latestText = rememberUpdatedState(text)
+    val enabled = copyable && text.isNotEmpty()
+    val copy = remember(context, haptics) {
+        {
+            val value = latestText.value
+            if (value.isNotEmpty()) {
+                context.getSystemService(ClipboardManager::class.java)
+                    .setPrimaryClip(ClipData.newPlainText("Message", value))
+                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             }
         }
     }
+    val action = if (enabled) copy else null
+    Box(
+        if (enabled && captureTouch) Modifier.fillMaxWidth().longPressToCopy(copy) else Modifier.fillMaxWidth(),
+    ) { content(action) }
 }
 
 @Composable
-private fun CopyMessageButton(text: String, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    // Streaming updates change the copied value, not the lifetime of click feedback.
-    var copyCount by remember { mutableIntStateOf(0) }
-    val feedback = remember { Animatable(1f) }
-    LaunchedEffect(copyCount) {
-        if (copyCount > 0) {
-            feedback.snapTo(0f)
-            feedback.animateTo(1f, tween(1_000))
+private fun Modifier.longPressToCopy(onLongPress: () -> Unit): Modifier {
+    val current = rememberUpdatedState(onLongPress)
+    return semantics {
+        onLongClick(label = "Copy message") {
+            current.value()
+            true
         }
+    }.pointerInput(Unit) {
+        detectTapGestures(onLongPress = { current.value() })
     }
-    Box(modifier.size(32.dp)) {
-        IconButton(
-            onClick = rememberHapticOnClick {
-                context.getSystemService(ClipboardManager::class.java)
-                    .setPrimaryClip(ClipData.newPlainText("Message", text))
-                copyCount++
-            },
-            modifier = Modifier.fillMaxSize(),
-            enabled = text.isNotEmpty(),
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.ContentCopy,
-                contentDescription = "Copy message",
-                modifier = Modifier.size(14.dp),
-                tint = BrandPurple,
-            )
-        }
-        if (feedback.value < 1f) {
-            Text(
-                "Copied",
-                modifier = Modifier.align(Alignment.TopCenter)
-                    .wrapContentSize(unbounded = true)
-                    .offset(y = (-16).dp)
-                    .graphicsLayer {
-                        val progress = feedback.value
-                        translationY = -12.dp.toPx() * progress
-                        alpha = minOf(progress / 0.12f, (1f - progress) / 0.4f, 1f)
-                    },
-                color = MaterialTheme.colorScheme.tertiary,
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Default,
-                fontSize = 10.sp,
-                maxLines = 1,
-            )
-        }
+}
+
+/** Assistant Markdown consumes touches, so long-press copy has to live on the text view. */
+internal class MessageBodyTextView(context: Context) : TextView(context) {
+    var onCopy: (() -> Unit)? = null
+
+    override fun performLongClick(): Boolean {
+        val copy = onCopy ?: return super.performLongClick()
+        copy()
+        sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_LONG_CLICKED)
+        return true
     }
 }

@@ -33,6 +33,11 @@ class HostOperationsTest {
         override fun reconnect(hostId: String) { calls += "reconnect:$hostId" }
         override fun reconnectHosts() { calls += "reconnect-hosts" }
         override suspend fun forget(hostId: String) { calls += "forget:$hostId" }
+        var renameGate: CompletableDeferred<Unit>? = null
+        override suspend fun rename(hostId: String, name: String) {
+            calls += "rename:$hostId:$name"
+            renameGate?.await()
+        }
         override suspend fun listing(hostId: String, path: String, forceRefresh: Boolean): Listing {
             calls += "listing:$hostId:$path:$forceRefresh"
             listingDelegate?.let { return it(hostId, path, forceRefresh) }
@@ -98,19 +103,43 @@ class HostOperationsTest {
         assertEquals(listOf("cancel", "cleanup"), events)
     }
 
+    @Test fun rename_does_not_block_host_refresh() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val actions = FakeActions().apply { renameGate = gate }
+        val operations = HostOperations(backgroundScope, actions, {}, {}, {}, {})
+        operations.rename("host", "Office")
+        runCurrent()
+        assertTrue(operations.operations.value.isEmpty())
+        operations.refresh("host", isOnline = true)
+        runCurrent()
+        assertTrue("refresh:host" in actions.calls)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals("rename:host:Office", actions.calls.first())
+    }
+
     @Test fun directory_loading_and_failure_are_feature_state() = runTest {
         val actions = FakeActions()
-        val operations = HostOperations(backgroundScope, actions, {}, {}, {}, {})
+        val effects = mutableListOf<UiEffect>()
+        val operations = HostOperations(backgroundScope, actions, effects::add, {}, {}, {})
         val key = BrowserKey("host", "/work")
+        val listing = Listing("/work", null, listOf(Workspace("child", "/work/child")))
         operations.loadDirectory(key)
         assertEquals(DirectoryLoad(key, LoadState.Loading), operations.directory.value)
         runCurrent()
-        assertEquals("/work", (operations.directory.value?.state as LoadState.Ready).value.path)
+        assertEquals(DirectoryLoad(key, LoadState.Ready(listing)), operations.directory.value)
         assertTrue("prefetch:host:/work/child" in actions.calls)
         actions.directoryFailure = IllegalStateException("offline")
         operations.loadDirectory(key, forceRefresh = true)
+        assertEquals(DirectoryLoad(key, LoadState.Ready(listing, refreshing = true)), operations.directory.value)
         runCurrent()
-        assertEquals(DirectoryLoad(key, LoadState.Failed("offline")), operations.directory.value)
+        assertEquals(DirectoryLoad(key, LoadState.Ready(listing)), operations.directory.value)
+        assertEquals(listOf(UiEffect.ShowToast("offline")), effects)
+        assertEquals(1, actions.calls.count { it.startsWith("prefetch:") })
+        operations.loadDirectory(BrowserKey("host", "/missing"))
+        runCurrent()
+        assertEquals(DirectoryLoad(BrowserKey("host", "/missing"), LoadState.Failed("offline")), operations.directory.value)
+        assertEquals(listOf(UiEffect.ShowToast("offline")), effects)
     }
 
     @Test fun stale_directory_result_cannot_replace_refresh_or_return_after_forget() = runTest {

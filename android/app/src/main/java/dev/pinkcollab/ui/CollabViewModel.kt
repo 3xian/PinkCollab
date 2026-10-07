@@ -61,7 +61,8 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal val availableUpdate = mutableAvailableUpdate.asStateFlow()
     private val effectChannel = Channel<UiEffect>(Channel.BUFFERED)
     internal val effects = effectChannel.receiveAsFlow()
-    private fun showError(message: String) { effectChannel.trySend(UiEffect.ShowSnackbar(message)) }
+    private fun showToast(message: String) { effectChannel.trySend(UiEffect.ShowToast(message)) }
+    private fun showError(message: String) = showToast(message)
     private val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -143,6 +144,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         hostId, repository.state.value.hosts[hostId]?.connection is ConnectionState.Online,
     )
     internal fun forgetHost(hostId: String) = hostOperations.forget(hostId)
+    internal fun renameHost(hostId: String, name: String) = hostOperations.rename(hostId, name)
     internal fun reconnectHosts() = hostOperations.reconnectHosts()
     internal fun loadDirectory(key: BrowserKey, forceRefresh: Boolean = false) = hostOperations.loadDirectory(key, forceRefresh)
     internal fun createSession(hostId: String, path: String) = hostOperations.create(hostId, path)
@@ -158,7 +160,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
                         mutableAvailableUpdate.value = latest
                     }
                 } else if (manual) {
-                    showError("PinkCollab is up to date")
+                    showToast("PinkCollab is up to date")
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled

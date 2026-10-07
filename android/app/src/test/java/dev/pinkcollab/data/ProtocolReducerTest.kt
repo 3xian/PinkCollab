@@ -81,6 +81,16 @@ class ProtocolReducerTest {
         assertEquals(listOf(GatewayEffect.LoadHistory(key)), result.effects)
     }
 
+    @Test fun snapshot_keeps_a_phone_local_host_name() {
+        val named = paired.copy(localName = "Office")
+        val state = AppState(hosts = mapOf("host" to HostState(named)))
+        val next = reduce(state, host().put("host", paired.host.copy(name = "Gateway").json())).state
+            .hosts.getValue("host").paired
+        assertEquals("Gateway", next.host.name)
+        assertEquals("Office", next.localName)
+        assertEquals("Office", next.displayName)
+    }
+
     @Test fun discovery_adoption_replaces_card_without_losing_history() {
         val frame = session(history = true).also { it.getJSONObject("session").put("origin", "discovered") }
         var state = reduce(app(), frame).state

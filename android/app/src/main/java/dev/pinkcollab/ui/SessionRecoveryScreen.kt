@@ -114,7 +114,7 @@ internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenA
                     Column(Modifier.fillMaxWidth().glassPanel(CardShape).padding(16.dp)) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                host.paired.host.name,
+                                host.paired.displayName,
                                 Modifier,
                                 style = MaterialTheme.typography.titleSmall,
                             )

@@ -35,6 +35,7 @@ class ResourcesScreenDeviceTest {
                 browse = { _, _ -> },
                 pair = {},
                 refresh = {},
+                rename = { _, _ -> },
                 forget = {},
             )
         }

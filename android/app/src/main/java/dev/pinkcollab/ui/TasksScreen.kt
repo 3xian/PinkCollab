@@ -503,7 +503,7 @@ private fun TasksPagerBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(3.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             fileName,
                             Modifier.weight(1f),
@@ -515,9 +515,10 @@ private fun TasksPagerBar(
                         Spacer(Modifier.width(8.dp))
                         Text(
                             cardStatus.label,
-                            modifier = Modifier.weight(1f, fill = false),
+                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.labelSmall,
                             color = cardColor,
+                            textAlign = TextAlign.End,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

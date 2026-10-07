@@ -38,7 +38,7 @@ internal fun startupSteps(app: NavigationState): List<StartupStep> {
     if (app.loadingCredentials) return listOf(StartupStep("credentials", "Loading paired hosts"))
     if (app.hosts.isEmpty()) return listOf(StartupStep("hosts", "Ready to connect your first host"))
     return app.hosts.map { (id, host) ->
-        val name = host.host.name
+        val name = host.displayName
         val text = when (host.connection) {
             ConnectionState.Connecting -> "Connecting to $name"
             ConnectionState.Synchronizing -> "Syncing sessions · $name"

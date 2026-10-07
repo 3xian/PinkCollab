@@ -38,4 +38,15 @@ internal class PairedHostRegistry(
             disconnect(id)
         }
     }
+
+    suspend fun rename(id: String, name: String) = mutex.withLock {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        withContext(NonCancellable) {
+            val current = state.value.hosts[id] ?: return@withContext
+            val updated = current.copy(paired = current.paired.copy(localName = trimmed.takeUnless { it == current.paired.host.name }))
+            store.save(state.value.hosts.values.map { if (it.paired.host.id == id) updated.paired else it.paired })
+            state.update { it.copy(hosts = it.hosts + (id to updated)) }
+        }
+    }
 }

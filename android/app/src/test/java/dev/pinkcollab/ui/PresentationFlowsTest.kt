@@ -70,6 +70,13 @@ class PresentationFlowsTest {
         assertNotEquals(navigationState(initial), navigationState(offline))
     }
 
+    @Test fun navigation_keeps_the_gateway_name_beside_the_phone_name() {
+        val paired = PairedHost(Host("host", "Gateway", "", "", ""), "https://host", "secret", "client", localName = "Office")
+        val navigation = navigationState(AppState(hosts = mapOf("host" to HostState(paired)))).hosts.getValue("host")
+        assertEquals("Gateway", navigation.host.name)
+        assertEquals("Office", navigation.displayName)
+    }
+
     @Test fun returning_to_tasks_observes_sessions_created_while_there_were_no_collectors() = runTest {
         val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""))
         val source = MutableStateFlow(AppState(hosts = mapOf("host" to host)))

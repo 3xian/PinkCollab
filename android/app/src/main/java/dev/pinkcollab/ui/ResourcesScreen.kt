@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 
@@ -38,9 +39,11 @@ internal fun ResourcesScreen(
     browse: (String, String) -> Unit,
     pair: () -> Unit,
     refresh: (String) -> Unit,
+    rename: (String, String) -> Unit,
     forget: (String) -> Unit,
 ) {
-    var hostPendingRemoval by remember { mutableStateOf<Host?>(null) }
+    var hostPendingRemoval by remember { mutableStateOf<NavigationHost?>(null) }
+    var renaming by remember { mutableStateOf<NavigationHost?>(null) }
 
     if (app.hosts.isEmpty()) {
         Column(
@@ -93,47 +96,74 @@ internal fun ResourcesScreen(
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Dns, null, Modifier.size(22.dp), tint = workspaceIconColor(host.host.os))
+                        Icon(Icons.Outlined.Dns, null, Modifier.size(18.dp), tint = workspaceIconColor(host.host.os))
                         Spacer(Modifier.width(8.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(host.host.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        }
+                        Text(
+                            host.displayName,
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 18.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                         IconButton(
                             onClick = rememberHapticOnClick { refresh(hostId) },
                             enabled = !busy,
-                            colors = IconButtonDefaults.iconButtonColors(contentColor = Purple200),
+                            modifier = Modifier.size(36.dp),
                         ) {
-                            Icon(Icons.Outlined.Refresh, "Refresh host")
+                            Icon(Icons.Outlined.Refresh, "Refresh host", Modifier.size(18.dp))
                         }
-                        IconButton(
-                            onClick = rememberHapticOnClick { hostPendingRemoval = host.host },
-                            enabled = !busy,
-                            colors = IconButtonDefaults.iconButtonColors(contentColor = Gray400),
-                        ) {
-                            Icon(Icons.Outlined.DeleteOutline, "Remove host")
+                        var menuOpen by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(
+                                onClick = rememberHapticOnClick { menuOpen = true },
+                                enabled = !busy,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Icon(Icons.Outlined.Edit, "Edit host", Modifier.size(18.dp))
+                            }
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Rename") },
+                                    onClick = rememberHapticOnClick {
+                                        menuOpen = false
+                                        renaming = host
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Remove") },
+                                    onClick = rememberHapticOnClick {
+                                        menuOpen = false
+                                        hostPendingRemoval = host
+                                    },
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(2.dp))
                     HostUrlRow(host.url)
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "OMP ${host.host.ompVersion} · Gateway ${host.host.gatewayVersion}",
-                            Modifier.fillMaxWidth(),
+                            "${host.host.ompVersion} · Gateway ${host.host.gatewayVersion}",
+                            Modifier.weight(1f),
                             style = MaterialTheme.typography.bodySmall,
                             color = Gray400,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(6.dp).background(connectionColor, CircleShape))
-                            Spacer(Modifier.width(5.dp))
-                            if (connectionPending) {
-                                ConnectingLabel(connectionLabel, connectionColor)
-                            } else {
-                                Text(
-                                    connectionLabel,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = connectionColor,
-                                )
-                            }
+                        Spacer(Modifier.width(8.dp))
+                        Box(Modifier.size(6.dp).background(connectionColor, CircleShape))
+                        Spacer(Modifier.width(5.dp))
+                        if (connectionPending) {
+                            ConnectingLabel(connectionLabel, connectionColor)
+                        } else {
+                            Text(
+                                connectionLabel,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = connectionColor,
+                                maxLines = 1,
+                            )
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -179,12 +209,12 @@ internal fun ResourcesScreen(
             onDismissRequest = { hostPendingRemoval = null },
             icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = Red400) },
             title = { Text("Remove host?") },
-            text = { Text("This removes “${host.name}” and its saved connection from this phone. The host itself will not be changed.") },
+            text = { Text("This removes “${host.displayName}” and its saved connection from this phone. The host itself will not be changed.") },
             confirmButton = {
                 TextButton(
                     onClick = rememberHapticOnClick {
                         hostPendingRemoval = null
-                        forget(host.id)
+                        forget(host.host.id)
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = Red400),
                 ) {
@@ -192,6 +222,40 @@ internal fun ResourcesScreen(
                 }
             },
             dismissButton = { TextButton(onClick = rememberHapticOnClick { hostPendingRemoval = null }) { Text("Cancel") } },
+        )
+    }
+    renaming?.let { host ->
+        var draft by remember(host.host.id) { mutableStateOf(host.displayName) }
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("Rename host") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it.replace("\n", "") },
+                        singleLine = true,
+                        label = { Text("Name") },
+                    )
+                    if (host.host.name != host.displayName) {
+                        TextButton(onClick = rememberHapticOnClick { draft = host.host.name }) {
+                            Text("Use Gateway name “${host.host.name}”", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = rememberHapticOnClick {
+                        rename(host.host.id, draft.trim())
+                        renaming = null
+                    },
+                    enabled = draft.trim().isNotEmpty(),
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = rememberHapticOnClick { renaming = null }) { Text("Cancel") }
+            },
         )
     }
 }

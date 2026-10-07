@@ -13,7 +13,7 @@ internal data class BrowserKey(val hostId: String, val path: String)
 internal data class DirectoryLoad(val key: BrowserKey, val state: LoadState<Listing>)
 
 internal sealed interface UiEffect {
-    data class ShowSnackbar(val message: String) : UiEffect
+    data class ShowToast(val message: String) : UiEffect
     data class HostPaired(val attemptId: Long) : UiEffect
     data class PairingFailed(val attemptId: Long, val message: String) : UiEffect
     data class SessionCreated(val key: SessionKey) : UiEffect
@@ -25,6 +25,7 @@ internal interface HostActions {
     fun reconnect(hostId: String)
     fun reconnectHosts()
     suspend fun forget(hostId: String)
+    suspend fun rename(hostId: String, name: String)
     suspend fun listing(hostId: String, path: String, forceRefresh: Boolean): Listing
     fun prefetchListings(hostId: String, paths: List<String>)
     suspend fun create(hostId: String, path: String): Session
@@ -36,6 +37,7 @@ internal class RepositoryHostActions(private val repository: GatewayRepository) 
     override fun reconnect(hostId: String) = repository.requestReconnect(hostId)
     override fun reconnectHosts() = repository.reconnectHosts()
     override suspend fun forget(hostId: String) = repository.forget(hostId)
+    override suspend fun rename(hostId: String, name: String) = repository.renameHost(hostId, name)
     override suspend fun listing(hostId: String, path: String, forceRefresh: Boolean) =
         repository.listing(hostId, path, forceRefresh)
     override fun prefetchListings(hostId: String, paths: List<String>) = repository.prefetchListings(hostId, paths)
@@ -84,19 +86,26 @@ internal class HostOperations(
         }
     }
 
+    fun rename(hostId: String, name: String) = launch("Unable to rename host") { actions.rename(hostId, name) }
+
     fun loadDirectory(key: BrowserKey, forceRefresh: Boolean = false) {
         val request = synchronized(lock) {
-            if (!forceRefresh && mutableDirectory.value == DirectoryLoad(key, LoadState.Loading)) return
+            val current = mutableDirectory.value
+            val sameKey = current?.key == key
+            val ready = (current?.state as? LoadState.Ready)?.takeIf { sameKey }
+            if (!forceRefresh && sameKey && (current?.state == LoadState.Loading || ready != null)) return
+            if (forceRefresh && ready?.refreshing == true) return
             (++nextDirectoryRequest).also {
                 directoryRequest = it
-                mutableDirectory.value = DirectoryLoad(key, LoadState.Loading)
-            }
+                mutableDirectory.value = DirectoryLoad(key, ready?.copy(refreshing = true) ?: LoadState.Loading)
+            } to ready
         }
+        val (id, previous) = request
         scope.launch {
             try {
                 val listing = actions.listing(key.hostId, key.path, forceRefresh)
                 val current = synchronized(lock) {
-                    if (directoryRequest != request) false else {
+                    if (directoryRequest != id) false else {
                         directoryRequest = null
                         mutableDirectory.value = DirectoryLoad(key, LoadState.Ready(listing))
                         true
@@ -106,13 +115,19 @@ internal class HostOperations(
             } catch (failure: CancellationException) {
                 throw failure
             } catch (failure: Exception) {
-                synchronized(lock) {
-                    if (directoryRequest == request) {
+                val message = failure.message ?: "Unable to read this directory"
+                val reported = synchronized(lock) {
+                    if (directoryRequest != id) false else {
                         directoryRequest = null
-                        mutableDirectory.value = DirectoryLoad(key,
-                            LoadState.Failed(failure.message ?: "Unable to read this directory"))
+                        mutableDirectory.value = if (previous != null) {
+                            DirectoryLoad(key, previous.copy(refreshing = false))
+                        } else {
+                            DirectoryLoad(key, LoadState.Failed(message))
+                        }
+                        previous != null
                     }
                 }
+                if (reported) emit(UiEffect.ShowToast(message))
             }
         }
     }
@@ -124,10 +139,25 @@ internal class HostOperations(
         run(OperationKey.Host(hostId)) { actions.refreshHost(hostId) }
     }
 
+    private fun launch(
+        fallbackError: String,
+        action: suspend () -> Unit,
+    ) {
+        scope.launch {
+            try {
+                action()
+            } catch (failure: CancellationException) {
+                throw failure
+            } catch (failure: Exception) {
+                emit(UiEffect.ShowToast(failure.message ?: fallbackError))
+            }
+        }
+    }
+
     private fun run(
         key: OperationKey,
         fallbackError: String = "Action failed",
-        onError: (String) -> Unit = { emit(UiEffect.ShowSnackbar(it)) },
+        onError: (String) -> Unit = { emit(UiEffect.ShowToast(it)) },
         action: suspend () -> Unit,
     ) {
         synchronized(lock) {
