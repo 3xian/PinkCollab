@@ -11,7 +11,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HostRetryStateTest {
-    @Test fun retry_attempts_are_connecting_and_backoff_is_offline() = runBlocking {
+    @Test fun connection_cycle_tries_three_times_then_stays_offline() = runBlocking {
         val transport = object : GatewayTransport by GatewayApi() {
             override val client = OkHttpClient.Builder().addInterceptor { chain ->
                 Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
@@ -26,18 +26,20 @@ class HostRetryStateTest {
         try {
             supervisor.connect(paired)
             withTimeout(5_000) {
-                val first = states.receive()
-                assertEquals(ConnectionState.Connecting, first.first)
-                assertEquals(1, first.second?.attempt)
-                val waiting = states.receive()
-                assertTrue(waiting.first is ConnectionState.Offline)
-                assertEquals(ConnectionFailure.HostRejected, (waiting.first as ConnectionState.Offline).failure)
-                assertEquals(2, waiting.second?.attempt)
-                val retry = states.receive()
-                assertEquals(ConnectionState.Connecting, retry.first)
-                assertEquals(2, retry.second?.attempt)
-                assertEquals("Host rejected the connection (HTTP 503)", retry.second?.failure)
-                assertTrue(states.receive().first is ConnectionState.Offline)
+                repeat(3) { index ->
+                    val attempt = index + 1
+                    val connecting = states.receive()
+                    assertEquals(ConnectionState.Connecting, connecting.first)
+                    assertEquals(attempt, connecting.second?.attempt)
+                    val expectedFailure = if (attempt == 1) null else "Host rejected the connection (HTTP 503)"
+                    assertEquals(expectedFailure, connecting.second?.failure)
+                    val offline = states.receive()
+                    val failure = offline.first as ConnectionState.Offline
+                    assertEquals(ConnectionFailure.HostRejected, failure.failure)
+                    assertEquals("Host rejected the connection (HTTP 503)", failure.reason)
+                    assertNull(offline.second)
+                }
+                assertTrue(states.tryReceive().isFailure)
             }
         } finally {
             supervisor.forget("host")
