@@ -32,8 +32,10 @@ internal class HostConnectionSupervisor(
     private val connections = mutableMapOf<String, HostConnection>()
     private val desiredSessions = mutableMapOf<String, MutableSet<String>>()
 
-    fun connect(paired: PairedHost) {
+    fun connect(paired: PairedHost, force: Boolean = true) {
         synchronized(lock) {
+            // Foreground resume must not cancel a live socket or reset an active retry cycle.
+            if (!force && connections[paired.host.id]?.isRunning == true) return
             invalidateSubscriptions(paired.host.id)
             val connection = HostConnection(paired)
             connections.put(paired.host.id, connection)?.stop()
@@ -103,6 +105,7 @@ internal class HostConnectionSupervisor(
         private val connectionGeneration = AtomicLong()
         private var job: Job? = null
         private var socket: WebSocket? = null
+        val isRunning: Boolean get() = job?.isActive == true
 
         fun subscribe(sessionId: String, fresh: Boolean = false) {
             val cached = cachedSession(paired.host.id, sessionId)

@@ -146,12 +146,11 @@ internal class GatewayRepository(
         state.value.hosts[id]?.paired?.let(::connect)
     }
 
-    fun reconnectHosts() {
-        // Background suspension and network changes can leave any socket stale,
-        // including one still marked online or waiting for its first snapshot.
+    fun reconnectHosts(force: Boolean = false) {
+        // Keep running connections on foreground resume; network changes can force replacement.
         state.value.hosts.values.forEach { host ->
             if (host.connection != ConnectionState.AuthenticationRequired &&
-                host.connection != ConnectionState.UpgradeRequired) connect(host.paired)
+                host.connection != ConnectionState.UpgradeRequired) connections.connect(host.paired, force)
         }
     }
 

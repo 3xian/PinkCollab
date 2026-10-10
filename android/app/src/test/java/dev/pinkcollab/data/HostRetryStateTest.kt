@@ -31,6 +31,7 @@ class HostRetryStateTest {
                     val connecting = states.receive()
                     assertEquals(ConnectionState.Connecting, connecting.first)
                     assertEquals(attempt, connecting.second?.attempt)
+                    supervisor.connect(paired, force = false)
                     val expectedFailure = if (attempt == 1) null else "Host rejected the connection (HTTP 503)"
                     assertEquals(expectedFailure, connecting.second?.failure)
                     val offline = states.receive()

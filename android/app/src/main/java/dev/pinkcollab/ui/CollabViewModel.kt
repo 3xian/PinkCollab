@@ -66,7 +66,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     private val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            repository.reconnectHosts()
+            repository.reconnectHosts(force = true)
         }
 
         override fun onLost(network: Network) {
