@@ -105,6 +105,40 @@ fn stale_omp_noninteractive_requires_authorization() {
 }
 
 #[test]
+fn failed_configured_omp_is_probed_once_when_path_matches() {
+    for bare_name in [false, true] {
+        for doctor in [false, true] {
+            let home = tempfile::tempdir().unwrap();
+            tools(home.path());
+            let entry = versioned_omp(home.path());
+            executable(
+                &home.path().join("bin/omp-0.1.0"),
+                r#"printf '%s\n' "$1" >> "$HOME/omp-probes"; exit 23"#,
+            );
+            let data = home.path().join("data");
+            saved_omp_config(
+                home.path(),
+                &data,
+                if bare_name { Path::new("omp") } else { &entry },
+            );
+            let before = config_snapshot(&data);
+            let output = if doctor {
+                cli(home.path(), &data).arg("doctor").output().unwrap()
+            } else {
+                migration_setup(home.path(), &data).output().unwrap()
+            };
+            assert!(!output.status.success());
+            assert_eq!(
+                std::fs::read_to_string(home.path().join("omp-probes")).unwrap(),
+                "--version\n",
+                "doctor={doctor}, bare_name={bare_name}"
+            );
+            assert_eq!(config_snapshot(&data), before);
+        }
+    }
+}
+
+#[test]
 fn stale_omp_invalid_candidates_leave_config_and_service_untouched() {
     for candidate in [
         None,
@@ -251,6 +285,11 @@ fn stale_omp_doctor_reports_candidate_without_migrating() {
     let output = cli(home.path(), &data).arg("doctor").output().unwrap();
     assert!(!output.status.success());
     assert_eq!(config_snapshot(&data), before);
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("Database leases"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(
         (
             std::fs::read(&database).unwrap(),

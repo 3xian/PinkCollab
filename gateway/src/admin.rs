@@ -263,6 +263,14 @@ fn doctor_lease_count(dir: &Path) -> Result<i64> {
     }
     let db =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let has_leases: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_leases')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_leases {
+        return Ok(0);
+    }
     Ok(db.query_row("SELECT COUNT(*) FROM runtime_leases", [], |row| row.get(0))?)
 }
 
@@ -306,10 +314,11 @@ pub async fn doctor(dir: &Path) -> Result<()> {
     println!("OMP");
     let executable = config.as_ref().map_or("omp", |c| c.omp.as_str());
     println!("  configured entry: {executable}");
-    let configured_valid = match config::resolve_executable(executable) {
+    let configured_path = config::resolve_executable(executable);
+    let configured_valid = match &configured_path {
         Some(path) => {
             println!("  executable: {}", path.display());
-            doctor_omp_version(&path).await
+            doctor_omp_version(path).await
         }
         None => {
             println!("  resolution: unavailable (missing or not executable)");
@@ -321,7 +330,14 @@ pub async fn doctor(dir: &Path) -> Result<()> {
         match config::resolve_executable("omp") {
             Some(path) => {
                 println!("  PATH candidate: {}", path.display());
-                if doctor_omp_version(&path).await {
+                if configured_path.as_ref() == Some(&path) {
+                    println!(
+                        "  PATH candidate validation: invalid (same entry already failed --version)"
+                    );
+                    println!(
+                        "  Fix this launcher or select a different entry with `pinkcollab setup --omp <path>`."
+                    );
+                } else if doctor_omp_version(&path).await {
                     println!("  PATH candidate validation: valid");
                 } else {
                     println!("  PATH candidate validation: invalid");

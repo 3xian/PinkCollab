@@ -148,6 +148,7 @@ async fn select_omp(
     if let Some(reference) = explicit {
         return validated_omp(control, reference).await.context(OMP_HELP);
     }
+    let configured_path = config::resolve_executable(configured);
     let failure = match validated_omp(control, configured).await {
         Ok(selected) => return Ok(selected),
         Err(error) => {
@@ -156,6 +157,11 @@ async fn select_omp(
         }
     };
     println!("Configured OMP: {} ({failure:#})", safe_text(configured));
+    let candidate_path = config::resolve_executable("omp");
+    ensure!(
+        configured_path.is_none() || candidate_path != configured_path,
+        "{failure:#}\nPATH points to the same failed OMP entry; no replacement is available. Fix this launcher or use pinkcollab setup --omp <different-path>."
+    );
     let candidate = validated_omp(control, "omp")
         .await
         .with_context(|| format!("{failure:#}\n{OMP_HELP}\n\nCheck PATH, then run pinkcollab setup --omp omp (with your workspace and transport options)."))?;
@@ -242,7 +248,6 @@ pub async fn run(
         select_omp(&control, &config.omp, explicit_omp, non_interactive).await?;
     println!("✓ OMP {}", safe_text(&version));
     control.checkpoint().await?;
-    let omp_changed = config.omp != workspace::display(&executable);
     let save_required = merge(&mut config, roots, &executable)? || !exists;
     match transport {
         Transport::External => {
@@ -271,20 +276,7 @@ pub async fn run(
     println!("Starting Gateway...");
     let start = installation.clone();
     control
-        .blocking(
-            move || {
-                let manager = crate::service::manager(&start);
-                if omp_changed
-                    && before == crate::service::ServiceStatus::Running
-                    && outcome == crate::service::InstallOutcome::Unchanged
-                {
-                    manager.restart()
-                } else {
-                    manager.start()
-                }
-            },
-            None,
-        )
+        .blocking(move || crate::service::manager(&start).start(), None)
         .await?;
     control.wait(crate::health::wait(config.listen)).await?;
     control.phase = Phase::Running;
