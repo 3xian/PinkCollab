@@ -1,6 +1,7 @@
 package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.ConnectionState
+import dev.pinkcollab.data.SessionOrigin
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
 import org.junit.Assert.assertEquals
@@ -11,11 +12,13 @@ class SessionCardStatusTest {
     private val session = Session("s", "h", "/work", "Work", SessionStatus.Idle, "", false, null,
         "", "", true)
 
-    @Test fun discovered_card_is_history() {
-        val historical = session.copy(runtimeAttached = false, generation = null, origin = dev.pinkcollab.data.SessionOrigin.Discovered)
-        assertEquals(SessionCardStatus.History, sessionCardStatus(historical, online))
-        assertEquals("History", sessionCardStatus(historical, online).label)
-        assertEquals(SessionCardStatus.Offline, sessionCardStatus(historical, null))
+    @Test fun discovered_card_preserves_connectivity_without_a_runtime() {
+        val discovered = session.copy(runtimeAttached = false, generation = null, origin = SessionOrigin.Discovered)
+        assertEquals(SessionCardStatus.OnHost, sessionCardStatus(discovered, online))
+        assertEquals(SessionCardStatus.Offline, sessionCardStatus(discovered, ConnectionState.Offline()))
+        assertEquals(SessionCardStatus.Syncing, sessionCardStatus(discovered, ConnectionState.Synchronizing))
+        assertEquals(SessionCardStatus.Connecting, sessionCardStatus(discovered, ConnectionState.Connecting))
+        assertEquals(SessionCardStatus.Offline, sessionCardStatus(discovered, null))
     }
 
     @Test fun `idle distinguishes ready absent runtime and startup`() {

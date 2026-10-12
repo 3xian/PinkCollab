@@ -147,8 +147,7 @@ internal fun SessionPage(
                 state.host?.connection, state.sendProgress) {
                 sessionWorkStatus(detail, state.host, state.sendProgress)
             }
-            if (awaitingHistory &&
-                (current.kind == WorkStatusKind.Ready || current.kind == WorkStatusKind.History)) {
+            if (awaitingHistory && (current.kind == WorkStatusKind.Ready || current.kind == WorkStatusKind.OnHost)) {
                 SessionWorkStatus(WorkStatusKind.Loading, "Loading conversation")
             } else current
         }

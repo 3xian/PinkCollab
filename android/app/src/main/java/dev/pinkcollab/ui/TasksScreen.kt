@@ -10,13 +10,18 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.RadioButtonChecked
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -29,6 +34,8 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -81,23 +88,27 @@ internal fun TasksScreen(
     val drafts = state.drafts
     val fileSelections = state.fileSelections
     val selectedSession = state.selectedSession
-    val onSessionSelected = actions.selectSession
+    val onSessionSelected by rememberUpdatedState(actions.selectSession)
     val openResources = actions.openResources
     val connectHost = actions.connectHost
     // Active sessions come first, by createdAt DESC to keep working sessions stable.
-    // Inactive sessions follow by updatedAt DESC.
-    val hostSessions = remember(hosts) { hosts.values.map { it.sessions } }
-    val sessions = remember(hostSessions) {
-        hostSessions.flatten().sortedWith(::compareSessionsForPresentation)
-    }
+    // Inactive sessions follow by updatedAt DESC. The host filter narrows that order; it does not reorder it.
+    var requestedHostId by rememberSaveable { mutableStateOf<String?>(null) }
+    val hostFilter = requestedHostId?.takeIf { it in hosts }
+    val visibleState = remember(state.sessions, hostFilter) { state.sessions.forHostFilter(hostFilter) }
+    val visibleHosts = visibleState.hosts
+    val sessions = remember(visibleHosts) { sessionsForHostFilter(visibleHosts, null) }
     val initialPage = sessions.indexOfFirst { SessionKey(it.hostId, it.id) == selectedSession }.coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = { sessions.size })
+    val listedSessionKeys = remember(hosts) {
+        hosts.values.flatMap { host -> host.sessions.map { SessionKey(it.hostId, it.id) } }.toSet()
+    }
     val sessionKeys = remember(sessions) { sessions.map { SessionKey(it.hostId, it.id) } }
     val pagerKeys = remember(sessionKeys) { sessionKeys.map { it.pagerKey() } }
     val localDisplayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
     val displayCache = retainedDisplay ?: localDisplayCache
     SideEffect {
-        displayCache.keys.toList().filter { it !in sessionKeys }.forEach(displayCache::remove)
+        displayCache.keys.toList().filter { it !in listedSessionKeys }.forEach(displayCache::remove)
         state.details.forEach { (key, detail) ->
             if (key in sessionKeys) {
                 sessionDetailForDisplay(detail, displayCache[key])?.let { displayCache[key] = it }
@@ -107,53 +118,68 @@ internal fun TasksScreen(
 
     val scope = rememberCoroutineScope()
 
-    // Do not publish the previous page while a navigation target is missing or being applied.
-    var pendingSelection by remember(selectedSession) { mutableStateOf(selectedSession) }
-    LaunchedEffect(selectedSession, sessionKeys) {
-        val target = sessionKeys.indexOf(selectedSession)
-        if (target < 0 && selectedSession != null && hosts[selectedSession.hostId]?.connected == true) actions.ensureSessionListed(selectedSession)
-        if (target >= 0) {
-            pendingSelection = selectedSession
-            if (target != pagerState.currentPage) pagerState.scrollToPage(target)
-            pendingSelection = null
-        }
+    // Apply new navigation before publishing pager changes; removed or intentionally hidden selections may fall back.
+    val hiddenByFilter = hostFilter != null && selectedSession != null && selectedSession.hostId != hostFilter
+    var appliedSelection by remember {
+        mutableStateOf(selectedSession?.takeIf { hiddenByFilter || it in sessionKeys })
     }
-    LaunchedEffect(pagerState, selectedSession, sessionKeys) {
+    val selectedHostConnected = selectedSession?.let { hosts[it.hostId]?.connected } == true
+    LaunchedEffect(pagerState, selectedSession, sessionKeys, hostFilter, selectedHostConnected) {
+        val selectionChanged = appliedSelection != selectedSession
+        if (selectionChanged && hiddenByFilter) {
+            requestedHostId = null
+            return@LaunchedEffect
+        }
+        val target = sessionKeys.indexOf(selectedSession)
+        if (selectionChanged && selectedSession != null && !hiddenByFilter && target < 0) {
+            if (selectedHostConnected) actions.ensureSessionListed(selectedSession)
+            return@LaunchedEffect
+        }
+        if (target >= 0 && target != pagerState.currentPage) pagerState.scrollToPage(target)
+        appliedSelection = selectedSession
         snapshotFlow {
-            if (pendingSelection != null || pagerState.isScrollInProgress) null
-            else sessionKeys.getOrNull(pagerState.settledPage)
+            if (pagerState.isScrollInProgress) null else sessionKeys.getOrNull(pagerState.settledPage)
         }.collect { key -> key?.let(onSessionSelected) }
     }
 
     Column(Modifier.fillMaxSize()) {
         TasksTopBar(
-            activeTaskCount = sessions.count { it.isActive },
-            taskCount = hosts.values.sumOf { it.totalSessions ?: it.sessions.size },
+            hosts = hosts,
+            selectedHostId = hostFilter,
+            onSelectHost = { hostId ->
+                requestedHostId = hostId
+                sessionToSelectForHostFilter(selectedSession, sessionsForHostFilter(hosts, hostId?.takeIf { it in hosts }))
+                    ?.let(onSessionSelected)
+            },
             showWorkspaces = hosts.isNotEmpty(),
             openResources = openResources,
             checkForUpdates = actions.checkForUpdates,
             showVersion = actions.showVersion,
         )
         TasksPagerBar(
-            hosts = hosts,
+            hosts = visibleHosts,
             sessions = sessions,
             currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
             selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
-            loadMore = { hosts.values.filter { it.connected && it.nextSessionsCursor != null }.forEach { actions.loadMoreSessions(it.paired.host.id) } },
-            hasMore = hosts.values.any { it.nextSessionsCursor != null },
+            loadMore = {
+                visibleHosts.values.filter { it.connected && it.nextSessionsCursor != null }
+                    .forEach { actions.loadMoreSessions(it.paired.host.id) }
+            },
+            hasMore = visibleHosts.values.any { it.nextSessionsCursor != null },
         )
         if (sessions.isEmpty()) {
             Box(Modifier.weight(1f)) {
-                when (state.sessions.emptyState) {
+                when (visibleState.emptyState) {
                     TaskListEmptyState.Loading -> TaskListLoadingState()
-                    TaskListEmptyState.Recovery -> SessionRecoveryScreen(hosts.values.toList(), actions)
+                    TaskListEmptyState.Recovery -> SessionRecoveryScreen(visibleHosts.values.toList(), actions)
 
                     TaskListEmptyState.Ready -> if (hosts.isEmpty()) {
                         BringOmpEmptyState(connectHost = connectHost)
                     } else {
                         EmptyState(
-                            title = "No sessions yet",
-                            description = "Choose a workspace to create your first session.",
+                            title = if (hostFilter != null) "No sessions on this host" else "No sessions yet",
+                            description = if (hostFilter != null) "Choose another host, or open a workspace to create one."
+                                else "Choose a workspace to create your first session.",
                             action = "Open workspaces",
                             onAction = openResources,
                         )
@@ -352,8 +378,9 @@ private fun PairingStepRow(number: Int, step: PairingStep) {
 
 @Composable
 private fun TasksTopBar(
-    activeTaskCount: Int,
-    taskCount: Int,
+    hosts: Map<String, HostState>,
+    selectedHostId: String?,
+    onSelectHost: (String?) -> Unit,
     showWorkspaces: Boolean,
     openResources: () -> Unit,
     checkForUpdates: () -> Unit,
@@ -368,16 +395,8 @@ private fun TasksTopBar(
             .padding(start = 16.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (taskCount > 0) {
-            Text(
-                "Sessions $activeTaskCount/$taskCount active",
-                Modifier.weight(1f).padding(end = 10.dp),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                softWrap = false,
-            )
+        if (hosts.isNotEmpty()) {
+            HostSessionFilter(hosts, selectedHostId, onSelectHost, Modifier.weight(1f))
         } else {
             Spacer(Modifier.weight(1f))
         }
@@ -404,22 +423,115 @@ private fun TasksTopBar(
 }
 
 @Composable
-private fun TopBarAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun HostSessionFilter(
+    hosts: Map<String, HostState>,
+    selectedHostId: String?,
+    onSelect: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = remember(hosts) { hostFilterOptions(hosts) }
+    val label = options.firstOrNull { it.hostId == selectedHostId }?.label ?: AllHostsFilterLabel
+    var expanded by remember { mutableStateOf(false) }
+    BoxWithConstraints(modifier) {
+        val filterMaxWidth = maxWidth
+        Box(Modifier.widthIn(max = filterMaxWidth)) {
+            TopBarTextButton(
+                onClick = { expanded = true },
+                contentPadding = PaddingValues(start = 16.dp, end = 6.dp),
+                modifier = Modifier
+                    .widthIn(max = filterMaxWidth)
+                    .testTag("hostFilter")
+                    .semantics {
+                        contentDescription = "Filter sessions by host"
+                        stateDescription = if (expanded) "$label, expanded" else label
+                    },
+            ) {
+                Text(
+                    label,
+                    Modifier.widthIn(max = (filterMaxWidth - 43.dp).coerceAtLeast(0.dp)),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = Purple400,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    softWrap = false,
+                )
+                Spacer(Modifier.width(5.dp))
+                Icon(
+                    if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = Purple400,
+                )
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.widthIn(max = 280.dp),
+            ) {
+                HostFilterMenuItem(AllHostsFilterLabel, selected = selectedHostId == null, tag = "hostFilterOption:all") {
+                    expanded = false
+                    onSelect(null)
+                }
+                options.forEach { option ->
+                    HostFilterMenuItem(option.label, selected = option.hostId == selectedHostId, tag = "hostFilterOption:${option.hostId}") {
+                        expanded = false
+                        onSelect(option.hostId)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HostFilterMenuItem(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        onClick = rememberHapticOnClick(onClick),
+        leadingIcon = {
+            Icon(
+                if (selected) Icons.Outlined.RadioButtonChecked else Icons.Outlined.RadioButtonUnchecked,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = if (selected) Purple400 else TextMid,
+            )
+        },
+        modifier = Modifier.testTag(tag).semantics { this.selected = selected },
+    )
+}
+
+@Composable
+private fun TopBarTextButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 6.dp),
+    content: @Composable RowScope.() -> Unit,
+) {
     TextButton(
         onClick = rememberHapticOnClick(onClick),
+        modifier = modifier,
         contentPadding = PaddingValues(0.dp),
     ) {
         Row(
-            Modifier
-                .height(30.dp)
-                .padding(horizontal = 6.dp),
+            Modifier.height(30.dp).padding(contentPadding),
             verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Purple400)
-            Spacer(Modifier.width(5.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Medium, color = Purple400)
-        }
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun TopBarAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+    TopBarTextButton(onClick) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Purple400)
+        Spacer(Modifier.width(5.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            color = Purple400,
+        )
     }
 }
 
@@ -435,9 +547,10 @@ private fun TasksPagerBar(
     if (sessions.isEmpty()) return
     val listState = rememberLazyListState()
     val sessionKeys = sessions.map { SessionKey(it.hostId, it.id) }
-    LaunchedEffect(listState, sessions.size, hasMore) {
+    val currentLoadMore by rememberUpdatedState(loadMore)
+    LaunchedEffect(listState, sessionKeys, hasMore) {
         if (hasMore) snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
-            .collect { if (it >= sessions.lastIndex - 3) loadMore() }
+            .collect { if (it >= sessions.lastIndex - 3) currentLoadMore() }
     }
     val cardWidth = 168.dp
     val startPadding = 12.dp

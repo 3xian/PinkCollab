@@ -3,6 +3,7 @@ package dev.pinkcollab.ui
 import dev.pinkcollab.data.Attention
 import dev.pinkcollab.data.AttentionType
 import dev.pinkcollab.data.ConnectionState
+import dev.pinkcollab.data.SessionOrigin
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.PairedHost
@@ -57,13 +58,16 @@ class SessionWorkStatusTest {
         assertEquals(WorkStatusKind.Attention, sessionWorkStatus(detail, online).kind)
     }
 
-    @Test fun historical_session_never_claims_ready_or_completed_work() {
-        val historical = session.copy(origin = dev.pinkcollab.data.SessionOrigin.Discovered,
+    @Test fun discovered_session_never_claims_ready_or_completed_work() {
+        val discovered = session.copy(origin = SessionOrigin.Discovered,
             runtimeAttached = false, generation = null, status = SessionStatus.Idle)
-        val status = sessionWorkStatus(SessionDetail(session = historical), online)
-        assertEquals(WorkStatusKind.History, status.kind)
+        val detail = SessionDetail(discovered, streaming = "Old reply", liveItems = listOf(tool()))
+        val status = sessionWorkStatus(detail, online)
+        assertEquals(WorkStatusKind.OnHost, status.kind)
         assertFalse(status.active)
         assertEquals(null, status.timing)
+        assertEquals(WorkStatusKind.Offline,
+            sessionWorkStatus(detail, online.copy(connection = ConnectionState.Offline())).kind)
     }
 
     @Test fun timing_survives_work_label_changes_but_is_hidden_offline() {

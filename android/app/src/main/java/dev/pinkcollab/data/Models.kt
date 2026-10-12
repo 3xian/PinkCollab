@@ -261,7 +261,7 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
         SessionStatus.Stopping -> "Stopping OMP"
         SessionStatus.Running -> "Working"
         SessionStatus.NeedsInput -> "Waiting for input"
-        SessionStatus.Idle -> if (optString("origin") == "discovered") "History on host" else "Ready to continue"
+        SessionStatus.Idle -> if (optString("origin") == "discovered") "Session on host" else "Ready to continue"
     }
     return Session(getString("id"), getString("hostId"), getString("cwd"), getString("title"), status, activity, a != null || (runtime?.optInt("pendingInputCount") ?: 0) > 0, a, getString("createdAt"), getString("updatedAt"), runtime != null, runtime?.optString("generation")?.takeIf { it.isNotBlank() },
         runtime?.optJSONObject("workTiming")?.takeIf { it.has("elapsedMs") }?.let {

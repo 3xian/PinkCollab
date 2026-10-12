@@ -302,7 +302,7 @@ Finish active work and stop the Gateway before copying the entire data directory
 
 ## Discovering host OMP conversations
 
-Supported existing OMP histories appear as History in Tasks. Run the Gateway under their owner's account and allowlist the projects. Close external OMP instances before continuing on the phone; concurrent writers are unsupported.
+Supported existing OMP conversations appear as On host in Tasks. This is a source label; Gateway does not observe whether an external OMP process is still running. Run the Gateway under their owner's account and allowlist the projects. Close external OMP instances before continuing on the phone; concurrent writers are unsupported.
 
 ### Storage selection
 

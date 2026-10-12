@@ -74,7 +74,7 @@ class TodoQuestDeviceTest {
             listOf(TodoTask("Build", TodoStatus.Completed))))) }
         compose.mainClock.advanceTimeBy(2400)
         compose.onNodeWithTag("todoHeader").assertIsDisplayed()
-        compose.onNodeWithText("Plan settled").assertIsDisplayed()
+        saveScreenshot("todo-settled-collapsed.png")
         compose.onNodeWithText("Ship").assertDoesNotExist()
         compose.onNodeWithTag("todoHeader").performClick()
         compose.mainClock.advanceTimeBy(3000)

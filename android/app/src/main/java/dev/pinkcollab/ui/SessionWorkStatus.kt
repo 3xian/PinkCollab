@@ -63,7 +63,7 @@ import dev.pinkcollab.ui.theme.Purple400
 import dev.pinkcollab.ui.theme.TextHigh
 import dev.pinkcollab.ui.theme.TextMid
 
-internal enum class WorkStatusKind { Loading, Sending, Working, Starting, Stopping, Attention, Offline, Ready, History }
+internal enum class WorkStatusKind { Loading, Sending, Working, Starting, Stopping, Attention, Offline, Ready, OnHost }
 
 internal data class SessionWorkStatus(
     val kind: WorkStatusKind,
@@ -114,7 +114,7 @@ private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): Se
     }
     val session = detail.session
     if (session.origin == dev.pinkcollab.data.SessionOrigin.Discovered) {
-        return SessionWorkStatus(WorkStatusKind.History, "History on host")
+        return SessionWorkStatus(WorkStatusKind.OnHost, "Session on host")
     }
     val active = session.status == SessionStatus.Running
     if (session.status == SessionStatus.Starting) {

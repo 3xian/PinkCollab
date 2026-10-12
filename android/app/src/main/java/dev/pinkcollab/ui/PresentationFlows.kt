@@ -7,6 +7,7 @@ import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.InitialSyncState
 import dev.pinkcollab.data.Session
+import dev.pinkcollab.data.SessionKey
 import dev.pinkcollab.data.compareTimestamps
 import dev.pinkcollab.data.TaskListLoadState
 import dev.pinkcollab.data.Workspace
@@ -41,6 +42,31 @@ internal fun compareSessionsForPresentation(a: Session, b: Session): Int = when 
     a.isActive != b.isActive -> if (a.isActive) -1 else 1
     a.isActive -> compareTimestamps(b.createdAt, a.createdAt)
     else -> compareTimestamps(b.updatedAt, a.updatedAt)
+}
+
+internal const val AllHostsFilterLabel = "All hosts"
+
+internal data class HostFilterOption(val hostId: String, val label: String)
+
+/** Phone host names, stable and disambiguated when two pairings share a label. */
+internal fun hostFilterOptions(hosts: Map<String, HostState>): List<HostFilterOption> {
+    val named = hosts.map { (id, host) -> id to host.paired.displayName.trim().ifBlank { id } }
+    val duplicates = named.groupingBy { it.second }.eachCount()
+    return named.sortedWith(compareBy({ it.second.lowercase() }, { it.first })).map { (id, name) ->
+        HostFilterOption(id, if ((duplicates[name] ?: 0) > 1) "$name · $id" else name)
+    }
+}
+
+internal fun sessionsForHostFilter(hosts: Map<String, HostState>, hostId: String?): List<Session> {
+    val rows = if (hostId == null) hosts.values.asSequence() else sequenceOf(hosts[hostId] ?: return emptyList())
+    return rows.flatMap { it.sessions.asSequence() }.sortedWith(::compareSessionsForPresentation).toList()
+}
+
+/** Session to publish after a host filter change, or null when the current selection remains visible. */
+internal fun sessionToSelectForHostFilter(current: SessionKey?, visible: List<Session>): SessionKey? {
+    if (current != null && visible.any { it.hostId == current.hostId && it.id == current.sessionId }) return null
+    val first = visible.firstOrNull() ?: return null
+    return SessionKey(first.hostId, first.id)
 }
 
 internal fun sessionForFocus(app: SessionListState, selected: SessionKey?): Session? {
@@ -112,7 +138,8 @@ internal data class SessionListState(
     fun samePresentation(other: SessionListState): Boolean =
         loadState == other.loadState && emptyState == other.emptyState && hosts.keys == other.hosts.keys && hosts.all { (id, host) ->
             val next = other.hosts.getValue(id)
-            host.sessions == next.sessions && host.connection == next.connection &&
+            host.paired.displayName == next.paired.displayName &&
+                host.sessions == next.sessions && host.connection == next.connection &&
                 host.totalSessions == next.totalSessions && host.nextSessionsCursor == next.nextSessionsCursor &&
                 host.snapshotToken == next.snapshotToken && host.initialSync == next.initialSync &&
                 (host.connectionProgress != null) == (next.connectionProgress != null)
@@ -120,6 +147,11 @@ internal data class SessionListState(
 }
 
 internal fun sessionListState(app: AppState) = SessionListState(app.hosts, app.taskListLoadState)
+
+internal fun SessionListState.forHostFilter(hostId: String?): SessionListState {
+    if (hostId == null) return this
+    return sessionListState(AppState(hosts = mapOf(hostId to hosts.getValue(hostId))))
+}
 
 /** Keep summaries current while Tasks is off screen; transcript changes are observed separately. */
 internal fun StateFlow<AppState>.sessionListPresentation(scope: CoroutineScope): StateFlow<SessionListState> =

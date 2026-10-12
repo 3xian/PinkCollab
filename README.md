@@ -59,7 +59,7 @@ On Windows, use a normal terminal as your OMP user. The Gateway starts automatic
 
 ### 3. Send a prompt
 
-- **Continue a conversation:** open a **History** entry in **Tasks**. Its project must be inside your configured workspace roots.
+- **Continue a conversation:** open an **On host** entry in **Tasks**. Its project must be inside your configured workspace roots.
 - **Start a new session:** open **Workspaces**, choose a directory, and create a session.
 
 **Close the corresponding OMP instance on your computer before continuing a conversation from the phone.** This is not a takeover of a running terminal session; do not use the same conversation elsewhere while PinkCollab owns its runtime.

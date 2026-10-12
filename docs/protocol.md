@@ -120,7 +120,7 @@ Optional inspection APIs (Android uses snapshots instead): `GET /host`, `GET /wo
 
 ## Discovered OMP history
 
-Existing host OMP sessions share `/sessions` pagination, host snapshots, session snapshots, history and commands. `origin: discovered` always has `runtime: null`; its session snapshot has `hasHistory: true`, empty `timeline` and empty `operations`. Timestamps describe stored metadata only. No transcript path or OMP-specific representation is exposed. Display it as History, never Ready/running/completed.
+Existing host OMP sessions share `/sessions` pagination, host snapshots, session snapshots, history and commands. `origin: discovered` always has `runtime: null`; its session snapshot has `hasHistory: true`, empty `timeline` and empty `operations`. Timestamps describe stored metadata only. No transcript path or OMP-specific representation is exposed. Display it as On host: a source label, not a claim that the external process is running, idle, or exited. A null runtime means no Gateway-owned runtime, not proof that an external OMP process is absent.
 
 A generation-less `prompt` or `start_runtime` lazily adopts it and publishes the normal flattened `session_upsert` followed by normal runtime/session events. Its ID does not change; `origin` becomes `managed`, replacing the existing card. Uploading an attachment or reading a snapshot/history does not adopt. Command IDs, outbox scope, receipt lookup and cursor binding are unchanged.
 

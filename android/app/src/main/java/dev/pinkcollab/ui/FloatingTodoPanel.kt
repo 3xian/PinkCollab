@@ -24,14 +24,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.ui.theme.*
 
 
-internal val TodoPanelCollapsedHeight = 60.dp
+internal val TodoPanelCollapsedHeight = 40.dp
 
 @Composable
 internal fun todoPanelHeaderHeight(): Dp =
@@ -83,31 +81,33 @@ internal fun FloatingTodoPanel(
         .background(Color(0xFF211D2B))
         .background(Brush.horizontalGradient(listOf(accent.copy(alpha = emphasis), Color.Transparent)))
         .testTag("floatingTodoPanel")) {
-        Column(Modifier.fillMaxWidth().height(headerHeight).testTag("todoHeader")
+        Box(Modifier.fillMaxWidth().height(headerHeight).testTag("todoHeader")
             .semantics {
                 stateDescription = if (expanded) "Expanded" else "Collapsed"
                 contentDescription = "Task plan, $closed of ${tasks.size} settled"
             }
             .clickable(role = Role.Button, onClick = rememberHapticOnClick { onExpandedChange(!expanded) })
-            .padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (focus?.status == TodoStatus.Active) GlowDot(accent,
-                    modifier = Modifier.todoDotBreathing(live), size = 6.dp)
-                else Icon(if (settled) Icons.Outlined.CheckCircle else Icons.Outlined.Checklist,
-                    null, Modifier.size(18.dp), tint = accent)
-                Text(if (settled) "Plan settled" else focus?.content ?: "Task plan",
-                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall, color = if (quiet) TextMid else TextHigh)
-                Text("$closed/${tasks.size}", color = accent.copy(alpha = if (quiet) 0.7f else 1f),
-                    style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Default)
-                Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp).rotate(arrow), tint = TextMid)
-            }
-            Box(Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(99.dp))
+            .padding(4.dp)) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(9.dp))
                 .background(accent.copy(alpha = 0.1f))
                 .semantics { progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f) }) {
                 if (progress > 0f) Box(Modifier.fillMaxWidth(progress).fillMaxHeight()
-                    .background(Brush.horizontalGradient(listOf(Purple400, accent, Teal300))))
+                    .background(Brush.horizontalGradient(listOf(
+                        Purple400.copy(alpha = 0.28f), accent.copy(alpha = 0.32f), Teal300.copy(alpha = 0.28f)))))
+                Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("TODOs", style = MaterialTheme.typography.labelMedium,
+                        color = if (quiet) TextMid else TextHigh)
+                    Text("$closed/${tasks.size}", color = if (quiet) TextMid else TextHigh,
+                        style = MaterialTheme.typography.labelMedium)
+                }
+                if (focus?.status == TodoStatus.Active) GlowDot(accent,
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 10.dp).todoDotBreathing(live),
+                    size = 6.dp)
+                else Icon(if (settled) Icons.Outlined.CheckCircle else Icons.Outlined.Checklist,
+                    null, Modifier.align(Alignment.CenterStart).padding(start = 8.dp).size(16.dp), tint = accent)
+                Icon(Icons.Outlined.ExpandMore, null,
+                    Modifier.align(Alignment.CenterEnd).padding(end = 8.dp).size(16.dp).rotate(arrow), tint = TextMid)
             }
         }
         AnimatedVisibility(expanded, enter = fadeIn(tween(180)) + expandVertically(tween(300)),
