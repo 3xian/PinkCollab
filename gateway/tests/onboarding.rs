@@ -930,6 +930,21 @@ esac"#,
         let calls = std::fs::read_to_string(home.path().join("service-commands")).unwrap();
         let new_calls = &calls[before_calls.len()..];
         #[cfg(target_os = "macos")]
+        let restarts = new_calls
+            .lines()
+            .filter(|line| line.starts_with("launchctl bootout "))
+            .count();
+        #[cfg(target_os = "linux")]
+        let restarts = new_calls
+            .lines()
+            .filter(|line| *line == "systemctl --user stop pinkcollab")
+            .count();
+        let expected_restarts = usize::from(!matches!(index, 2 | 4));
+        assert_eq!(
+            restarts, expected_restarts,
+            "iteration {index}: {new_calls}"
+        );
+        #[cfg(target_os = "macos")]
         let starts = new_calls
             .lines()
             .filter(|line| line.starts_with("launchctl bootstrap"))
@@ -939,13 +954,13 @@ esac"#,
             .lines()
             .filter(|line| *line == "systemctl --user start pinkcollab")
             .count();
-        if index < 3 {
-            assert_eq!(
-                starts,
-                usize::from(index < 2),
-                "iteration {index}: {new_calls}"
-            );
-        }
+        // systemctl start is idempotent but still invoked after installation;
+        // launchctl start skips bootstrap when the service is already loaded.
+        #[cfg(target_os = "linux")]
+        let expected_starts = expected_restarts + 1;
+        #[cfg(target_os = "macos")]
+        let expected_starts = expected_restarts;
+        assert_eq!(starts, expected_starts, "iteration {index}: {new_calls}");
         if index == 1 || index == 2 {
             assert_eq!(
                 (
@@ -962,7 +977,6 @@ esac"#,
                 before_config,
                 "repeat setup rewrote config"
             );
-            assert_eq!(starts, 0, "repeat setup restarted service: {new_calls}");
         }
         assert_eq!(
             serde_yaml::to_string(&Config::load(&data).unwrap()).unwrap(),
