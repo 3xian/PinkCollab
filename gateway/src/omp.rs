@@ -1,3 +1,10 @@
+mod error;
+mod frame;
+mod protocol;
+
+pub use error::{TransportError, TransportErrorKind};
+use protocol::{Action, Phase, Progress, Protocol};
+
 use crate::storage::id;
 use anyhow::{Context, Result, bail, ensure};
 use parking_lot::Mutex;
@@ -347,15 +354,24 @@ struct Shutdown {
     exited: watch::Sender<bool>,
     output: mpsc::Sender<Output>,
     finished: Mutex<bool>,
+    progress: watch::Sender<Progress>,
 }
 
 impl Shutdown {
     /// Idempotent: ends the process, releases every pending request and reports the outcome once.
-    fn finish(&self, reason: Option<String>) {
+    fn finish(&self, reason: Option<TransportError>) {
         // Claim the outcome before termination wakes a competing reader with EOF.
         let mut finished = self.finished.lock();
         if *finished {
             return;
+        }
+        // Fail readiness immediately; process reaping and pending-request release still
+        // wait for confirmed termination below.
+        if let Some(error) = reason.as_ref() {
+            self.progress.send_replace(Progress {
+                phase: Phase::Failed(error.clone()),
+                deadline: None,
+            });
         }
         let status = match self.process.terminate(TERMINATE_GRACE) {
             Ok(status) => status,
@@ -368,19 +384,30 @@ impl Shutdown {
         drop(finished);
         // A stop we requested is not a crash; `session::exit` already reports it as stopped.
         let reason = reason.or_else(|| {
-            (!*self.requested.borrow() && !status.success())
-                .then(|| "OMP process exited unexpectedly".to_string())
+            (!*self.requested.borrow() && !status.success()).then(|| {
+                TransportError::new(TransportErrorKind::Io, "OMP process exited unexpectedly")
+            })
+        });
+        self.progress.send_replace(Progress {
+            phase: Phase::Failed(
+                reason
+                    .clone()
+                    .unwrap_or_else(|| TransportError::new(TransportErrorKind::Io, "OMP exited")),
+            ),
+            deadline: None,
         });
         self.pending.lock().clear();
         let _ = self.exited.send(true);
-        let _ = self.output.blocking_send(Output::Exited(reason));
+        let _ = self
+            .output
+            .blocking_send(Output::Exited(reason.map(|error| error.to_string())));
     }
 }
 
 pub struct Runtime {
     input: mpsc::Sender<(Value, oneshot::Sender<Result<()>>)>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
-    ready: watch::Receiver<bool>,
+    progress: watch::Receiver<Progress>,
     exited: watch::Receiver<bool>,
     stop: watch::Sender<bool>,
     process: Arc<Process>,
@@ -442,9 +469,10 @@ impl Runtime {
         let stdin = child.stdin.take().context("OMP stdin unavailable")?;
         let stdout = child.stdout.take().context("OMP stdout unavailable")?;
         let (input, mut commands) = mpsc::channel::<(Value, oneshot::Sender<Result<()>>)>(32);
-        // A frame is at most 1 MiB; this caps queued stdout at roughly 32 MiB.
-        let (output, receiver) = mpsc::channel(32);
-        let (ready_tx, ready) = watch::channel(false);
+        // Only one parsed logical frame may queue: v2 frames can reach 64 MiB.
+        // The reader retains at most one additional frame under backpressure.
+        let (output, receiver) = mpsc::channel(1);
+        let (progress_tx, progress) = watch::channel(Progress::starting());
         let (exit_tx, exited) = watch::channel(false);
         let (stop, mut stopping) = watch::channel(false);
         let pending = Arc::new(Mutex::new(HashMap::<String, oneshot::Sender<Value>>::new()));
@@ -456,47 +484,102 @@ impl Runtime {
             exited: exit_tx,
             output: output.clone(),
             finished: Mutex::new(false),
+            progress: progress_tx.clone(),
         });
         let reader = shutdown.clone();
         let reader_output = output.clone();
         let reader_pending = pending.clone();
+        let mut supervisor = progress.clone();
+        let supervisor_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            loop {
+                let state = supervisor.borrow_and_update().clone();
+                if matches!(state.phase, Phase::Failed(_)) {
+                    break;
+                }
+                tokio::select! {
+                    changed = supervisor.changed() => if changed.is_err() { break; },
+                    _ = async {
+                        if let Some(deadline) = state.deadline {
+                            tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                        } else {
+                            std::future::pending::<()>().await;
+                        }
+                    } => {
+                        // Completion wins if the reader published progress at the deadline.
+                        if supervisor.has_changed().unwrap_or(false) { continue; }
+                        let error = state.timeout_error();
+                        let _ = tokio::task::spawn_blocking(move || supervisor_shutdown.finish(Some(error))).await;
+                        break;
+                    }
+                }
+            }
+        });
+        let protocol_input = input.clone();
         std::thread::spawn(move || {
             let mut source = BufReader::new(stdout);
             let mut frame = Vec::with_capacity(8 * 1024);
+            let mut protocol = Protocol::new(progress_tx);
             let reason = loop {
                 frame.clear();
-                match read_frame(&mut source, &mut frame) {
-                    // stdout closed: OMP is exiting, either on its own or because we stopped it.
-                    Ok(0) => break None,
-                    Ok(_) if frame.len() > MAX_LINE => {
-                        break Some("OMP exceeded the NDJSON transport limit".to_string());
+                match read_frame(&mut source, &mut frame, protocol.frame_limit()) {
+                    Ok(0) => {
+                        break (protocol.incomplete() && !*reader.requested.borrow()).then(|| {
+                            TransportError::new(
+                                TransportErrorKind::IncompleteChunk,
+                                "OMP EOF during rpc chunk sequence",
+                            )
+                        });
+                    }
+                    Ok(_) if frame.len() > protocol.frame_limit() => {
+                        break Some(TransportError::new(
+                            TransportErrorKind::PhysicalFrameTooLarge,
+                            "OMP exceeded the NDJSON transport limit",
+                        ));
+                    }
+                    Ok(_) if frame.last() != Some(&b'\n') => {
+                        break Some(TransportError::new(
+                            TransportErrorKind::InvalidFrame,
+                            "OMP EOF in NDJSON physical frame",
+                        ));
                     }
                     Ok(_) => {}
-                    Err(err) => break Some(format!("OMP output transport failed: {err}")),
+                    Err(error) => {
+                        break Some(TransportError::new(
+                            TransportErrorKind::Io,
+                            format!("OMP output transport failed: {error}"),
+                        ));
+                    }
                 }
-                let Ok(value) = serde_json::from_slice::<Value>(&frame) else {
-                    continue;
+                let value = match protocol.accept(&frame) {
+                    Ok(Action::Frame(value)) => value,
+                    Ok(Action::Pending) => continue,
+                    Ok(Action::Command(command)) => {
+                        // Only the writer waits on stdin. The reader keeps reading the handshake
+                        // response; write failures already converge on Shutdown.
+                        let (ack, _written) = oneshot::channel();
+                        if protocol_input.blocking_send((command, ack)).is_err() {
+                            break Some(TransportError::new(
+                                TransportErrorKind::Io,
+                                "OMP protocol input closed",
+                            ));
+                        }
+                        continue;
+                    }
+                    Err(error) => break Some(error),
                 };
-                if string(&value, "type") == "ready" {
-                    let _ = ready_tx.send(true);
-                }
                 if string(&value, "type") == "response"
                     && let Some(responder) = reader_pending.lock().remove(string(&value, "id"))
                 {
                     let _ = responder.send(value);
                     continue;
                 }
-                let replaceable_delta = string(&value, "type") == "message_update"
-                    && string(&value["assistantMessageEvent"], "type") == "text_delta";
-                if replaceable_delta {
-                    match reader_output.try_send(Output::Frame(value)) {
-                        Ok(()) | Err(mpsc::error::TrySendError::Full(_)) => {}
-                        Err(mpsc::error::TrySendError::Closed(_)) => break None,
-                    }
-                } else if reader_output.blocking_send(Output::Frame(value)).is_err() {
+                // All events, including additive text deltas, use lossless backpressure.
+                if reader_output.blocking_send(Output::Frame(value)).is_err() {
                     break None;
                 }
             };
+            drop(protocol);
             reader.finish(reason);
         });
         let writer = shutdown.clone();
@@ -504,6 +587,7 @@ impl Runtime {
         // The handle must be resolved here, on the runtime thread: calling `Handle::current()`
         // inside the spawned thread panics and silently kills the writer.
         let runtime = tokio::runtime::Handle::current();
+        let writer_progress = progress.clone();
         std::thread::spawn(move || {
             let (reason, stdin) = runtime.block_on(async move {
                 let stdin: Arc<Mutex<Option<Box<dyn Write + Send>>>> =
@@ -516,11 +600,14 @@ impl Runtime {
                     let Some((value, ack)) = command else {
                         break None;
                     };
-                    let result = write_frame(&stdin, value).await;
-                    let failure = result
-                        .as_ref()
-                        .err()
-                        .map(|err| format!("OMP input transport failed: {err:#}"));
+                    let limit = writer_progress.borrow().frame_limit();
+                    let result = write_frame(&stdin, value, limit).await;
+                    let failure = result.as_ref().err().map(|err| {
+                        TransportError::new(
+                            TransportErrorKind::Io,
+                            format!("OMP input transport failed: {err:#}"),
+                        )
+                    });
                     let _ = ack.send(result);
                     if failure.is_some() {
                         break failure;
@@ -541,7 +628,7 @@ impl Runtime {
             Arc::new(Self {
                 input,
                 pending,
-                ready,
+                progress,
                 exited,
                 stop,
                 process,
@@ -551,27 +638,22 @@ impl Runtime {
     }
 
     pub async fn wait_ready(&self) -> Result<()> {
-        let mut ready = self.ready.clone();
-        let mut exited = self.exited.clone();
-        tokio::time::timeout(Duration::from_secs(30), async {
-            loop {
-                if *ready.borrow() {
-                    return Ok(());
-                }
-                if *exited.borrow() {
-                    bail!("OMP exited before ready");
-                }
-                tokio::select! {
-                    result = ready.changed() => { result.context("OMP ready channel closed")?; },
-                    _ = exited.changed() => {},
-                }
+        let mut progress = self.progress.clone();
+        loop {
+            match &progress.borrow_and_update().phase {
+                Phase::Ready(_) => return Ok(()),
+                Phase::Failed(error) => return Err(error.clone().into()),
+                _ => {}
             }
-        })
-        .await
-        .context("OMP startup timed out")?
+            progress
+                .changed()
+                .await
+                .context("OMP protocol progress closed")?;
+        }
     }
 
     pub async fn write(&self, frame: Value) -> Result<()> {
+        self.wait_ready().await?;
         let (ack, rx) = oneshot::channel();
         self.input
             .send((frame, ack))
@@ -616,8 +698,16 @@ impl Runtime {
             after_write();
             let response = tokio::time::timeout(Duration::from_secs(15), rx)
                 .await
-                .context("OMP response timed out")?
-                .context("OMP exited before response")?;
+                .map_err(|_| {
+                    TransportError::new(TransportErrorKind::Timeout, "OMP response timed out")
+                })?
+                .map_err(|_| match &self.progress.borrow().phase {
+                    Phase::Failed(error) => anyhow::Error::new(error.clone()),
+                    _ => anyhow::Error::new(TransportError::new(
+                        TransportErrorKind::Io,
+                        "OMP exited before response",
+                    )),
+                })?;
             ensure!(
                 response["success"] == true,
                 "OMP rejected command: {}",
@@ -678,14 +768,22 @@ impl Drop for Runtime {
 
 /// Reads one NDJSON frame without ever buffering more than `MAX_LINE + 1` bytes, so a line that
 /// never ends fails the transport instead of growing until the Gateway runs out of memory.
-fn read_frame<R: BufRead>(source: &mut R, frame: &mut Vec<u8>) -> std::io::Result<usize> {
-    let mut bounded = std::io::Read::take(&mut *source, (MAX_LINE + 1) as u64);
+fn read_frame<R: BufRead>(
+    source: &mut R,
+    frame: &mut Vec<u8>,
+    limit: usize,
+) -> std::io::Result<usize> {
+    let mut bounded = std::io::Read::take(&mut *source, (limit + 1) as u64);
     bounded.read_until(b'\n', frame)
 }
 
-async fn write_frame(pipe: &Arc<Mutex<Option<Box<dyn Write + Send>>>>, value: Value) -> Result<()> {
+async fn write_frame(
+    pipe: &Arc<Mutex<Option<Box<dyn Write + Send>>>>,
+    value: Value,
+    limit: usize,
+) -> Result<()> {
     let mut bytes = serde_json::to_vec(&value)?;
-    ensure!(bytes.len() < MAX_LINE, "OMP frame too large");
+    ensure!(bytes.len() < limit, "OMP frame too large");
     bytes.push(b'\n');
     let pipe = pipe.clone();
     let write = tokio::task::spawn_blocking(move || -> Result<()> {

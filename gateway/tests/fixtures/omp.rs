@@ -1,4 +1,5 @@
 // Deterministic subprocess fixture. This binary is excluded from normal builds.
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 fn emit(value: Value) {
@@ -80,6 +81,157 @@ fn save_title(log: &std::path::Path, title: &str) {
         format!("{}\n{body}", json!({"type":"title","v":1,"title":title})),
     )
     .unwrap();
+}
+
+fn large_models(models: &[Value]) -> Vec<Value> {
+    let mut result = models.to_vec();
+    result.extend((0..640).map(|index| json!({
+        "provider":"fixture","id":format!("large-{index}"),"name":format!("Fixture Large {index}"),
+        "reasoning":true,"contextWindow":200000,"maxTokens":8192,
+        "cost":{"input":1.25,"output":5,"cacheRead":0.1,"cacheWrite":1.5},
+        "input":["text","image"],"thinking":{"mode":"effort","efforts":["low","medium","high"]},
+        "fixtureMetadata":{"index":index,"description":"界".repeat(700)}
+    })));
+    result
+}
+
+fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find(|pair| pair[0] == name)
+        .map(|pair| pair[1].as_str())
+}
+
+fn chunk_frames(bytes: &[u8]) -> Vec<Value> {
+    // An odd byte boundary intentionally bisects multibyte UTF-8 codepoints.
+    let size = 200_003;
+    let count = bytes.len().div_ceil(size);
+    bytes
+        .chunks(size)
+        .enumerate()
+        .map(|(index, part)| {
+            json!({
+                "type":"rpc_chunk","chunkId":"fixture-chunks","index":index,
+                "count":count,"byteLength":bytes.len(),"data":STANDARD.encode(part)
+            })
+        })
+        .collect()
+}
+
+fn emit_chunked(value: Value) {
+    let bytes = serde_json::to_vec(&value).unwrap();
+    let frames = chunk_frames(&bytes);
+    assert!(frames.len() >= 5, "fixture must exercise a long sequence");
+    assert!(
+        bytes
+            .chunks(200_003)
+            .any(|part| std::str::from_utf8(part).is_err()),
+        "fixture must split a UTF-8 codepoint"
+    );
+    for frame in frames {
+        emit(frame);
+    }
+}
+
+fn malformed(mode: &str, request: &Value) {
+    if matches!(
+        mode,
+        "physical-local" | "physical-advertised" | "unterminated-local" | "unterminated-advertised"
+    ) {
+        let size = if mode.ends_with("advertised") {
+            65_537
+        } else {
+            1_048_577
+        };
+        let mut stdout = std::io::stdout().lock();
+        if mode.starts_with("unterminated") {
+            stdout.write_all(&vec![b'x'; size]).unwrap();
+        } else {
+            let bytes =
+                serde_json::to_vec(&json!({"type":"fixture_event","text":"x".repeat(size)}))
+                    .unwrap();
+            stdout.write_all(&bytes).unwrap();
+        }
+        if !mode.starts_with("unterminated") {
+            stdout.write_all(b"\n").unwrap();
+        }
+        stdout.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        return;
+    }
+    let value = json!({"type":"response","id":request["id"],"success":true,"data":{"text":"界🙂".repeat(180_000)}});
+    let mut bytes = serde_json::to_vec(&value).unwrap();
+    match mode {
+        "invalid-json" => bytes = vec![b'x'; 1_200_000],
+        "invalid-utf8" => bytes = vec![0xff; 1_200_000],
+        "non-object" => bytes = serde_json::to_vec(&json!(["x".repeat(1_200_000)])).unwrap(),
+        "nested-chunk" => bytes = serde_json::to_vec(&json!({"type":"rpc_chunk","text":"x".repeat(1_200_000)})).unwrap(),
+        "oversized-chunk" => bytes = serde_json::to_vec(&json!({"type":"response","id":request["id"],"success":true,"data":{"text":"x".repeat(1_200_000)}})).unwrap(),
+        _ => {}
+    }
+    let mut frames = chunk_frames(&bytes);
+    if mode == "oversized-chunk" {
+        let split = 256 * 1024 + 1;
+        let parts = std::iter::once(&bytes[..split])
+            .chain(bytes[split..].chunks(200_003))
+            .collect::<Vec<_>>();
+        let count = parts.len();
+        frames = parts
+            .into_iter()
+            .enumerate()
+            .map(|(index, part)| {
+                json!({
+                    "type":"rpc_chunk","chunkId":"fixture-chunks","index":index,
+                    "count":count,"byteLength":bytes.len(),"data":STANDARD.encode(part)
+                })
+            })
+            .collect();
+    }
+    match mode {
+        "wrong-index" => frames[0]["index"] = json!(1),
+        "wrong-id" => frames[1]["chunkId"] = json!("different"),
+        "wrong-count" => frames[1]["count"] = json!(99),
+        "duplicate" => {
+            frames.insert(1, frames[0].clone());
+        }
+        "missing" => {
+            frames.remove(1);
+        }
+        "interleaved" => {
+            frames.insert(1, json!({"type":"fixture_event","text":"interleaved"}));
+        }
+        "short-length" => {
+            for frame in &mut frames {
+                frame["byteLength"] = json!(bytes.len() - 1);
+            }
+        }
+        "long-length" => {
+            for frame in &mut frames {
+                frame["byteLength"] = json!(bytes.len() + 1);
+            }
+        }
+        "small-length" => frames[0]["byteLength"] = json!(100),
+        "corrupt-base64" => frames[0]["data"] = json!("%%%="),
+        "unpadded-base64" => frames[0]["data"] = json!("YQ"),
+        "noncanonical-base64" => frames[0]["data"] = json!("YR=="),
+        "oversized-reassembly" => frames[0]["byteLength"] = json!(64 * 1024 * 1024 + 1),
+        "count-one" => frames[0]["count"] = json!(1),
+        "count-too-many" => frames[0]["count"] = json!(257),
+        "empty-id" => frames[0]["chunkId"] = json!(""),
+        "long-id" => frames[0]["chunkId"] = json!("x".repeat(129)),
+        _ => {}
+    }
+    for (index, frame) in frames.into_iter().enumerate() {
+        emit(frame);
+        if mode == "midchunk-exit" && index == 0 {
+            std::process::exit(7);
+        }
+        if mode == "missing-stall" && index == 0 {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            return;
+        }
+    }
+    // Leave the process alive so transport failures cannot be mistaken for fixture EOF.
+    std::thread::sleep(std::time::Duration::from_secs(30));
 }
 
 fn save_tool(log: &std::path::Path, parent: &mut String, call_id: &str) {
@@ -172,8 +324,12 @@ fn main() {
         json!({"provider":"fixture","id":"smart","name":"Fixture Smart","reasoning":true,
             "thinking":{"mode":"effort","efforts":["medium","high"]}}),
     ];
+    let expanded_models;
     // `--single-model` mirrors a host whose model scope has no alternative for `cycle_model` to pick.
-    let models: &[Value] = if args.iter().any(|arg| arg == "--single-model") {
+    let models: &[Value] = if args.iter().any(|arg| arg == "--large-models") {
+        expanded_models = large_models(&all_models);
+        &expanded_models
+    } else if args.iter().any(|arg| arg == "--single-model") {
         &all_models[..1]
     } else {
         &all_models
@@ -185,7 +341,33 @@ fn main() {
     let mut session_title = std::fs::read_to_string(&title_file).unwrap_or_default();
     let mut pending_prompt_id: Option<Value> = None;
     let mut pending_prompt_ack: Option<Value> = None;
-    emit(json!({"type":"ready","protocolVersion":1}));
+    let v2 = args.iter().any(|arg| arg == "--rpc-v2");
+    let mode = option(&args, "--rpc-case").unwrap_or_default();
+    let physical =
+        if mode.ends_with("advertised") || args.iter().any(|arg| arg == "--physical-small") {
+            65_536
+        } else if mode.ends_with("local") || args.iter().any(|arg| arg == "--physical-large") {
+            2 * 1024 * 1024
+        } else {
+            1024 * 1024
+        };
+    let reassembly =
+        if mode == "advertised-reassembly" || args.iter().any(|arg| arg == "--reassembly-small") {
+            1_100_000
+        } else if mode == "oversized-reassembly" {
+            128 * 1024 * 1024
+        } else {
+            64 * 1024 * 1024
+        };
+    let mut negotiated = false;
+    if v2 {
+        emit(
+            json!({"type":"ready","protocolVersion":1,"supportedProtocolVersions":[1,2],
+            "maxFrameBytes":physical,"maxReassembledFrameBytes":reassembly}),
+        );
+    } else {
+        emit(json!({"type":"ready","protocolVersion":1}));
+    }
     if args.iter().any(|arg| arg == "--attention-on-start") {
         emit(
             json!({"type":"extension_ui_request","id":"question-1","method":"select",
@@ -205,15 +387,74 @@ fn main() {
         let Ok(frame) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+        if frame["type"] == "negotiate_protocol" {
+            assert!(
+                v2 && frame["id"] == "protocol-1" && frame["protocolVersion"] == 2,
+                "unexpected negotiation"
+            );
+            match option(&args, "--negotiation") {
+                Some("timeout") => {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    continue;
+                }
+                Some("exit") => std::process::exit(8),
+                Some("reject") => emit(
+                    json!({"type":"response","id":frame["id"],"success":false,"error":"fixture rejected negotiation"}),
+                ),
+                Some("wrong-version") => emit(
+                    json!({"type":"response","id":frame["id"],"success":true,"data":{"protocolVersion":1}}),
+                ),
+                _ => {
+                    negotiated = true;
+                    emit(
+                        json!({"type":"response","id":frame["id"],"command":"negotiate_protocol","success":true,"data":{"protocolVersion":2}}),
+                    );
+                }
+            }
+            continue;
+        }
+        if v2 && !negotiated {
+            eprintln!("business call arrived before negotiation");
+            std::process::exit(9);
+        }
+        if frame["type"] == "fixture_malformed" {
+            malformed(mode, &frame);
+            continue;
+        }
+        if frame["type"] == "fixture_large_event" {
+            emit_chunked(json!({"type":"fixture_event","text":"界🙂".repeat(240_000)}));
+        }
+        if frame["type"] == "fixture_echo" {
+            emit(json!({"type":"response","id":frame["id"],"success":true,
+                "data":{"sequence":frame["sequence"],"negotiated":negotiated}}));
+            continue;
+        }
         let ack = |data: Value| {
-            emit(
-                json!({"type":"response","id":frame["id"],"command":frame["type"],"success":true,"data":data}),
-            )
+            let reply = json!({"type":"response","id":frame["id"],"command":frame["type"],"success":true,"data":data});
+            if serde_json::to_vec(&reply).unwrap().len() >= 1024 * 1024 {
+                if v2 {
+                    emit_chunked(reply);
+                } else {
+                    emit(
+                        json!({"type":"response","id":frame["id"],"command":frame["type"],
+                        "success":false,"error":"RPC response exceeded the transport limit"}),
+                    );
+                }
+            } else {
+                emit(reply);
+            }
         };
         match frame["type"].as_str().unwrap_or_default() {
-            "get_state" => ack(
-                json!({"sessionFile":log,"sessionId":session_id,"sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"fastModeEnabled":fast_mode,"fastModeActive":fast_mode,"isSettled":pending_prompt_id.is_none() && !args.iter().any(|arg| arg == "--unknown-execution"),"isStreaming":pending_prompt_id.is_some()}),
-            ),
+            "get_state" => {
+                if args.iter().any(|arg| arg == "--startup-event-burst") {
+                    for _ in 0..3 {
+                        emit(json!({"type":"available_commands_update","commands":[]}));
+                    }
+                }
+                ack(
+                    json!({"sessionFile":log,"sessionId":session_id,"sessionName":session_title,"model":models[model_index],"thinkingLevel":thinking_level,"fastModeEnabled":fast_mode,"fastModeActive":fast_mode,"isSettled":pending_prompt_id.is_none() && !args.iter().any(|arg| arg == "--unknown-execution"),"isStreaming":pending_prompt_id.is_some()}),
+                );
+            }
             "get_available_thinking_levels" => {
                 let mut levels = vec![json!("off")];
                 levels.extend(

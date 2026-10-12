@@ -157,7 +157,8 @@ impl SessionController {
         });
         let started = async {
             runtime.wait_ready().await?;
-            let _feedback_order = self.feedback_order.lock().await;
+            // Startup RPCs may emit ordinary events before their response. Let the
+            // generation-checked consumer drain them while the projection is starting.
             let missing_allowed = if let Some(reference) = session.engine_session_ref.as_deref() {
                 let file_exists = match tokio::fs::metadata(reference).await {
                     Ok(metadata) => {
@@ -225,6 +226,17 @@ impl SessionController {
                 !reference.is_empty(),
                 "OMP did not provide a session reference"
             );
+            // Serialize only the durable mapping/state commit with feedback and history.
+            // No RPC may run under this gate: the bounded output queue needs its consumer.
+            let _feedback_order = self.feedback_order.lock().await;
+            let mut state = self.state.lock().await;
+            ensure!(
+                state
+                    .runtime
+                    .as_ref()
+                    .is_some_and(|r| r.generation == generation),
+                "runtime generation changed during startup"
+            );
             if session.engine_session_ref.is_none() {
                 let save_session = session.id.clone();
                 let save_reference = reference.to_owned();
@@ -267,14 +279,6 @@ impl SessionController {
                 saved.engine_session_ref.as_deref() == Some(reference),
                 "session mapping changed during startup"
             );
-            let mut state = self.state.lock().await;
-            ensure!(
-                state
-                    .runtime
-                    .as_ref()
-                    .is_some_and(|r| r.generation == generation),
-                "runtime generation changed during startup"
-            );
             state.session = saved;
             if let Some(snapshot) = state.projection.as_mut() {
                 snapshot.phase = "ready".into();
@@ -289,6 +293,7 @@ impl SessionController {
                 snapshot.actual_model = model_info(data);
             }
             state.update_work_timing(false);
+            self.publish_state(&mut state);
             Ok::<(), anyhow::Error>(())
         }
         .await;
@@ -298,10 +303,6 @@ impl SessionController {
                 self.apply_exit(&generation, Some(err.to_string())).await;
             }
             return Err(err);
-        }
-        {
-            let mut state = self.state.lock().await;
-            self.publish_state(&mut state);
         }
         Ok((generation, runtime))
     }

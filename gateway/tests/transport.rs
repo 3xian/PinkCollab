@@ -1,7 +1,7 @@
 //! Transport-level regression tests for the OMP runtime. They need the fixture binary, which
 //! speaks the same NDJSON protocol and can be told to misbehave.
 #![cfg(feature = "test-fixtures")]
-use pinkcollab_gateway::omp::{Output, Runtime};
+use pinkcollab_gateway::omp::{Output, Runtime, TransportError, TransportErrorKind};
 use serde_json::json;
 use std::time::Duration;
 
@@ -225,4 +225,291 @@ fn unix_child_running(pid: i32) -> bool {
     {
         true
     }
+}
+
+// Draining concurrently is essential: production deliberately queues only one logical frame.
+fn drain(
+    mut output: tokio::sync::mpsc::Receiver<Output>,
+) -> tokio::task::JoinHandle<(Vec<serde_json::Value>, Option<String>)> {
+    tokio::spawn(async move {
+        let mut frames = Vec::new();
+        while let Some(event) = output.recv().await {
+            match event {
+                Output::Frame(frame) => {
+                    assert_ne!(
+                        frame["type"], "rpc_chunk",
+                        "wire envelopes must remain private"
+                    );
+                    frames.push(frame);
+                }
+                Output::Exited(reason) => return (frames, reason),
+            }
+        }
+        panic!("output closed without an exit");
+    })
+}
+
+#[tokio::test]
+async fn v1_small_reply_remains_compatible() {
+    let (_dir, runtime, output) = fixture(&[]);
+    let drained = drain(output);
+    runtime.wait_ready().await.unwrap();
+    let reply = runtime
+        .request(json!({"type":"get_available_models"}))
+        .await
+        .unwrap();
+    assert_eq!(reply["data"]["models"].as_array().unwrap().len(), 2);
+    assert_eq!(reply["data"]["models"][0]["id"], "fast");
+    assert_eq!(
+        reply["data"]["models"][1]["thinking"]["efforts"],
+        json!(["medium", "high"])
+    );
+    runtime.stop().await;
+    assert_eq!(drained.await.unwrap().1, None);
+}
+
+#[tokio::test]
+async fn v1_catalog_overflow_preserves_the_upstream_error() {
+    let (_dir, runtime, output) = fixture(&["--large-models"]);
+    let drained = drain(output);
+    let error = runtime
+        .request(json!({"type":"get_available_models"}))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "OMP rejected command: RPC response exceeded the transport limit"
+    );
+    // A rejected logical response is not a broken transport.
+    let response = runtime
+        .request(json!({"type":"fixture_echo","sequence":7}))
+        .await
+        .unwrap();
+    assert_eq!(response["data"], json!({"sequence":7,"negotiated":false}));
+    runtime.stop().await;
+    assert_eq!(drained.await.unwrap().1, None);
+}
+
+#[tokio::test]
+async fn concurrent_business_requests_wait_for_negotiation() {
+    let (_dir, runtime, output) = fixture(&["--rpc-v2"]);
+    let drained = drain(output);
+    let mut calls = Vec::new();
+    for sequence in 0..8 {
+        let runtime = runtime.clone();
+        calls.push(tokio::spawn(async move {
+            let id = format!("early-{sequence}");
+            let reply = runtime
+                .request_with_id(
+                    id.clone(),
+                    json!({"type":"fixture_echo","sequence":sequence}),
+                )
+                .await
+                .unwrap();
+            assert_eq!(reply["id"], id);
+            assert_eq!(
+                reply["data"],
+                json!({"sequence":sequence,"negotiated":true})
+            );
+        }));
+    }
+    for call in calls {
+        tokio::time::timeout(Duration::from_secs(5), call)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    runtime.stop().await;
+    assert_eq!(drained.await.unwrap().1, None);
+}
+
+#[tokio::test]
+async fn v2_negotiates_then_reassembles_large_models_and_utf8_events() {
+    let (_dir, runtime, output) = fixture(&["--rpc-v2", "--large-models"]);
+    let drained = drain(output);
+    runtime.wait_ready().await.unwrap();
+    for sequence in 0..3 {
+        let reused = runtime
+            .request_with_id(
+                "protocol-1".to_owned(),
+                json!({"type":"fixture_echo","sequence":sequence}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reused["id"], "protocol-1");
+        assert_eq!(
+            reused["data"],
+            json!({"sequence":sequence,"negotiated":true})
+        );
+        let reply = runtime
+            .request_with_id(
+                format!("catalog-{sequence}"),
+                json!({"type":"get_available_models"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply["id"], format!("catalog-{sequence}"));
+        assert_eq!(reply["success"], true);
+        let models = reply["data"]["models"].as_array().unwrap();
+        assert_eq!(models.len(), 642);
+        assert!(serde_json::to_vec(&reply).unwrap().len() > 1024 * 1024);
+        assert_eq!(models[0]["id"], "fast");
+        assert_eq!(models[1]["id"], "smart");
+        for (index, model) in models[2..].iter().enumerate() {
+            assert_eq!(
+                *model,
+                json!({
+                    "provider":"fixture","id":format!("large-{index}"),"name":format!("Fixture Large {index}"),
+                    "reasoning":true,"contextWindow":200000,"maxTokens":8192,
+                    "cost":{"input":1.25,"output":5,"cacheRead":0.1,"cacheWrite":1.5},
+                    "input":["text","image"],"thinking":{"mode":"effort","efforts":["low","medium","high"]},
+                    "fixtureMetadata":{"index":index,"description":"界".repeat(700)}
+                })
+            );
+        }
+        let small = runtime
+            .request_with_id(
+                format!("small-{sequence}"),
+                json!({"type":"fixture_echo","sequence":sequence}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(small["id"], format!("small-{sequence}"));
+        assert_eq!(
+            small["data"],
+            json!({"sequence":sequence,"negotiated":true})
+        );
+    }
+    runtime
+        .request(json!({"type":"fixture_large_event"}))
+        .await
+        .unwrap();
+    runtime.stop().await;
+    let (frames, reason) = drained.await.unwrap();
+    assert_eq!(reason, None);
+    let events = frames
+        .iter()
+        .filter(|frame| frame["type"] == "fixture_event")
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["text"], "界🙂".repeat(240_000));
+}
+
+#[tokio::test]
+async fn malformed_v2_streams_fail_boundedly_and_release_pending_calls() {
+    use TransportErrorKind::*;
+    for (mode, expected) in [
+        ("wrong-index", InvalidChunk),
+        ("wrong-id", InvalidChunk),
+        ("wrong-count", InvalidChunk),
+        ("duplicate", InvalidChunk),
+        ("missing", InvalidChunk),
+        ("interleaved", InvalidChunk),
+        ("short-length", InvalidChunk),
+        ("long-length", InvalidChunk),
+        ("small-length", InvalidChunk),
+        ("corrupt-base64", InvalidChunk),
+        ("unpadded-base64", InvalidChunk),
+        ("noncanonical-base64", InvalidChunk),
+        ("invalid-json", InvalidJson),
+        ("invalid-utf8", InvalidUtf8),
+        ("non-object", InvalidFrame),
+        ("nested-chunk", InvalidFrame),
+        ("oversized-reassembly", ReassemblyTooLarge),
+        ("advertised-reassembly", ReassemblyTooLarge),
+        ("midchunk-exit", IncompleteChunk),
+        ("physical-local", PhysicalFrameTooLarge),
+        ("physical-advertised", PhysicalFrameTooLarge),
+        ("unterminated-local", PhysicalFrameTooLarge),
+        ("unterminated-advertised", PhysicalFrameTooLarge),
+        ("count-one", InvalidChunk),
+        ("count-too-many", InvalidChunk),
+        ("empty-id", InvalidChunk),
+        ("long-id", InvalidChunk),
+        ("oversized-chunk", ChunkPayloadTooLarge),
+    ] {
+        let (_dir, runtime, output) = fixture(&["--rpc-v2", "--rpc-case", mode]);
+        let drained = drain(output);
+        runtime.wait_ready().await.unwrap();
+        let (first, second) = tokio::time::timeout(Duration::from_secs(8), async {
+            tokio::join!(
+                runtime.request(json!({"type":"fixture_malformed"})),
+                runtime.request(json!({"type":"fixture_echo","sequence":99})),
+            )
+        })
+        .await
+        .expect("malformed stream must release all pending requests");
+        let error = first.expect_err(mode);
+        let transport = error.downcast::<TransportError>().unwrap_or_else(|error| {
+            panic!("{mode}: expected typed transport error, got {error:#}")
+        });
+        assert_eq!(transport.kind, expected, "{mode}: {transport}");
+        // The ordinary reply may complete before the malformed request, but never hangs.
+        if let Ok(reply) = second {
+            assert_eq!(reply["data"]["sequence"], 99);
+        }
+        let (_, reason) = tokio::time::timeout(Duration::from_secs(8), drained)
+            .await
+            .expect("malformed stream must terminate")
+            .unwrap();
+        let diagnostic = reason
+            .as_deref()
+            .expect("transport failure must have a diagnostic");
+        assert!(!diagnostic.is_empty(), "{mode}");
+        assert!(!runtime.alive(), "{mode}");
+        tokio::time::timeout(Duration::from_secs(5), runtime.stop())
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn negotiation_failures_release_ready_and_stop() {
+    for mode in ["reject", "wrong-version", "timeout", "exit"] {
+        let (_dir, runtime, output) = fixture(&["--rpc-v2", "--negotiation", mode]);
+        let drained = drain(output);
+        tokio::time::timeout(Duration::from_secs(13), runtime.wait_ready())
+            .await
+            .expect("negotiation deadline must be bounded")
+            .expect_err(mode);
+        let (_, reason) = tokio::time::timeout(Duration::from_secs(5), drained)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            reason.as_deref().is_some_and(|reason| !reason.is_empty()),
+            "{mode}"
+        );
+        tokio::time::timeout(Duration::from_secs(5), runtime.stop())
+            .await
+            .unwrap();
+        assert!(!runtime.alive());
+    }
+}
+
+#[tokio::test]
+async fn an_unfinished_chunk_sequence_has_a_deadline() {
+    let (_dir, runtime, output) = fixture(&["--rpc-v2", "--rpc-case", "missing-stall"]);
+    let drained = drain(output);
+    runtime.wait_ready().await.unwrap();
+    let error = tokio::time::timeout(
+        Duration::from_secs(20),
+        runtime.request(json!({"type":"fixture_malformed"})),
+    )
+    .await
+    .unwrap()
+    .expect_err("unfinished chunks cannot keep a request pending");
+    assert_eq!(
+        error.downcast::<TransportError>().unwrap().kind,
+        TransportErrorKind::Timeout
+    );
+    let (_, reason) = tokio::time::timeout(Duration::from_secs(8), drained)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(reason.as_deref().is_some_and(|reason| !reason.is_empty()));
+    tokio::time::timeout(Duration::from_secs(5), runtime.stop())
+        .await
+        .unwrap();
+    assert!(!runtime.alive());
 }
