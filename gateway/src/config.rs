@@ -132,6 +132,49 @@ pub fn resolve_executable(name: &str) -> Option<PathBuf> {
             .and_then(|candidate| std::path::absolute(candidate).ok())
     })
 }
+/// Compares launcher entries without following their final symlink/reparse point.
+/// Windows filesystem identity handles casing and aliases without folding distinct files
+/// in case-sensitive directories. Other platforms retain lexical entry comparison.
+pub fn same_executable_entry(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+        };
+
+        fn identity(path: &Path) -> Option<(u64, [u8; 16])> {
+            let file = std::fs::OpenOptions::new()
+                .access_mode(0)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(path)
+                .ok()?;
+            // FileIdInfo initializes the entire output structure on success.
+            let mut info: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+            let success = unsafe {
+                GetFileInformationByHandleEx(
+                    file.as_raw_handle(),
+                    FileIdInfo,
+                    (&raw mut info).cast(),
+                    std::mem::size_of::<FILE_ID_INFO>() as u32,
+                )
+            };
+            (success != 0).then_some((info.VolumeSerialNumber, info.FileId.Identifier))
+        }
+
+        identity(left)
+            .zip(identity(right))
+            .is_some_and(|(left, right)| left == right)
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 fn executable(path: &Path) -> bool {
     #[cfg(unix)]
     {

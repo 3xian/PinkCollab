@@ -149,19 +149,21 @@ Use the external transport flags on these setup commands too, if applicable. For
 
 ### Recover a stale OMP installation path
 
-Switching OMP installation channels (for example, from Homebrew to the official curl installer) can leave the saved `omp` entry pointing at a removed launcher. `pinkcollab doctor` shows that entry and its validation result; only when it is invalid does doctor probe `omp` on PATH. Doctor never changes configuration or services.
+After switching OMP installation channels, PinkCollab may still point to the old launcher. Confirm the new installation works, inspect the saved entry, then run setup to approve a replacement:
 
-Find the intended launcher as the Gateway user with `type -a omp` and `command -v omp` on macOS/Linux, or `Get-Command omp -All` in PowerShell, then confirm `omp --version` works. A healthy saved launcher remains preferred even if PATH points elsewhere.
+```sh
+omp --version
+pinkcollab doctor
+pinkcollab setup
+```
 
-If PATH resolves to the same entry that already failed validation, setup and doctor do not probe it again. Repair that launcher or select a different working entry with `setup --omp <path>`.
+- Setup keeps a working saved launcher. If it has failed, setup offers a validated PATH replacement; confirmation defaults to **No**. To select a launcher explicitly, use `pinkcollab setup --omp omp` or `pinkcollab setup --omp "/absolute/path/to/omp"`.
+- For automation, provide `--non-interactive --workspace <existing-root> --omp <path-or-omp>`.
+- For external HTTPS, add your existing `--transport external --public-url https://your-host` options to setup.
+- Finish active work first: a required Gateway restart ends active OMP runtimes but preserves provider credentials, pairings, and saved sessions.
+- If restart fails, the approved configuration remains saved. Resolve the service error, then run `pinkcollab service restart`; do not delete configuration or pairings.
 
-Run `pinkcollab setup` to confirm a validated PATH replacement interactively; the confirmation defaults to **No**. To authorize a specific replacement explicitly, use `pinkcollab setup --omp omp` (resolve the current PATH launcher) or `pinkcollab setup --omp "/absolute/path/to/omp"`. Setup validates the replacement before saving it. Non-interactive recovery requires both `--workspace <existing-root>` and `--omp <path-or-omp>`; it never silently replaces a broken saved launcher.
-
-Retain `--transport external --public-url https://your-host` on every recovery setup invocation if you use external HTTPS. OMP provider credentials, PinkCollab pairings, and stored sessions are preserved. A necessary Gateway restart ends active OMP runtimes; finish active work first.
-
-If the required service restart fails, setup exits with an error but keeps the authorized configuration. Resolve the service error, then run `pinkcollab service restart` to apply it; do not delete configuration or pairings.
-
-Background startup uses a saved PATH snapshot, already including the user's `.local/bin` and `.bun/bin` on Unix. Changing shell PATH alone does not update an existing service; rerun setup after changing the launcher environment.
+If recovery still fails, locate the intended launcher with `type -a omp` on macOS/Linux or `Get-Command omp -All` in PowerShell, verify its `--version`, and select it with `setup --omp <path>`.
 
 ## Pairing and access
 

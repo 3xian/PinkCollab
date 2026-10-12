@@ -159,7 +159,12 @@ async fn select_omp(
     println!("Configured OMP: {} ({failure:#})", safe_text(configured));
     let candidate_path = config::resolve_executable("omp");
     ensure!(
-        configured_path.is_none() || candidate_path != configured_path,
+        !configured_path
+            .as_ref()
+            .zip(candidate_path.as_ref())
+            .is_some_and(|(configured, candidate)| config::same_executable_entry(
+                configured, candidate
+            )),
         "{failure:#}\nPATH points to the same failed OMP entry; no replacement is available. Fix this launcher or use pinkcollab setup --omp <different-path>."
     );
     let candidate = validated_omp(control, "omp")

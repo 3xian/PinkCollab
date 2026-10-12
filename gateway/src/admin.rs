@@ -330,7 +330,10 @@ pub async fn doctor(dir: &Path) -> Result<()> {
         match config::resolve_executable("omp") {
             Some(path) => {
                 println!("  PATH candidate: {}", path.display());
-                if configured_path.as_ref() == Some(&path) {
+                if configured_path
+                    .as_ref()
+                    .is_some_and(|configured| config::same_executable_entry(configured, &path))
+                {
                     println!(
                         "  PATH candidate validation: invalid (same entry already failed --version)"
                     );
