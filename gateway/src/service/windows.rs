@@ -89,7 +89,7 @@ pub fn system_legacy(
             Ok(Some(service))
         }
         Err(windows_service::Error::Winapi(error)) if error.raw_os_error() == Some(1060) => Ok(None),
-        Err(error) => Err(error).context("Cannot migrate the old Windows service. Run pinkcollab service install once in an Administrator terminal as the same user. Future installs need no elevation or password."),
+        Err(error) => Err(error).context("Cannot migrate the old Windows service. Run pinkcollab setup once in an Administrator terminal as the same user. Later updates use pinkcollab update and need no elevation or password."),
     }
 }
 
@@ -119,7 +119,7 @@ impl ServiceManager for Manager<'_> {
         println!("Windows background Gateway: starts at user login; no password required.");
         Ok(())
     }
-    fn install(&self) -> Result<InstallOutcome> {
+    fn install(&self) -> Result<InstallReport> {
         let i = self.installation;
         self.preflight(false)?;
         let state = self.status()?;
@@ -139,7 +139,10 @@ impl ServiceManager for Manager<'_> {
             && environment_same
             && self.legacy(ServiceAccess::empty())?.is_none()
         {
-            return Ok(InstallOutcome::Unchanged);
+            return Ok(InstallReport {
+                outcome: InstallOutcome::Unchanged,
+                resumed: false,
+            });
         }
         let outcome = if state == ServiceStatus::NotInstalled {
             InstallOutcome::Installed
@@ -162,8 +165,9 @@ impl ServiceManager for Manager<'_> {
         if update.resume {
             self.start()?;
         }
+        let resumed = update.resume;
         update.commit()?;
-        Ok(outcome)
+        Ok(InstallReport { outcome, resumed })
     }
     fn uninstall(&self) -> Result<()> {
         self.installation.check_owner()?;

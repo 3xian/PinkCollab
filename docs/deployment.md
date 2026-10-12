@@ -38,7 +38,7 @@ Configure your HTTPS front end, then run:
 pinkcollab setup --transport external --public-url https://collab.example.com --workspace /srv/projects
 ```
 
-`--public-url` is required on **every external setup invocation**, including upgrades. It must be an absolute HTTPS root with a host and optional port, no username/password, no path other than `/`, and no query or fragment. A trailing `/` is allowed. Setup saves this as `public_url`; later `pinkcollab pair` uses it by default.
+`--public-url` is required on every external `setup` invocation. It must be an absolute HTTPS root with a host and optional port, no username/password, no path other than `/`, and no query or fragment. A trailing `/` is allowed. Setup saves this as `public_url`; later `pinkcollab pair` uses it by default. A version update uses `pinkcollab update` and does not repeat this flag.
 
 The proxy must forward to the configured loopback listener, preserve the `Authorization` header, and support WebSocket upgrades and long-lived connections. Do not expose the Gateway's HTTP port directly. A minimal Caddy site on the same host is:
 
@@ -52,7 +52,7 @@ Replace the hostname and upstream port. Caddy handles WebSocket forwarding; you 
 
 External setup does not invoke Tailscale or manage DNS, certificates, or the proxy. It checks **local Gateway health, not external reachability**. Verify the connection from the phone using the [deployment checks](#verify-the-deployment).
 
-When switching from Funnel, external setup does not remove the old Tailscale mapping. Inspect `tailscale funnel status` and remove the obsolete mapping if public access is no longer intended; see [Tailscale Funnel](#tailscale-funnel). Omitting `--transport external` selects the default Funnel flow even if an external URL is already saved.
+When switching from Funnel, external setup does not remove the old Tailscale mapping. Inspect `tailscale funnel status` and remove the obsolete mapping if public access is no longer intended; see [Tailscale Funnel](#tailscale-funnel). Omitting `--transport external` on `setup` selects the default Funnel flow even if an external URL is already saved. `pinkcollab update` does not run setup and does not change the saved transport.
 
 ### Automation
 
@@ -79,7 +79,7 @@ A healthy local process does not prove that DNS, TLS, the proxy, or phone connec
 
 ## Run as a background service
 
-Setup installs and starts background startup. Manage it with:
+Setup installs and starts background startup. Apply a new CLI to that installation with `pinkcollab update`. Manage the service with:
 
 | Command | Effect |
 | --- | --- |
@@ -87,7 +87,7 @@ Setup installs and starts background startup. Manage it with:
 | `pinkcollab service stop` | Stop it without disabling future startup |
 | `pinkcollab service restart` | Stop and start it |
 | `pinkcollab service status` | Check the background process |
-| `pinkcollab service install` | Install or update startup; a new installation needs `start` afterward |
+| `pinkcollab service install` | Install startup when it is missing. Does not start it, and does not update an existing installation |
 | `pinkcollab service uninstall` | Stop it and remove startup; preserve data |
 
 | Platform | Startup and logout behavior | Logs |
@@ -108,31 +108,33 @@ The stable executable is `%LOCALAPPDATA%/PinkCollab/bin/pinkcollab-gateway.exe`.
 
 There is no automatic crash restart; use `pinkcollab service start` to recover. If Windows disables the startup entry or Windows Script Host, start it manually after login.
 
-**Migrating an old Windows service:** run `pinkcollab setup` once in an Administrator terminal as its original user. The installer verifies ownership, binary, and data directory before replacing the old service with login startup. Settings and pairings are preserved; later updates use a normal terminal.
+**Migrating an old Windows service:** run `pinkcollab setup` once in an Administrator terminal as its original user. The installer verifies ownership, binary, and data directory before replacing the old service with login startup. Settings and pairings are preserved; later updates use `pinkcollab update` in a normal terminal.
 
 ## Upgrade checks and duplicate installations
 
-Finish active work, update the Android APK and npm package to the same release, then update the installed Gateway:
+Finish active work, update the Android APK and npm package to the same release, then apply that CLI to the installed Gateway:
 
 ```sh
 npm install -g pinkcollab@latest
 pinkcollab --version
-pinkcollab setup
+pinkcollab update
 pinkcollab doctor
 ```
 
-For a specific APK release, use `pinkcollab@X.Y.Z` instead of `@latest`. **External HTTPS users must replace the setup command** with `pinkcollab setup --transport external --public-url https://collab.example.com`, using their actual URL. Include `--workspace` when adding roots.
+For a specific APK release, use `pinkcollab@X.Y.Z` instead of `@latest`. `update` requires an existing configuration and installed background startup. It does not change workspaces, the public URL, transport, or pairings, and it does not prompt. A changed running Gateway restarts and ends active OMP runtimes. An identical installation does not restart. A stopped Gateway is updated on disk and left stopped unless the installer is completing an interrupted restart or reloading a still-loaded macOS launchd agent. Whenever the installer starts the Gateway, `update` waits for local health before reporting success. Otherwise, start it with `pinkcollab service start`.
 
-`doctor` should show matching CLI and installed-binary hashes and a healthy Gateway. Identical completed installs do not restart it. If an update fails, fix the reported error and rerun setup; do not delete configuration or pairings.
+Changing workspaces, transport, or the OMP launcher still uses `pinkcollab setup`. External HTTPS setup must keep `--transport external --public-url https://collab.example.com`. `service install` only registers startup that is not installed yet.
 
-If `pinkcollab --version` disagrees with `npm list -g pinkcollab --depth=0`, another installation may be ahead on PATH. Locate it with `Get-Command pinkcollab -All` in PowerShell or `type -a pinkcollab` on macOS/Linux. Avoid running setup from the obsolete copy; invoke the current npm package directly:
+`doctor` should show matching CLI and installed-binary hashes and a healthy Gateway. If an update fails, fix the reported error and rerun `pinkcollab update`; do not delete configuration or pairings.
+
+If `pinkcollab --version` disagrees with `npm list -g pinkcollab --depth=0`, another installation may be ahead on PATH. Locate it with `Get-Command pinkcollab -All` in PowerShell or `type -a pinkcollab` on macOS/Linux. Avoid running update from the obsolete copy; invoke the current npm package directly:
 
 **Windows PowerShell:**
 
 ```powershell
 $launcher = Join-Path (npm root -g) "pinkcollab/bin/pinkcollab.js"
 node $launcher --version
-node $launcher setup
+node $launcher update
 node $launcher doctor
 ```
 
@@ -141,11 +143,11 @@ node $launcher doctor
 ```sh
 launcher="$(npm root -g)/pinkcollab/bin/pinkcollab.js"
 node "$launcher" --version
-node "$launcher" setup
+node "$launcher" update
 node "$launcher" doctor
 ```
 
-Use the external transport flags on these setup commands too, if applicable. For a read-only PATH diagnostic, run the package's `bin/check-install.js` through Node from your shell, outside npm lifecycle scripts. Shell aliases still require the shell checks above. Correct PATH or remove only the verified obsolete npm installation, then open a new terminal and recheck the version.
+Use `setup` only when changing configuration. External HTTPS setup must keep its transport flags. For a read-only PATH diagnostic, run the package's `bin/check-install.js` through Node from your shell, outside npm lifecycle scripts. Shell aliases still require the shell checks above. Correct PATH or remove only the verified obsolete npm installation, then open a new terminal and recheck the version.
 
 ### Recover a stale OMP installation path
 
@@ -240,7 +242,7 @@ Start with `pinkcollab doctor`; it diagnoses without changing the installation. 
 | OMP unavailable or prompts fail | Run OMP as the Gateway user; check provider credentials, configured executable, and saved PATH. Reinstall/update startup after changing the launcher environment. |
 | Tailscale sign-in times out | Finish sign-in in Tailscale, check `tailscale status`, and rerun setup. |
 | Funnel approval missing | Follow [remote-access troubleshooting](#troubleshooting-remote-access) or choose another transport. |
-| Gateway stopped or update failed | Inspect the platform logs above, fix the error, and rerun setup. On Windows, check login startup and Windows Script Host. |
+| Gateway stopped or update failed | For a stopped Gateway, run `pinkcollab service start`. For a failed update, inspect the platform logs above, fix the error, and rerun `pinkcollab update`. On Windows, check login startup and Windows Script Host. |
 | Installed build differs from CLI | Follow [upgrade checks](#upgrade-checks-and-duplicate-installations); diagnostics do not upgrade automatically. |
 | Data-directory conflict | Manage the installation with its original `--data-dir` and OS user. |
 | Listener already occupied | Stop a manually started Gateway or resolve the port conflict before setup. |
@@ -261,7 +263,8 @@ The default data directory is `~/.pinkcollab` (`./.pinkcollab` if no home direct
 
 | Command | Purpose |
 | --- | --- |
-| `setup` | Configure/update, install background startup, start, and pair |
+| `setup` | Configure, install background startup, start, and pair |
+| `update` | Apply this CLI to an installed background Gateway without changing configuration |
 | `status` / `doctor` | Operational status / detailed diagnostics |
 | `service <action>` | [Manage background startup](#run-as-a-background-service) |
 | `init --workspace <dir>...` | Manual bootstrap; requires existing directories and OMP; fails if configuration exists |

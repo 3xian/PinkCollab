@@ -18,6 +18,7 @@ mod service;
 mod setup;
 mod setup_connect;
 mod setup_control;
+mod update;
 
 #[cfg(windows)]
 mod windows;
@@ -36,7 +37,7 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Commands {
-    /// Set up or update PinkCollab.
+    /// Set up PinkCollab.
     #[command(display_order = 0)]
     Setup {
         #[arg(long)]
@@ -52,6 +53,9 @@ enum Commands {
         #[arg(long)]
         omp: Option<String>,
     },
+    /// Apply this CLI to an installed background Gateway without changing configuration.
+    #[command(display_order = 0)]
+    Update,
     /// Manage the background Gateway.
     #[command(display_order = 3)]
     Service {
@@ -139,22 +143,18 @@ async fn main() -> Result<()> {
             transport,
             public_url,
             omp,
-        } => match setup::run(
-            &cli.data_dir,
-            &workspace,
-            non_interactive,
-            transport,
-            public_url.as_deref(),
-            omp.as_deref(),
-        )
-        .await
-        {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                eprintln!("{error:#}\n\nFor details, run pinkcollab doctor.");
-                std::process::exit(1);
-            }
-        },
+        } => with_doctor_hint(
+            setup::run(
+                &cli.data_dir,
+                &workspace,
+                non_interactive,
+                transport,
+                public_url.as_deref(),
+                omp.as_deref(),
+            )
+            .await,
+        ),
+        Commands::Update => with_doctor_hint(update::run(&cli.data_dir).await),
         Commands::Service { action } => service::execute(&cli.data_dir, action),
         Commands::Doctor => admin::doctor(&cli.data_dir).await,
         Commands::Init { workspace } => admin::init(&cli.data_dir, &workspace),
@@ -198,6 +198,15 @@ async fn main() -> Result<()> {
         Commands::BackgroundStart => service::execute(&cli.data_dir, service::Action::Start),
     }
 }
+
+fn with_doctor_hint(result: Result<()>) -> Result<()> {
+    if let Err(error) = result {
+        eprintln!("{error:#}\n\nFor details, run pinkcollab doctor.");
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 async fn serve_until(
     config: Config,
     store: Arc<Store>,
@@ -315,5 +324,11 @@ mod cli_tests {
             _ => panic!("expected external setup"),
         }
         assert!(Cli::try_parse_from(["pinkcollab", "setup", "--transport", "unknown"]).is_err());
+    }
+    #[test]
+    fn update_has_no_configuration_flags() {
+        let cli = Cli::try_parse_from(["pinkcollab", "update"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Update)));
+        assert!(Cli::try_parse_from(["pinkcollab", "update", "--workspace", "/tmp"]).is_err());
     }
 }

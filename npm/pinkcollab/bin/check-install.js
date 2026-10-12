@@ -52,10 +52,10 @@ function main() {
       "pinkcollab: WARNING: another installation takes precedence on PATH.\n" +
       `  Shell command: ${shadow.candidate}\n` +
       `  Newly installed npm launcher: ${shadow.launcher}\n` +
-      "Running pinkcollab setup may still run the other installation.\n" +
-      "Run the new launcher explicitly with node, or correct PATH before setup.\n" +
+      "Running pinkcollab may still run the other installation.\n" +
+      "Run the new launcher explicitly with node, or correct PATH before update.\n" +
       "Remove an older npm installation only using its original global prefix.\n" +
-      "Then run setup or service install to update the background Gateway.\n" +
+      "Then run pinkcollab update to apply the new CLI to the background Gateway.\n" +
       "Gateway updates can stop active OMP runtimes; sessions and pairings remain.",
     );
   } catch (error) {

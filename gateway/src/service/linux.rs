@@ -25,7 +25,7 @@ fn render(i: &Installation) -> String {
     )
 }
 impl ServiceManager for Manager<'_> {
-    fn install(&self) -> Result<InstallOutcome> {
+    fn install(&self) -> Result<InstallReport> {
         let i = self.installation;
         let fresh = !i.definition.try_exists()?;
         i.check_owner()?;
@@ -35,7 +35,10 @@ impl ServiceManager for Manager<'_> {
         if !update.changed
             && read_optional(&i.definition)?.as_deref() == Some(definition.as_bytes())
         {
-            return Ok(InstallOutcome::Unchanged);
+            return Ok(InstallReport {
+                outcome: InstallOutcome::Unchanged,
+                resumed: false,
+            });
         }
         let outcome = if fresh {
             InstallOutcome::Installed
@@ -55,8 +58,9 @@ impl ServiceManager for Manager<'_> {
         if update.resume {
             self.restart()?;
         }
+        let resumed = update.resume;
         update.commit()?;
-        Ok(outcome)
+        Ok(InstallReport { outcome, resumed })
     }
     fn uninstall(&self) -> Result<()> {
         if self.installation.definition.exists() {
@@ -125,6 +129,7 @@ mod manager_tests {
     #[derive(Default)]
     struct Mock {
         calls: RefCell<Vec<String>>,
+        stopped: std::cell::Cell<bool>,
     }
     impl Runner for Mock {
         fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
@@ -133,7 +138,11 @@ mod manager_tests {
                 .push(format!("{program} {}", args.join(" ")));
             Ok(Output {
                 status: std::process::ExitStatus::from_raw(0),
-                stdout: b"active\n".to_vec(),
+                stdout: if self.stopped.get() {
+                    b"inactive\n".to_vec()
+                } else {
+                    b"active\n".to_vec()
+                },
                 stderr: vec![],
             })
         }
@@ -154,9 +163,13 @@ mod manager_tests {
             installation: &installation,
             runner: &runner,
         };
-        assert_eq!(manager.install().unwrap(), InstallOutcome::Installed);
+        let report = manager.install().unwrap();
+        assert_eq!(report.outcome, InstallOutcome::Installed);
+        assert!(!report.resumed);
         runner.calls.borrow_mut().clear();
-        assert_eq!(manager.install().unwrap(), InstallOutcome::Unchanged);
+        let report = manager.install().unwrap();
+        assert_eq!(report.outcome, InstallOutcome::Unchanged);
+        assert!(!report.resumed);
         assert!(
             runner
                 .calls
@@ -165,9 +178,43 @@ mod manager_tests {
                 .all(|c| !c.contains("stop") && !c.contains("start"))
         );
         std::fs::write(installation.dir.join("config.yaml"), "updated config").unwrap();
-        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
+        let report = manager.install().unwrap();
+        assert_eq!(report.outcome, InstallOutcome::Updated);
+        assert!(report.resumed);
         std::fs::write(&installation.definition, "changed definition").unwrap();
-        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
+        assert_eq!(manager.install().unwrap().outcome, InstallOutcome::Updated);
         assert_eq!(manager.status().unwrap(), ServiceStatus::Running);
+    }
+    #[test]
+    fn stopped_update_only_resumes_with_pending_activation_intent() {
+        let root = tempfile::tempdir().unwrap();
+        let installation = Installation {
+            dir: root.path().join("data"),
+            binary: root.path().join("bin/gateway"),
+            definition: root.path().join("unit.service"),
+            path: "/bin".into(),
+        };
+        std::fs::create_dir_all(&installation.dir).unwrap();
+        std::fs::write(installation.dir.join("config.yaml"), "config").unwrap();
+        let runner = Mock::default();
+        runner.stopped.set(true);
+        let manager = Manager {
+            installation: &installation,
+            runner: &runner,
+        };
+        manager.install().unwrap();
+        std::fs::write(installation.dir.join("config.yaml"), "changed config").unwrap();
+        let report = manager.install().unwrap();
+        assert_eq!(report.outcome, InstallOutcome::Updated);
+        assert!(!report.resumed);
+        std::fs::write(
+            installation.binary.parent().unwrap().join("update-pending"),
+            "running",
+        )
+        .unwrap();
+        let report = manager.install().unwrap();
+        assert_eq!(report.outcome, InstallOutcome::Updated);
+        assert!(report.resumed);
+        assert_eq!(manager.status().unwrap(), ServiceStatus::Stopped);
     }
 }

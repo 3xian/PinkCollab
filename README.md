@@ -75,9 +75,10 @@ If connection or prompts fail, run `pinkcollab doctor` and see [setup troublesho
 | Check the host | `pinkcollab` |
 | Diagnose problems | `pinkcollab doctor` |
 | Pair another phone | `pinkcollab pair` |
+| Update the Gateway | `pinkcollab update` |
 | Add project roots | `pinkcollab setup --workspace /path/to/code --workspace /path/to/work` |
 
-To upgrade, install the APK and CLI from the same release, then rerun `pinkcollab setup` to update the background Gateway. External HTTPS users must repeat `--transport external --public-url https://collab.example.com` to avoid the default Funnel flow. Existing settings, conversations, and pairings are preserved. **An update may stop active OMP runtimes**; finish current work first. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations).
+To upgrade, install the APK and CLI from the same release, then run `pinkcollab update`. It applies this CLI to the installed Gateway and does not change workspaces, the public URL, or pairings. A changed running Gateway restarts and stops active OMP runtimes; finish current work first. Stopped Gateways stay stopped unless completing an interrupted restart or reloading a still-loaded macOS agent. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations).
 
 ## Keep in mind
 

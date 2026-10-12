@@ -47,6 +47,13 @@ impl InstallOutcome {
         }
     }
 }
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct InstallReport {
+    pub outcome: InstallOutcome,
+    /// The installer started the Gateway; readiness must still be checked.
+    pub resumed: bool,
+}
 /// Missing is distinct from an unreadable/corrupt installation.
 fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
     match std::fs::read(path) {
@@ -67,6 +74,7 @@ impl BinaryIdentity {
 
 #[derive(clap::Subcommand)]
 pub enum Action {
+    /// Install background startup when none is installed. Does not start it or update an existing installation.
     Install,
     Uninstall,
     Start,
@@ -75,12 +83,20 @@ pub enum Action {
     Status,
 }
 
+fn ensure_fresh_install(status: &ServiceStatus) -> Result<()> {
+    ensure!(
+        matches!(status, ServiceStatus::NotInstalled),
+        "Background startup is already installed. Run pinkcollab update to apply this CLI."
+    );
+    Ok(())
+}
+
 pub trait ServiceManager {
     fn preflight(&self, _non_interactive: bool) -> Result<()> {
         Ok(())
     }
 
-    fn install(&self) -> Result<InstallOutcome>;
+    fn install(&self) -> Result<InstallReport>;
     fn uninstall(&self) -> Result<()>;
     fn start(&self) -> Result<()>;
     fn stop(&self) -> Result<()>;
@@ -383,6 +399,8 @@ pub fn execute(dir: &Path, action: Action) -> Result<()> {
     match action {
         Action::Install => {
             Config::load(dir)?;
+            let state = manager.status()?;
+            ensure_fresh_install(&state)?;
             manager.preflight(false)?;
             manager.install()?;
         }
@@ -485,5 +503,17 @@ mod tests {
             ),
             "\"C:\\Program Files\\Gateway.exe\" --data-dir \"C:\\\\\" service-run"
         );
+    }
+    #[test]
+    fn service_install_rejects_an_existing_startup() {
+        assert!(ensure_fresh_install(&ServiceStatus::NotInstalled).is_ok());
+        for status in [
+            ServiceStatus::Running,
+            ServiceStatus::Stopped,
+            ServiceStatus::Failed("crashed".into()),
+        ] {
+            let error = ensure_fresh_install(&status).unwrap_err();
+            assert!(error.to_string().contains("pinkcollab update"), "{error:#}");
+        }
     }
 }
