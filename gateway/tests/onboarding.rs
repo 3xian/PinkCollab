@@ -748,6 +748,9 @@ impl HealthFixture {
             while !server_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut socket, _)) => {
+                        // macOS accepted sockets inherit the listener's nonblocking mode.
+                        // Use blocking reads with the timeout below, not an immediate WouldBlock.
+                        socket.set_nonblocking(false).unwrap();
                         socket
                             .set_read_timeout(Some(std::time::Duration::from_secs(1)))
                             .unwrap();
