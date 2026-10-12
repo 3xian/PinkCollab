@@ -256,6 +256,30 @@ pub async fn status(dir: &Path) -> Result<()> {
     );
     Ok(())
 }
+fn doctor_lease_count(dir: &Path) -> Result<i64> {
+    let path = dir.join("pinkcollab.db");
+    if !path.try_exists()? {
+        return Ok(0);
+    }
+    let db =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    Ok(db.query_row("SELECT COUNT(*) FROM runtime_leases", [], |row| row.get(0))?)
+}
+
+async fn doctor_omp_version(path: &Path) -> bool {
+    let version = omp::version(&workspace::display(path)).await;
+    if version == "unavailable" {
+        println!("  version: unavailable (--version failed or timed out)");
+        false
+    } else if version.trim().is_empty() {
+        println!("  version: unavailable (--version returned empty output)");
+        false
+    } else {
+        println!("  version: {version}");
+        true
+    }
+}
+
 /// Full diagnostics continue through independent failures, including an invalid config.
 pub async fn doctor(dir: &Path) -> Result<()> {
     let mut problems = Vec::new();
@@ -281,18 +305,31 @@ pub async fn doctor(dir: &Path) -> Result<()> {
     };
     println!("OMP");
     let executable = config.as_ref().map_or("omp", |c| c.omp.as_str());
-    match config::resolve_executable(executable) {
+    println!("  configured entry: {executable}");
+    let configured_valid = match config::resolve_executable(executable) {
         Some(path) => {
-            let version = omp::version(&workspace::display(&path)).await;
-            println!("  executable: {}\n  version: {version}", path.display());
-            if version == "unavailable" {
-                problems.push("OMP");
-            }
+            println!("  executable: {}", path.display());
+            doctor_omp_version(&path).await
         }
         None => {
-            println!("  executable: {executable} (unavailable)");
-            problems.push("OMP");
+            println!("  resolution: unavailable (missing or not executable)");
+            false
         }
+    };
+    if !configured_valid {
+        problems.push("OMP");
+        match config::resolve_executable("omp") {
+            Some(path) => {
+                println!("  PATH candidate: {}", path.display());
+                if doctor_omp_version(&path).await {
+                    println!("  PATH candidate validation: valid");
+                } else {
+                    println!("  PATH candidate validation: invalid");
+                }
+            }
+            None => println!("  PATH candidate: no executable omp found"),
+        }
+        println!("  Recovery: run `pinkcollab setup --omp omp` after validating OMP on PATH.");
     }
     let remote = config
         .as_ref()
@@ -437,8 +474,8 @@ pub async fn doctor(dir: &Path) -> Result<()> {
                 "  clients: {}\n  sessions: {}",
                 counts.clients, counts.sessions
             );
-            match Store::open(dir).and_then(|s| s.runtime_leases()) {
-                Ok(leases) => println!("  leases: {}", leases.len()),
+            match doctor_lease_count(dir) {
+                Ok(leases) => println!("  leases: {leases}"),
                 Err(error) => {
                     println!("  leases: unavailable ({error:#})");
                     problems.push("Database leases");

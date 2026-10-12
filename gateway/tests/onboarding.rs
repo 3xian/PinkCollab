@@ -35,6 +35,230 @@ fn versioned_omp(home: &Path) -> PathBuf {
     std::os::unix::fs::symlink(&versioned, &entry).unwrap();
     entry
 }
+
+fn saved_omp_config(home: &Path, data: &Path, omp: &Path) -> Config {
+    std::fs::create_dir_all(data).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let config = Config {
+        listen: listener.local_addr().unwrap(),
+        omp: omp.to_string_lossy().into_owned(),
+        public_url: "https://proxy.example".into(),
+        name: "Keep this name".into(),
+        omp_args: vec!["--keep-argument".into()],
+        max_sessions: 17,
+        workspaces: vec![home.canonicalize().unwrap()],
+        ..Config::default()
+    };
+    std::fs::write(
+        data.join("config.yaml"),
+        serde_yaml::to_string(&config).unwrap(),
+    )
+    .unwrap();
+    config
+}
+
+fn config_snapshot(data: &Path) -> (Vec<u8>, std::time::SystemTime) {
+    let path = data.join("config.yaml");
+    (
+        std::fs::read(&path).unwrap(),
+        path.metadata().unwrap().modified().unwrap(),
+    )
+}
+
+fn migration_setup(home: &Path, data: &Path) -> Command {
+    let mut command = cli(home, data);
+    command
+        .args([
+            "setup",
+            "--non-interactive",
+            "--transport",
+            "external",
+            "--public-url",
+            "https://proxy.example",
+            "--workspace",
+        ])
+        .arg(home);
+    command
+}
+
+#[test]
+fn stale_omp_noninteractive_requires_authorization() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let data = home.path().join("data");
+    let stale = home.path().join("removed-installation/omp");
+    saved_omp_config(home.path(), &data, &stale);
+    let before = config_snapshot(&data);
+    let output = migration_setup(home.path(), &data).output().unwrap();
+    assert!(!output.status.success());
+    let diagnostic = format!(
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(diagnostic.contains("setup --omp omp"), "{diagnostic}");
+    assert!(diagnostic.contains(stale.to_str().unwrap()), "{diagnostic}");
+    assert_eq!(config_snapshot(&data), before);
+    assert!(!data.join("pinkcollab.db").exists());
+    assert!(!home.path().join("Library").exists());
+    assert!(!home.path().join(".config").exists());
+}
+
+#[test]
+fn stale_omp_invalid_candidates_leave_config_and_service_untouched() {
+    for candidate in [
+        None,
+        Some("exit 23"),
+        Some("printf '  \\n'"),
+        Some("exec /bin/sleep 30"),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        tools(home.path());
+        match candidate {
+            Some(script) => executable(&home.path().join("bin/omp"), script),
+            None => std::fs::remove_file(home.path().join("bin/omp")).unwrap(),
+        }
+        let data = home.path().join("data");
+        saved_omp_config(home.path(), &data, &home.path().join("removed/omp"));
+        let before = config_snapshot(&data);
+        #[cfg(not(target_os = "linux"))]
+        let definition = home
+            .path()
+            .join("Library/LaunchAgents/dev.pinkcollab.gateway.plist");
+        #[cfg(target_os = "linux")]
+        let definition = home.path().join(".config/systemd/user/pinkcollab.service");
+        #[cfg(target_os = "macos")]
+        let base = home.path().join("Library/Application Support/PinkCollab");
+        #[cfg(target_os = "linux")]
+        let base = home.path().join(".local/share/pinkcollab");
+        std::fs::create_dir_all(base.join("bin")).unwrap();
+        std::fs::write(
+            base.join("bin/data-dir"),
+            data.canonicalize().unwrap().to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        executable(&home.path().join("bin/id"), "echo 501");
+        std::fs::create_dir_all(definition.parent().unwrap()).unwrap();
+        std::fs::write(&definition, b"existing service definition").unwrap();
+        let definition_before = (
+            std::fs::read(&definition).unwrap(),
+            definition.metadata().unwrap().modified().unwrap(),
+        );
+        // Any service-manager invocation is recorded, including an accidental restart.
+        for tool in ["systemctl", "launchctl"] {
+            executable(
+                &home.path().join("bin").join(tool),
+                r#"printf '%s\n' "$*" >> "$HOME/service-commands"
+case "$1 $2" in
+ "print "*) exit 1 ;;
+ "--user show") echo inactive ;;
+ *) echo unexpected-mutation >> "$HOME/service-commands"; exit 99 ;;
+esac"#,
+            );
+        }
+        let absolute = home.path().join("bin/omp");
+        for override_reference in [None, Some("omp"), Some(absolute.to_str().unwrap())] {
+            let mut command = migration_setup(home.path(), &data);
+            if let Some(reference) = override_reference {
+                command.args(["--omp", reference]);
+            }
+            let started = std::time::Instant::now();
+            let output = command.output().unwrap();
+            assert!(!output.status.success(), "{candidate:?}");
+            let diagnostic = String::from_utf8_lossy(&output.stderr);
+            assert!(diagnostic.contains("OMP"), "{diagnostic}");
+            assert!(
+                diagnostic.contains(if candidate.is_none() {
+                    "missing or not executable"
+                } else {
+                    "failed `--version`"
+                }),
+                "{diagnostic}"
+            );
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(15),
+                "{candidate:?}"
+            );
+            assert_eq!(config_snapshot(&data), before, "{candidate:?}");
+            assert_eq!(
+                (
+                    std::fs::read(&definition).unwrap(),
+                    definition.metadata().unwrap().modified().unwrap()
+                ),
+                definition_before,
+                "{candidate:?}"
+            );
+            let calls = std::fs::read_to_string(home.path().join("service-commands")).unwrap();
+            assert!(!calls.contains("unexpected-mutation"), "{calls}");
+            assert!(!data.join("pinkcollab.db").exists(), "{candidate:?}");
+        }
+    }
+}
+
+#[test]
+fn valid_pinned_omp_does_not_execute_path_candidate() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let pinned = home.path().join("pinned-omp");
+    executable(&pinned, "echo pinned-version");
+    executable(
+        &home.path().join("bin/omp"),
+        r#"echo probed > "$HOME/path-omp-probed"; exit 99"#,
+    );
+    let data = home.path().join("data");
+    let expected = saved_omp_config(home.path(), &data, &pinned);
+    let output = migration_setup(home.path(), &data).output().unwrap();
+    // Missing fake service manager prevents completion after OMP preflight.
+    assert!(!output.status.success());
+    assert_eq!(Config::load(&data).unwrap().omp, expected.omp);
+    assert!(!home.path().join("path-omp-probed").exists());
+}
+
+#[test]
+fn stale_omp_doctor_reports_candidate_without_migrating() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let data = home.path().join("data");
+    let stale = home.path().join("removed/omp");
+    saved_omp_config(home.path(), &data, &stale);
+    let before = config_snapshot(&data);
+    let output = cli(home.path(), &data).arg("doctor").output().unwrap();
+    assert!(!output.status.success());
+    let text = format!(
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(text.contains(stale.to_str().unwrap()), "{text}");
+    assert!(
+        text.contains(home.path().join("bin/omp").to_str().unwrap()),
+        "{text}"
+    );
+    assert!(text.contains("0.1.0"), "{text}");
+    assert!(text.contains("setup --omp omp"), "{text}");
+    assert_eq!(config_snapshot(&data), before);
+    assert!(!data.join("pinkcollab.db").exists());
+    // Diagnostics must not migrate an older database either.
+    let database = data.join("pinkcollab.db");
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute_batch("CREATE TABLE clients (id TEXT); PRAGMA user_version=1;")
+        .unwrap();
+    drop(db);
+    let database_before = (
+        std::fs::read(&database).unwrap(),
+        database.metadata().unwrap().modified().unwrap(),
+    );
+    let output = cli(home.path(), &data).arg("doctor").output().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(config_snapshot(&data), before);
+    assert_eq!(
+        (
+            std::fs::read(&database).unwrap(),
+            database.metadata().unwrap().modified().unwrap(),
+        ),
+        database_before
+    );
+}
 #[test]
 fn doctor_reports_all_sections_even_when_config_and_tools_fail() {
     let home = tempfile::tempdir().unwrap();
@@ -57,7 +281,6 @@ fn doctor_reports_all_sections_even_when_config_and_tools_fail() {
     ] {
         assert!(text.contains(section), "{text}");
     }
-    assert!(text.contains("omp (unavailable)"));
     assert!(text.contains("backend: Stopped"));
 }
 #[test]
@@ -540,11 +763,25 @@ exit 99"#,
     let health = HealthFixture::new();
     let data = home.path().join("data");
     let store = Store::open(&data).unwrap();
+    let pairing = store.new_pairing().unwrap();
+    let (client_id, _) = store.pair(&pairing, "Existing phone").unwrap();
+    let db = rusqlite::Connection::open(data.join("pinkcollab.db")).unwrap();
+    db.execute(
+        "INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref) VALUES ('sess_existing',?1,?2,'Preserved task',3,'2026-01-01T00:00:00Z','2026-01-02T00:00:00Z','existing-transcript')",
+        rusqlite::params![store.host_id().unwrap(), home.path().to_str().unwrap()],
+    ).unwrap();
+    drop(db);
+    let pinned = home.path().join("pinned-omp");
+    executable(&pinned, "echo pinned-version");
     let mut expected = Config {
         listen: health.address,
         public_url: "https://old-host.ts.net".into(),
         name: "Custom gateway name".into(),
-        omp: home.path().join("bin/omp").to_string_lossy().into_owned(),
+        omp: home
+            .path()
+            .join("removed-installation/omp")
+            .to_string_lossy()
+            .into_owned(),
         omp_args: vec!["--custom-argument".into()],
         max_sessions: 17,
         workspaces: vec![home.path().canonicalize().unwrap()],
@@ -583,6 +820,7 @@ exit 99"#,
         r#"printf '%s\n' "systemctl $*" >> "$HOME/service-commands"
 case "$2" in
  show) echo active ;;
+ stop) [ ! -f "$HOME/restart-fails" ] || exit 23 ;;
  start)
   while IFS= read -r line; do
    case "$line" in public_url:*) printf '%s\n' "$line" >> "$HOME/service-commands" ;; esac
@@ -594,7 +832,7 @@ esac"#,
         r#"printf '%s\n' "launchctl $*" >> "$HOME/service-commands"
 case "$1" in
  print) [ ! -s "$HOME/service-stopped" ] || exit 1; echo 'state = running' ;;
- bootout) echo stopped > "$HOME/service-stopped" ;;
+ bootout) [ ! -f "$HOME/restart-fails" ] || exit 23; echo stopped > "$HOME/service-stopped" ;;
  bootstrap)
   while IFS= read -r line; do
    case "$line" in public_url:*) printf '%s\n' "$line" >> "$HOME/service-commands" ;; esac
@@ -603,13 +841,26 @@ case "$1" in
 esac"#,
     );
     let mut unchanged_config = None;
-    for url in [
-        "https://proxy.example:8443",
-        "https://replacement.example",
-        "https://replacement.example",
-    ] {
+    for (index, (url, reference)) in [
+        ("https://proxy.example:8443", Some("omp")),
+        ("https://proxy.example:8443", Some(pinned.to_str().unwrap())),
+        ("https://proxy.example:8443", None),
+        ("https://replacement.example", None),
+        ("https://replacement.example", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let before = health.requests.load(std::sync::atomic::Ordering::Relaxed);
-        let output = cli(home.path(), &data)
+        let before_config = config_snapshot(&data);
+        let before_definition = (
+            std::fs::read(&definition).unwrap(),
+            definition.metadata().unwrap().modified().unwrap(),
+        );
+        let before_calls =
+            std::fs::read_to_string(home.path().join("service-commands")).unwrap_or_default();
+        let mut command = cli(home.path(), &data);
+        command
             .args([
                 "setup",
                 "--non-interactive",
@@ -619,9 +870,11 @@ esac"#,
                 url,
                 "--workspace",
             ])
-            .arg(home.path())
-            .output()
-            .unwrap();
+            .arg(home.path());
+        if let Some(reference) = reference {
+            command.args(["--omp", reference]);
+        }
+        let output = command.output().unwrap();
         assert!(
             output.status.success(),
             "{} {}",
@@ -630,6 +883,48 @@ esac"#,
         );
         assert!(health.requests.load(std::sync::atomic::Ordering::Relaxed) > before);
         expected.public_url = url.into();
+        expected.omp = if index == 0 {
+            home.path().join("bin/omp").to_string_lossy().into_owned()
+        } else {
+            pinned.to_string_lossy().into_owned()
+        };
+        let calls = std::fs::read_to_string(home.path().join("service-commands")).unwrap();
+        let new_calls = &calls[before_calls.len()..];
+        #[cfg(target_os = "macos")]
+        let starts = new_calls
+            .lines()
+            .filter(|line| line.starts_with("launchctl bootstrap"))
+            .count();
+        #[cfg(target_os = "linux")]
+        let starts = new_calls
+            .lines()
+            .filter(|line| *line == "systemctl --user start pinkcollab")
+            .count();
+        if index < 3 {
+            assert_eq!(
+                starts,
+                usize::from(index < 2),
+                "iteration {index}: {new_calls}"
+            );
+        }
+        if index == 1 || index == 2 {
+            assert_eq!(
+                (
+                    std::fs::read(&definition).unwrap(),
+                    definition.metadata().unwrap().modified().unwrap()
+                ),
+                before_definition,
+                "config-only migration must not rewrite the service definition"
+            );
+        }
+        if index == 2 || index == 4 {
+            assert_eq!(
+                config_snapshot(&data),
+                before_config,
+                "repeat setup rewrote config"
+            );
+            assert_eq!(starts, 0, "repeat setup restarted service: {new_calls}");
+        }
         assert_eq!(
             serde_yaml::to_string(&Config::load(&data).unwrap()).unwrap(),
             serde_yaml::to_string(&expected).unwrap()
@@ -641,7 +936,17 @@ esac"#,
             .query_row("SELECT COUNT(*) FROM pairing", [], |row| row.get(0))
             .unwrap();
         assert_eq!(tokens, 0, "noninteractive setup created a pairing token");
-        assert!(store.clients().unwrap().is_empty());
+        let clients = store.clients().unwrap();
+        assert_eq!(clients.len(), 1);
+        assert_eq!(clients[0].id, client_id);
+        assert_eq!(clients[0].name, "Existing phone");
+        let session = store.v2_session("sess_existing").unwrap().unwrap();
+        assert_eq!(session.title, "Preserved task");
+        assert_eq!(session.metadata_revision, 3);
+        assert_eq!(
+            session.engine_session_ref.as_deref(),
+            Some("existing-transcript")
+        );
         if url == "https://replacement.example" {
             let bytes = std::fs::read(data.join("config.yaml")).unwrap();
             if let Some(previous) = &unchanged_config {
@@ -699,4 +1004,61 @@ esac"#,
     store
         .pair(payload["token"].as_str().unwrap(), "External phone")
         .unwrap();
+    // Authorized config is saved before restarting; a failed restart is not success.
+    let replacement = home.path().join("replacement-omp");
+    executable(&replacement, "echo replacement-version");
+    std::fs::write(home.path().join("restart-fails"), b"fail").unwrap();
+    let before_calls = std::fs::read_to_string(home.path().join("service-commands")).unwrap();
+    let before_definition = (
+        std::fs::read(&definition).unwrap(),
+        definition.metadata().unwrap().modified().unwrap(),
+    );
+    let output = cli(home.path(), &data)
+        .args([
+            "setup",
+            "--non-interactive",
+            "--transport",
+            "external",
+            "--public-url",
+            "https://replacement.example",
+            "--workspace",
+        ])
+        .arg(home.path())
+        .arg("--omp")
+        .arg(&replacement)
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "failed service restart was reported as success"
+    );
+    assert_eq!(
+        Config::load(&data).unwrap().omp,
+        replacement.to_str().unwrap()
+    );
+    assert_eq!(
+        (
+            std::fs::read(&definition).unwrap(),
+            definition.metadata().unwrap().modified().unwrap()
+        ),
+        before_definition
+    );
+    let calls = std::fs::read_to_string(home.path().join("service-commands")).unwrap();
+    let new_calls = &calls[before_calls.len()..];
+    #[cfg(target_os = "macos")]
+    {
+        assert!(new_calls.contains("launchctl bootout"), "{new_calls}");
+        assert!(!new_calls.contains("launchctl bootstrap"), "{new_calls}");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        assert!(
+            new_calls.contains("systemctl --user stop pinkcollab"),
+            "{new_calls}"
+        );
+        assert!(
+            !new_calls.contains("systemctl --user start pinkcollab"),
+            "{new_calls}"
+        );
+    }
 }

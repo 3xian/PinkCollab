@@ -48,6 +48,9 @@ enum Commands {
         /// Explicit HTTPS Gateway root URL for an externally managed reverse proxy.
         #[arg(long)]
         public_url: Option<String>,
+        /// Select and validate OMP explicitly; use "omp" to rediscover it on PATH.
+        #[arg(long)]
+        omp: Option<String>,
     },
     /// Manage the background Gateway.
     #[command(display_order = 3)]
@@ -135,12 +138,14 @@ async fn main() -> Result<()> {
             non_interactive,
             transport,
             public_url,
+            omp,
         } => match setup::run(
             &cli.data_dir,
             &workspace,
             non_interactive,
             transport,
             public_url.as_deref(),
+            omp.as_deref(),
         )
         .await
         {
