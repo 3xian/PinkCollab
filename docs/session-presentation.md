@@ -12,7 +12,7 @@
 8. [Visual and interaction rules](#8-visual-and-interaction-rules)
 9. [Acceptance scenarios](#9-acceptance-scenarios)
 10. [Extension checklist and implementation map](#10-extension-checklist-and-implementation-map)
-- [Host history entries](#host-history-entries)
+- [Host session entries](#host-session-entries)
 
 ## 1. Scope and terminology
 
