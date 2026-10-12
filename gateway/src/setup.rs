@@ -126,12 +126,79 @@ async fn enter(control: &Control, prompt: &str) -> Result<String> {
         .await
 }
 
+async fn validated_omp(control: &Control, reference: &str) -> Result<(PathBuf, String)> {
+    let executable = config::resolve_executable(reference)
+        .with_context(|| format!("OMP entry {reference:?} is missing or not executable"))?;
+    let version = control
+        .wait(async { Ok(omp::version(&workspace::display(&executable)).await) })
+        .await?;
+    ensure!(
+        version != "unavailable" && !version.is_empty(),
+        "OMP entry {reference:?} failed `--version` (failed to start, nonzero exit, timeout, or empty output)"
+    );
+    Ok((executable, version))
+}
+
+async fn select_omp(
+    control: &Control,
+    configured: &str,
+    explicit: Option<&str>,
+    non_interactive: bool,
+) -> Result<(PathBuf, String)> {
+    if let Some(reference) = explicit {
+        return validated_omp(control, reference).await.context(OMP_HELP);
+    }
+    let configured_path = config::resolve_executable(configured);
+    let failure = match validated_omp(control, configured).await {
+        Ok(selected) => return Ok(selected),
+        Err(error) => {
+            control.checkpoint().await?;
+            error
+        }
+    };
+    println!("Configured OMP: {} ({failure:#})", safe_text(configured));
+    let candidate_path = config::resolve_executable("omp");
+    ensure!(
+        !configured_path
+            .as_ref()
+            .zip(candidate_path.as_ref())
+            .is_some_and(|(configured, candidate)| config::same_executable_entry(
+                configured, candidate
+            )),
+        "{failure:#}\nPATH points to the same failed OMP entry; no replacement is available. Fix this launcher or use pinkcollab setup --omp <different-path>."
+    );
+    let candidate = validated_omp(control, "omp")
+        .await
+        .with_context(|| format!("{failure:#}\n{OMP_HELP}\n\nCheck PATH, then run pinkcollab setup --omp omp (with your workspace and transport options)."))?;
+    println!(
+        "PATH candidate: {}\nVersion: {}",
+        safe_text(&workspace::display(&candidate.0)),
+        safe_text(&candidate.1)
+    );
+    ensure!(
+        !non_interactive,
+        "OMP migration requires authorization. Run pinkcollab setup --omp omp with --non-interactive, --workspace and your transport options. Configuration was not changed."
+    );
+    let answer = enter(
+        control,
+        "Use this OMP instead of the configured entry? [y/N] ",
+    )
+    .await?;
+    ensure!(
+        matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"),
+        "OMP migration declined. Configuration was not changed."
+    );
+    // Revalidate after the prompt; the launcher may have changed while awaiting approval.
+    validated_omp(control, &workspace::display(&candidate.0)).await
+}
+
 pub async fn run(
     dir: &Path,
     requested: &[PathBuf],
     non_interactive: bool,
     transport: Transport,
     public_url: Option<&str>,
+    explicit_omp: Option<&str>,
 ) -> Result<()> {
     transport.validate(public_url)?;
     ensure!(
@@ -182,14 +249,8 @@ pub async fn run(
             "Setup cancelled. Choose a directory with --workspace <directory>."
         );
     }
-    let executable = config::resolve_executable(&config.omp).context(OMP_HELP)?;
-    let version = control
-        .wait(async { Ok(omp::version(&workspace::display(&executable)).await) })
-        .await?;
-    ensure!(
-        version != "unavailable" && !version.is_empty(),
-        "{OMP_HELP}"
-    );
+    let (executable, version) =
+        select_omp(&control, &config.omp, explicit_omp, non_interactive).await?;
     println!("✓ OMP {}", safe_text(&version));
     control.checkpoint().await?;
     let save_required = merge(&mut config, roots, &executable)? || !exists;
@@ -496,13 +557,6 @@ mod tests {
         assert_eq!(config.workspaces.len(), 2);
         assert_eq!(config.name, "Keep me");
         assert_eq!(config.max_sessions, 3);
-    }
-    #[test]
-    fn missing_omp_has_actionable_message() {
-        let error = config::resolve_executable("/missing/pinkcollab-test/omp")
-            .context(OMP_HELP)
-            .unwrap_err();
-        assert!(error.to_string().contains("omp --version"));
     }
     #[test]
     fn pairing_wait_detects_new_devices_and_expiry_without_printing_credentials() {

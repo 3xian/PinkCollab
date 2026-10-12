@@ -147,6 +147,24 @@ node "$launcher" doctor
 
 Use the external transport flags on these setup commands too, if applicable. For a read-only PATH diagnostic, run the package's `bin/check-install.js` through Node from your shell, outside npm lifecycle scripts. Shell aliases still require the shell checks above. Correct PATH or remove only the verified obsolete npm installation, then open a new terminal and recheck the version.
 
+### Recover a stale OMP installation path
+
+After switching OMP installation channels, PinkCollab may still point to the old launcher. Confirm the new installation works, inspect the saved entry, then run setup to approve a replacement:
+
+```sh
+omp --version
+pinkcollab doctor
+pinkcollab setup
+```
+
+- Setup keeps a working saved launcher. If it has failed, setup offers a validated PATH replacement; confirmation defaults to **No**. To select a launcher explicitly, use `pinkcollab setup --omp omp` or `pinkcollab setup --omp "/absolute/path/to/omp"`.
+- For automation, provide `--non-interactive --workspace <existing-root> --omp <path-or-omp>`.
+- For external HTTPS, add your existing `--transport external --public-url https://your-host` options to setup.
+- Finish active work first: a required Gateway restart ends active OMP runtimes but preserves provider credentials, pairings, and saved sessions.
+- If restart fails, the approved configuration remains saved. Resolve the service error, then run `pinkcollab service restart`; do not delete configuration or pairings.
+
+If recovery still fails, locate the intended launcher with `type -a omp` on macOS/Linux or `Get-Command omp -All` in PowerShell, verify its `--version`, and select it with `setup --omp <path>`.
+
 ## Pairing and access
 
 ```sh

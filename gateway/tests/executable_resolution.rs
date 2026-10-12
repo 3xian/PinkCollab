@@ -223,3 +223,103 @@ fn pathext_defaults_when_unset() {
 fn already_suffixed_name_is_found_on_path() {
     isolated("already_suffixed", Some(".CMD;.EXE"));
 }
+
+#[cfg(windows)]
+#[test]
+fn doctor_probes_case_variant_of_failed_launcher_only_once() {
+    use pinkcollab_gateway::config::Config;
+
+    let root = tempfile::tempdir().unwrap();
+    let bin = root.path().join("bin");
+    let data = root.path().join("data");
+    std::fs::create_dir(&bin).unwrap();
+    std::fs::create_dir(&data).unwrap();
+    let launcher = bin.join("omp.cmd");
+    let probes = root.path().join("probes");
+    std::fs::write(
+        &launcher,
+        format!(
+            "@echo off\r\necho probe>>\"{}\"\r\nexit /b 23\r\n",
+            probes.display()
+        ),
+    )
+    .unwrap();
+    let config = Config {
+        omp: launcher.to_string_lossy().into_owned(),
+        workspaces: vec![root.path().to_owned()],
+        public_url: "https://proxy.example".into(),
+        ..Config::default()
+    };
+    let config_path = data.join("config.yaml");
+    let before = serde_yaml::to_string(&config).unwrap();
+    std::fs::write(&config_path, &before).unwrap();
+    let modified = config_path.metadata().unwrap().modified().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_pinkcollab-gateway"))
+        .arg("--data-dir")
+        .arg(&data)
+        .arg("doctor")
+        .env("PATH", &bin)
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .env("USERPROFILE", root.path())
+        .env("HOME", root.path())
+        .env("APPDATA", root.path().join("roaming"))
+        .env("LOCALAPPDATA", root.path().join("local"))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read_to_string(&probes).unwrap().lines().count(), 1);
+    assert_eq!(std::fs::read_to_string(&config_path).unwrap(), before);
+    assert_eq!(
+        config_path.metadata().unwrap().modified().unwrap(),
+        modified
+    );
+    assert!(!data.join("pinkcollab.db").exists());
+}
+
+#[test]
+fn launcher_entry_comparison_keeps_distinct_files_separate() {
+    use pinkcollab_gateway::config::same_executable_entry;
+
+    let root = tempfile::tempdir().unwrap();
+    let first = root.path().join("omp.exe");
+    let second = root.path().join("replacement.exe");
+    std::fs::write(&first, b"same contents").unwrap();
+    std::fs::write(&second, b"same contents").unwrap();
+    assert!(same_executable_entry(&first, &first));
+    assert!(!same_executable_entry(&first, &second));
+    assert!(!same_executable_entry(
+        &first,
+        &root.path().join("missing.exe")
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn launcher_entry_comparison_handles_unicode_case_variants() {
+    use pinkcollab_gateway::config::same_executable_entry;
+
+    let root = tempfile::tempdir().unwrap();
+    let entry = root.path().join("安装-ä.exe");
+    std::fs::write(&entry, b"launcher").unwrap();
+    assert!(same_executable_entry(
+        &entry,
+        &root.path().join("安装-Ä.EXE")
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn launcher_entry_comparison_does_not_merge_symlinks_to_one_target() {
+    use pinkcollab_gateway::config::same_executable_entry;
+
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("target");
+    let first = root.path().join("omp");
+    let second = root.path().join("replacement");
+    std::fs::write(&target, b"launcher").unwrap();
+    std::os::unix::fs::symlink(&target, &first).unwrap();
+    std::os::unix::fs::symlink(&target, &second).unwrap();
+    assert!(same_executable_entry(&first, &first));
+    assert!(!same_executable_entry(&first, &second));
+    assert!(!same_executable_entry(&first, &target));
+}
