@@ -8,6 +8,9 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -45,6 +48,10 @@ import androidx.compose.ui.zIndex
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 internal data class TasksScreenState(
     val sessions: SessionListState,
@@ -104,6 +111,16 @@ internal fun TasksScreen(
         hosts.values.flatMap { host -> host.sessions.map { SessionKey(it.hostId, it.id) } }.toSet()
     }
     val sessionKeys = remember(sessions) { sessions.map { SessionKey(it.hostId, it.id) } }
+    var infoTarget by rememberSaveable(saver = SelectedSessionSaver) { mutableStateOf<SessionKey?>(null) }
+    val infoSession = infoTarget?.takeIf { it == selectedSession }?.let { target ->
+        hosts[target.hostId]?.sessions?.firstOrNull { SessionKey(it.hostId, it.id) == target }
+    }
+    SideEffect {
+        if (infoTarget != null && infoSession == null) infoTarget = null
+    }
+    if (infoSession != null) {
+        SessionInfoDialog(infoSession, hosts[infoSession.hostId]) { infoTarget = null }
+    }
     val pagerKeys = remember(sessionKeys) { sessionKeys.map { it.pagerKey() } }
     val localDisplayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
     val displayCache = retainedDisplay ?: localDisplayCache
@@ -160,6 +177,8 @@ internal fun TasksScreen(
             hosts = visibleHosts,
             sessions = sessions,
             currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
+            selectedSession = selectedSession,
+            showInfo = { infoTarget = it },
             selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
             loadMore = {
                 visibleHosts.values.filter { it.connected && it.nextSessionsCursor != null }
@@ -392,7 +411,7 @@ private fun TasksTopBar(
             .fillMaxWidth()
             .defaultMinSize(minHeight = 44.dp)
             .background(Base0.copy(alpha = 0.90f))
-            .padding(start = 16.dp, end = 8.dp),
+            .padding(start = 12.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (hosts.isNotEmpty()) {
@@ -540,6 +559,8 @@ private fun TasksPagerBar(
     hosts: Map<String, HostState>,
     sessions: List<Session>,
     currentPage: Int,
+    selectedSession: SessionKey?,
+    showInfo: (SessionKey) -> Unit,
     selectPage: (Int) -> Unit,
     loadMore: () -> Unit,
     hasMore: Boolean,
@@ -580,7 +601,8 @@ private fun TasksPagerBar(
         ) {
             itemsIndexed(sessions, key = { _, session -> SessionKey(session.hostId, session.id).pagerKey() }) { index, session ->
                 val cardStatus = sessionCardStatus(session, hosts[session.hostId]?.connection)
-                val selected = index == currentPage
+                val selected = SessionKey(session.hostId, session.id) ==
+                    (selectedSession ?: sessionKeys.getOrNull(currentPage))
                 val cardColor = when (cardStatus) {
                     SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired -> Amber300
                     SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> if (selected) Purple200 else Violet400
@@ -603,7 +625,13 @@ private fun TasksPagerBar(
                             this.selected = selected
                             stateDescription = cardStatus.label
                         }
-                        .clickable(onClick = rememberHapticOnClick { selectPage(index) })
+                        .clickable(
+                            role = Role.Button,
+                            onClickLabel = if (selected) "Show session info" else "Select session",
+                            onClick = rememberHapticOnClick {
+                                if (selected) showInfo(SessionKey(session.hostId, session.id)) else selectPage(index)
+                            },
+                        )
                         .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -657,3 +685,49 @@ private fun TasksPagerBar(
         )
     }
 }
+
+@Composable
+private fun SessionInfoDialog(session: Session, host: HostState?, dismiss: () -> Unit) {
+    val created = remember(session.createdAt) { sessionInfoTime(session.createdAt) }
+    val updated = remember(session.updatedAt) { sessionInfoTime(session.updatedAt) }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        modifier = Modifier.testTag("sessionInfo"),
+        title = { Text("Session info") },
+        text = {
+            SelectionContainer {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    SessionInfoField("Title", session.title)
+                    SessionInfoField("Host", host?.paired?.displayName ?: session.hostId)
+                    SessionInfoField("Working directory", session.cwd)
+                    SessionInfoField("Status", sessionCardStatus(session, host?.connection).label)
+                    SessionInfoField("Created (local time)", created)
+                    SessionInfoField("Updated (local time)", updated)
+                    SessionInfoField("Session ID", session.id)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = rememberHapticOnClick(dismiss)) { Text("Close") }
+        },
+        shape = RoundedCornerShape(24.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp,
+    )
+}
+
+@Composable
+private fun SessionInfoField(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = TextMid)
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
+    }
+}
+
+private fun sessionInfoTime(timestamp: String): String = runCatching {
+    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
+        .format(Instant.parse(timestamp).atZone(ZoneId.systemDefault()))
+}.getOrDefault(timestamp)

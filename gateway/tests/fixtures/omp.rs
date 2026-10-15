@@ -31,9 +31,8 @@ fn spawn_lingering_child(cwd: &std::path::Path) {
         .unwrap();
     std::fs::write(cwd.join("child.pid"), child.id().to_string()).unwrap();
 }
-fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
+fn save_message(log: &std::path::Path, parent: &mut String, message: &Value) -> String {
     let id = pinkcollab_gateway::storage::id("message_");
-    let message = json!({"role":"assistant","timestamp":chrono::Utc::now().timestamp_millis(),"content":[{"type":"text","text":text}],"stopReason":"stop"});
     let entry = json!({"id":id,"parentId":parent,"type":"message","timestamp":chrono::Utc::now(),"message":message});
     writeln!(
         std::fs::OpenOptions::new()
@@ -45,6 +44,11 @@ fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
     )
     .unwrap();
     *parent = id.clone();
+    id
+}
+fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
+    let message = json!({"role":"assistant","timestamp":chrono::Utc::now().timestamp_millis(),"content":[{"type":"text","text":text}],"stopReason":"stop"});
+    let id = save_message(log, parent, &message);
     emit(json!({"type":"message_start","messageId":format!("rpc-{id}"),"message":message}));
     if text.starts_with("stream-fixture:") {
         for chunk in text.as_bytes().chunks(2048) {
@@ -239,10 +243,7 @@ fn save_tool(log: &std::path::Path, parent: &mut String, call_id: &str) {
         json!({"role":"assistant","content":[{"type":"toolCall","id":call_id,"name":"bash","arguments":{"command":"cargo test"}}]}),
         json!({"role":"toolResult","toolCallId":call_id,"toolName":"bash","content":[{"type":"text","text":"tests passed"}]}),
     ] {
-        let id = pinkcollab_gateway::storage::id("message_");
-        writeln!(std::fs::OpenOptions::new().create(true).append(true).open(log).unwrap(), "{}",
-            json!({"id":id,"parentId":parent,"type":"message","timestamp":chrono::Utc::now(),"message":message})).unwrap();
-        *parent = id;
+        save_message(log, parent, &message);
     }
 }
 fn main() {
@@ -608,6 +609,71 @@ fn main() {
                         );
                         pending_prompt_id = None;
                     }
+                } else if message == "tool intents" {
+                    let calls = [
+                        json!({"type":"toolCall","id":"intent-read","name":"read","arguments":{"i":"Inspecting session state","path":"src/Session.kt"}}),
+                        json!({"type":"toolCall","id":"intent-edit","name":"edit","arguments":{"i":" ","description":"Updating session projection","input":"supplied patch"}}),
+                    ];
+                    // Read metadata precedes execution; edit metadata arrives after its result.
+                    // Execution arguments deliberately omit model-supplied intent.
+                    emit(
+                        json!({"type":"tool_execution_end","toolCallId":"intent-edit","toolName":"edit","isError":true,"result":{"content":[{"type":"text","text":"patch rejected"}]}}),
+                    );
+                    let assistant = json!({"role":"assistant","content":calls});
+                    emit(
+                        json!({"type":"message_end","messageId":"intent-message","message":assistant}),
+                    );
+                    emit(
+                        json!({"type":"tool_execution_start","toolCallId":"intent-read","toolName":"read","args":{"path":"src/Session.kt"}}),
+                    );
+                    emit(
+                        json!({"type":"tool_execution_update","toolCallId":"intent-read","toolName":"read","args":{"path":"src/Session.kt"},"partialResult":{"content":[{"type":"text","text":"reading"}]}}),
+                    );
+                    emit(
+                        json!({"type":"tool_execution_end","toolCallId":"intent-read","toolName":"read","result":{"content":[{"type":"text","text":"session content"}]}}),
+                    );
+                    for saved in [
+                        assistant,
+                        json!({"role":"toolResult","toolCallId":"intent-read","toolName":"read","content":[{"type":"text","text":"session content"}]}),
+                        json!({"role":"toolResult","toolCallId":"intent-edit","toolName":"edit","isError":true,"content":[{"type":"text","text":"patch rejected"}]}),
+                    ] {
+                        save_message(&log, &mut parent, &saved);
+                    }
+                    finish("Intent fixture complete", &log, &mut parent);
+                    emit(
+                        json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),
+                    );
+                    pending_prompt_id = None;
+                } else if message == "late tool intents" {
+                    let mut calls: Vec<Value> = (0..65).map(|index| json!({
+                        "type":"toolCall","id":format!("late-{index}"),"name":"read",
+                        "arguments":{"i":format!("Inspecting file {index}"),"path":format!("file-{index}")}
+                    })).collect();
+                    calls.push(json!({"type":"toolCall","id":"never-started","name":"read","arguments":{"i":"Unexecuted declaration","path":"not-read"}}));
+                    let assistant = json!({"role":"assistant","content":calls});
+                    save_message(&log, &mut parent, &assistant);
+                    for index in 0..65 {
+                        let result = json!({"content":[{"type":"text","text":format!("completed-{index}")}]});
+                        let call_id = format!("late-{index}");
+                        emit(
+                            json!({"type":"tool_execution_end","toolCallId":call_id,"toolName":"read","result":result}),
+                        );
+                        save_message(
+                            &log,
+                            &mut parent,
+                            &json!({
+                                "role":"toolResult","toolCallId":call_id,"toolName":"read","content":result["content"]
+                            }),
+                        );
+                    }
+                    emit(
+                        json!({"type":"message_end","messageId":"late-intent-message","message":assistant}),
+                    );
+                    finish("Late intent fixture complete", &log, &mut parent);
+                    emit(
+                        json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),
+                    );
+                    pending_prompt_id = None;
                 } else {
                     let call_id = format!("{id}-tool");
                     emit(

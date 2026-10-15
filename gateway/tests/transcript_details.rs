@@ -206,3 +206,162 @@ async fn long_reply_is_complete_and_has_the_same_identity_in_history() {
         404
     );
 }
+
+#[tokio::test]
+async fn live_tool_intents_survive_execution_and_match_history() {
+    let h = Harness::new(1, vec![]).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let session = support::create_session(&client, &h, &credential, &h.cwd("tool-intents")).await;
+    let mut events = h.bus.subscribe();
+    support::command_succeeds(
+        &client,
+        &session,
+        &credential,
+        "prompt",
+        json!({"type":"prompt","message":"tool intents"}),
+    )
+    .await;
+    let published = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        let mut actions = std::collections::HashMap::new();
+        while actions.len() < 2 {
+            if let pinkcollab_gateway::events::Event::Update { event, .. } =
+                events.recv().await.unwrap()
+                && let pinkcollab_gateway::protocol::ServerEvent::Timeline { upsert, .. } = &*event
+            {
+                for item in upsert {
+                    if let Some(tool) = &item.tool
+                        && tool.completed
+                        && let Some(summary) = &tool.summary
+                    {
+                        actions.insert(tool.call_id.clone(), summary.action.clone());
+                    }
+                }
+            }
+        }
+        actions
+    })
+    .await
+    .expect("both tool intents reach the live event stream");
+    assert_eq!(published["intent-read"], "Inspecting session state");
+    assert_eq!(published["intent-edit"], "Updating session projection");
+    let live: Value = client
+        .get(&session)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let saved: Value = client
+        .get(format!("{session}/history"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    for (call_id, action, result, is_error) in [
+        (
+            "intent-read",
+            "Inspecting session state",
+            "session content",
+            false,
+        ),
+        (
+            "intent-edit",
+            "Updating session projection",
+            "patch rejected",
+            true,
+        ),
+    ] {
+        let matching: Vec<_> = live["timeline"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["tool"]["callId"] == call_id)
+            .collect();
+        assert_eq!(matching.len(), 1, "one live operation per call");
+        let trace = &matching[0]["tool"];
+        assert_eq!(trace["summary"]["action"], action);
+        assert_eq!(trace["completed"], true);
+        assert_eq!(trace["isError"], is_error);
+        let history = saved["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["tool"]["callId"] == call_id)
+            .unwrap();
+        assert_eq!(history["tool"]["summary"], trace["summary"]);
+        let details: Value = client
+            .get(format!("{session}/tools/{call_id}"))
+            .bearer_auth(&credential)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let text = details["text"].as_str().unwrap();
+        assert!(text.contains(action), "{text}");
+        assert!(text.ends_with(result), "{text}");
+    }
+}
+
+#[tokio::test]
+async fn late_tool_metadata_does_not_resurrect_retired_or_unexecuted_calls() {
+    let h = Harness::new(1, vec![]).await;
+    let client = reqwest::Client::new();
+    let credential = h.pair().await;
+    let session =
+        support::create_session(&client, &h, &credential, &h.cwd("late-tool-intents")).await;
+    support::command_succeeds(
+        &client,
+        &session,
+        &credential,
+        "prompt",
+        json!({"type":"prompt","message":"late tool intents"}),
+    )
+    .await;
+    let view: Value = client
+        .get(&session)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tools: Vec<_> = view["timeline"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item.get("tool"))
+        .collect();
+    assert!(tools.iter().all(|tool| tool["completed"] == true));
+    assert!(!tools.iter().any(|tool| tool["callId"] == "late-0"));
+    assert!(!tools.iter().any(|tool| tool["callId"] == "never-started"));
+    let retained = tools
+        .iter()
+        .find(|tool| tool["callId"] == "late-64")
+        .unwrap();
+    assert_eq!(retained["summary"]["action"], "Inspecting file 64");
+
+    // Retirement removes only the live display record, not the complete durable call.
+    let detail: Value = client
+        .get(format!("{session}/tools/late-0"))
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(detail["completed"], true);
+    assert!(detail["nextCursor"].is_null());
+    let text = detail["text"].as_str().unwrap();
+    assert!(text.contains("Inspecting file 0"));
+    assert!(text.ends_with("completed-0"));
+}

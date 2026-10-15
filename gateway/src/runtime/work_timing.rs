@@ -112,6 +112,7 @@ mod tests {
             work_clock: None,
             messages: Vec::new(),
             finalized_messages: Default::default(),
+            pending_tool_arguments: Default::default(),
             pending_prompt_results: Default::default(),
             settled_revision: 0,
             dirty_messages: Default::default(),

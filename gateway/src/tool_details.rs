@@ -27,7 +27,11 @@ impl ToolTrace {
     pub fn summary(&self) -> Self {
         let first = |keys: &[&str]| {
             keys.iter()
-                .find_map(|key| self.arguments[*key].as_str())
+                .find_map(|key| {
+                    self.arguments[*key]
+                        .as_str()
+                        .filter(|s| !s.trim().is_empty())
+                })
                 .map(brief)
                 .unwrap_or_default()
         };

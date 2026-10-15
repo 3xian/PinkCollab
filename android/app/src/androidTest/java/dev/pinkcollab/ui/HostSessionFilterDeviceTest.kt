@@ -3,9 +3,11 @@ package dev.pinkcollab.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -14,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.pinkcollab.data.AppState
 import dev.pinkcollab.data.ConnectionState
@@ -32,6 +35,29 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class HostSessionFilterDeviceTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun host_filter_touch_target_aligns_with_the_first_session_card() {
+        val session = session("office-session", "office", "2026-09-20T00:00:00Z")
+        val hosts = mapOf("office" to host("office", "Office", listOf(session)))
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(
+                    sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
+                    emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("office", session.id),
+                ),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+            )
+        }
+        val filter = compose.onNodeWithTag("hostFilter")
+        val card = compose.onNodeWithTag("sessionCard:${session.id}")
+        assertEquals(
+            card.fetchSemanticsNode().boundsInRoot.left,
+            filter.fetchSemanticsNode().boundsInRoot.left,
+            0.5f,
+        )
+        filter.performTouchInput { click(Offset(1f, center.y)) }
+        compose.onNodeWithTag("hostFilterOption:all").assertIsDisplayed().assertIsSelected()
+    }
 
     @Test fun host_filter_defaults_to_all_hosts_and_limits_the_session_strip() {
         val office = session("office-session", "office", "2026-09-20T00:00:00Z")

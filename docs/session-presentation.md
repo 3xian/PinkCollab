@@ -204,6 +204,10 @@ Entrance batches use absolute monotonic completion deadlines owned by the group,
 
 Argument intent is supplied descriptive text, not a verified conclusion. Long summaries are ellipsized; detailed content remains separately accessible when supplied.
 
+Live and saved calls use the same intent fields. Only execution events establish live tool activity. Finalized assistant `toolCall` arguments from `message_end` replace matching live call arguments without changing results, completion/error flags, timestamps or timeline positions. Unmatched declarations are retained from the latest assistant message until execution supplies the call; they never create timeline entries or resurrect calls retired from the bounded live timeline. Original assistant arguments take precedence over execution snapshots that omit intent. Updated intents use the normal live timeline stream; reloading history is not required. Summary extraction skips blank intent fields before considering the next candidate. If no descriptive intent is supplied, the tool-specific verb remains the fallback rather than inventing a description from output.
+
+`cargo test --all-features --locked --test transcript_details live_tool_intents_survive_execution_and_match_history` exercises live publication and history parity with execution arguments that omit intent, metadata arriving before execution or after failure, multiple calls in a tool-only assistant message, and a blank `i` followed by a nonblank `description`. `late_tool_metadata_does_not_resurrect_retired_or_unexecuted_calls` covers late declarations after 65 completed calls: retained calls stay completed, retired calls remain absent from the live timeline but have complete durable details, and unexecuted declarations remain hidden.
+
 Targets, commands and file paths remain in the complete arguments shown in details. The Android display model does not extract duplicate target rows, aggregate changed-file lists or failure counts; individual operation outcomes supply group status.
 
 ### 5.5 Detail types
@@ -330,6 +334,8 @@ Timeline loading and failure surfaces contain no Retry buttons. The conversation
 
 | Surface | Visual / interaction contract |
 | --- | --- |
+| Host filter | The clickable control starts at the same 12dp leading inset as the first session card; its internal text padding remains independent of the aligned hit-target edge |
+| Session cards | Tap an unselected card to switch conversations. Tap the highlighted card again to open a read-only Session info dialog without reselecting or refreshing the session. The scrollable, selectable summary shows the full title, local host name, full working directory, connectivity-qualified card status, local creation/update times and session ID. The dialog is bound to the selected host/session identity, not a pager index: list reordering preserves it and refreshed metadata updates its content. Close, Back or an outside tap dismisses it; changing the selection or removing the target session also dismisses it without reopening on later updates |
 | User message | Distinct leading rail and static tint; plain text |
 | Agent message | Quiet static band; Markdown body |
 | Timeline card spacing | Messages, tool groups, errors, retained entries and streaming replies use 12dp content padding; their content edges align with the floating Todo panel's 12dp outer inset |

@@ -161,6 +161,8 @@ struct ControllerState {
     work_clock: Option<work_timing::WorkClock>,
     messages: Vec<TimelineItem>,
     finalized_messages: HashSet<String>,
+    // Unmatched call metadata from the latest finalized assistant message, not live activity.
+    pending_tool_arguments: HashMap<String, Value>,
     pending_prompt_results: HashMap<String, (String, String)>,
     settled_revision: u64,
     dirty_messages: HashSet<String>,

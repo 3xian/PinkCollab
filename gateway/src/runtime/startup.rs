@@ -126,6 +126,7 @@ impl SessionController {
             state.settled_revision = 0;
             state.messages.clear();
             state.finalized_messages.clear();
+            state.pending_tool_arguments.clear();
             state.dirty_messages.clear();
             state.published_messages.clear();
             state.published_messages.clear();

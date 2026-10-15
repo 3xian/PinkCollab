@@ -11,12 +11,15 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
@@ -51,6 +54,80 @@ class TasksPagerBarDeviceTest {
         Session("s$index", "host", "/work/project-$index/", "Session $index",
             if (index == 2) SessionStatus.NeedsInput else SessionStatus.Idle, "", false,
             null, timestamp, timestamp, false)
+    }
+
+    @Test fun selected_card_opens_session_info_without_reselecting_or_refreshing() {
+        var selected by mutableStateOf<SessionKey?>(SessionKey("host", "s0"))
+        var host by mutableStateOf(HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "", "", "", localName = "My desktop"),
+            connection = ConnectionState.Online(1L), sessions = sessions.take(2),
+        ))
+        val selections = mutableListOf<SessionKey>()
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(
+                    sessionListState(AppState(hosts = mapOf("host" to host))),
+                    emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), selected,
+                ),
+                TasksScreenActions({ selected = it; selections += it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+            )
+        }
+        compose.onNodeWithTag("sessionCard:s1").performClick()
+        compose.waitForIdle()
+        assertEquals(SessionKey("host", "s1"), selected)
+        compose.onNodeWithTag("sessionInfo").assertDoesNotExist()
+        val selectionCount = selections.size
+
+        compose.onNodeWithTag("sessionCard:s1").performClick()
+        compose.onNodeWithTag("sessionInfo").assertIsDisplayed()
+        for (value in listOf("Session 1", "My desktop", "/work/project-1/", "Inactive", "s1")) {
+            compose.onNode(hasText(value) and hasAnyAncestor(hasTestTag("sessionInfo")))
+                .performScrollTo().assertIsDisplayed()
+        }
+        assertEquals(selectionCount, selections.size)
+        // Move the selected inactive session from the second page to the first.
+        compose.runOnIdle {
+            host = host.copy(sessions = host.sessions.map {
+                if (it.id == "s1") it.copy(updatedAt = "2026-09-30T00:00:00Z") else it
+            })
+        }
+        compose.waitForIdle()
+        assertEquals(SessionKey("host", "s1"), selected)
+        compose.onNodeWithTag("sessionInfo").assertIsDisplayed()
+        compose.onNode(hasText("s1") and hasAnyAncestor(hasTestTag("sessionInfo")))
+            .performScrollTo().assertIsDisplayed()
+        compose.runOnIdle {
+            host = host.copy(
+                sessions = host.sessions.map { if (it.id == "s1") it.copy(cwd = "/work/renamed-project/") else it },
+                connection = ConnectionState.Offline(),
+                paired = host.paired.copy(localName = "Renamed desktop"),
+            )
+        }
+        compose.onNodeWithText("/work/renamed-project/").performScrollTo().assertIsDisplayed()
+        compose.onNode(hasText("Offline") and hasAnyAncestor(hasTestTag("sessionInfo")))
+            .performScrollTo().assertIsDisplayed()
+        compose.onNode(hasText("Renamed desktop") and hasAnyAncestor(hasTestTag("sessionInfo")))
+            .performScrollTo().assertIsDisplayed()
+        assertEquals(SessionKey("host", "s1"), selected)
+        compose.onNodeWithText("Close").performClick()
+        compose.onNodeWithTag("sessionInfo").assertDoesNotExist()
+        compose.onNodeWithTag("sessionCard:s1").performClick()
+        compose.onNodeWithTag("sessionInfo").assertIsDisplayed()
+        compose.runOnIdle { selected = SessionKey("host", "s0") }
+        compose.waitForIdle()
+        compose.onNodeWithTag("sessionInfo").assertDoesNotExist()
+        compose.runOnIdle { selected = SessionKey("host", "s1") }
+        compose.waitForIdle()
+        compose.onNodeWithTag("sessionInfo").assertDoesNotExist()
+        compose.onNodeWithTag("sessionCard:s1").performClick()
+        compose.onNodeWithTag("sessionInfo").assertIsDisplayed()
+        val removedSession = host.sessions.first { it.id == "s1" }
+        compose.runOnIdle { host = host.copy(sessions = host.sessions.filterNot { it.id == "s1" }) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("sessionInfo").assertDoesNotExist()
+        compose.runOnIdle { host = host.copy(sessions = host.sessions + removedSession) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("sessionInfo").assertDoesNotExist()
     }
 
     @Test fun active_sessions_precede_inactive_with_group_specific_timestamp_order() {

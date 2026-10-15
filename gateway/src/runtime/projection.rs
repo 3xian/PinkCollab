@@ -23,6 +23,7 @@ impl SessionController {
                     && let Some(snapshot) = state.projection.as_mut()
                 {
                     snapshot.execution = "quiescent".into();
+                    state.pending_tool_arguments.clear();
                     state.update_work_timing(false);
                     state.settled_revision = state.settled_revision.wrapping_add(1);
                 }
@@ -83,6 +84,7 @@ impl SessionController {
                 state.update_work_timing(true);
             }
             "session_settled" => {
+                state.pending_tool_arguments.clear();
                 if let Some(snapshot) = state.projection.as_mut() {
                     snapshot.execution = "quiescent".into();
                     changed_runtime = true;
@@ -143,14 +145,30 @@ impl SessionController {
                         return;
                     }
                     let name = omp::string(&frame, "toolName");
+                    // Original assistant arguments are canonical. Execution snapshots may omit
+                    // intent, but cannot replace it once it has been observed.
+                    let arguments = state
+                        .pending_tool_arguments
+                        .remove(call_id)
+                        .or_else(|| {
+                            state
+                                .messages
+                                .iter()
+                                .find(|entry| entry.id == call_id)
+                                .and_then(|entry| entry.tool.as_ref())
+                                .map(|tool| &tool.arguments)
+                                .filter(|arguments| !arguments.is_null())
+                                .cloned()
+                        })
+                        .or_else(|| frame.get("args").cloned())
+                        .unwrap_or(Value::Null);
                     let item = if kind == "tool_execution_start" {
-                        let args = frame.get("args").cloned().unwrap_or(Value::Null);
-                        TimelineItem::tool_started(item_id.clone(), name, args, Utc::now())
+                        TimelineItem::tool_started(item_id.clone(), name, arguments, Utc::now())
                     } else if kind == "tool_execution_update" {
                         let mut item = TimelineItem::tool_started(
                             item_id.clone(),
                             name,
-                            frame.get("args").cloned().unwrap_or(Value::Null),
+                            arguments,
                             Utc::now(),
                         );
                         item.tool.as_mut().unwrap().result =
@@ -158,14 +176,16 @@ impl SessionController {
                         item
                     } else {
                         let result = omp::text_content(&frame["result"]);
-                        TimelineItem::tool_completed(
+                        let mut item = TimelineItem::tool_completed(
                             item_id.clone(),
                             name,
                             result,
                             frame["isError"] == true,
                             Utc::now(),
                         )
-                        .with_todo_details(&frame["result"]["details"])
+                        .with_todo_details(&frame["result"]["details"]);
+                        item.tool.as_mut().unwrap().arguments = arguments;
+                        item
                     };
                     if let Some(previous) =
                         state.messages.iter_mut().find(|entry| entry.id == item_id)
@@ -255,6 +275,37 @@ impl SessionController {
                                 tool: None,
                                 timestamp: Utc::now(),
                             });
+                        }
+                    }
+                }
+                if frame["message"]["role"] == "assistant" {
+                    // Keep only this message's declarations. They do not establish execution
+                    // and must never resurrect calls retired from the bounded live timeline.
+                    state.pending_tool_arguments.clear();
+                    for part in frame["message"]["content"].as_array().into_iter().flatten() {
+                        if part["type"] != "toolCall" {
+                            continue;
+                        }
+                        let call_id = omp::string(part, "id");
+                        if call_id.is_empty() || omp::string(part, "name").is_empty() {
+                            continue;
+                        }
+                        let Some(arguments) = part.get("arguments").filter(|args| !args.is_null())
+                        else {
+                            continue;
+                        };
+                        if let Some(tool) = state
+                            .messages
+                            .iter_mut()
+                            .find(|entry| entry.id == call_id)
+                            .and_then(|entry| entry.tool.as_mut())
+                        {
+                            tool.arguments = arguments.clone();
+                            state.dirty_messages.insert(call_id.to_owned());
+                        } else {
+                            state
+                                .pending_tool_arguments
+                                .insert(call_id.to_owned(), arguments.clone());
                         }
                     }
                 }
@@ -399,6 +450,7 @@ impl SessionController {
             state.work_clock = None;
             state.messages.clear();
             state.finalized_messages.clear();
+            state.pending_tool_arguments.clear();
             state.pending_prompt_results.clear();
             state.dirty_messages.clear();
             state.published_messages.clear();
