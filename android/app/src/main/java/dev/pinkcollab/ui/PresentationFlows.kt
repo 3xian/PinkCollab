@@ -2,7 +2,6 @@ package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.AppState
 import dev.pinkcollab.data.ConnectionState
-import dev.pinkcollab.data.ConnectionProgress
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.InitialSyncState
@@ -104,7 +103,6 @@ internal data class NavigationHost(
     val initialSync: InitialSyncState,
     val workspaces: List<Workspace>,
     val activeTasks: Int,
-    val connectionProgress: ConnectionProgress? = null,
 ) {
     val connected: Boolean get() = connection is ConnectionState.Online
 }
@@ -118,7 +116,7 @@ internal data class NavigationState(
 internal fun navigationState(app: AppState) = NavigationState(
     hosts = app.hosts.mapValues { (_, host) ->
         NavigationHost(host.paired.host, host.paired.displayName, host.paired.url, host.connection, host.initialSync,
-            host.workspaces, host.sessions.count { it.isActive }, host.connectionProgress)
+            host.workspaces, host.sessions.count { it.isActive })
     },
     loadingCredentials = app.loadingCredentials,
 )
@@ -141,8 +139,7 @@ internal data class SessionListState(
             host.paired.displayName == next.paired.displayName &&
                 host.sessions == next.sessions && host.connection == next.connection &&
                 host.totalSessions == next.totalSessions && host.nextSessionsCursor == next.nextSessionsCursor &&
-                host.snapshotToken == next.snapshotToken && host.initialSync == next.initialSync &&
-                (host.connectionProgress != null) == (next.connectionProgress != null)
+                host.snapshotToken == next.snapshotToken && host.initialSync == next.initialSync
         }
 }
 

@@ -2,7 +2,6 @@ package dev.pinkcollab.data
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -22,7 +21,7 @@ import javax.net.ssl.SSLException
 internal class HostConnectionSupervisor(
     private val scope: CoroutineScope,
     private val api: GatewayTransport,
-    private val onState: (String, ConnectionState, ConnectionProgress?) -> Unit,
+    private val onState: (String, ConnectionState) -> Unit,
     private val onFrame: (String, JSONObject) -> Unit,
     private val onSubscriptionEnded: (String, String) -> Unit,
     private val cachedHost: (String) -> HostState? = { null },
@@ -32,10 +31,8 @@ internal class HostConnectionSupervisor(
     private val connections = mutableMapOf<String, HostConnection>()
     private val desiredSessions = mutableMapOf<String, MutableSet<String>>()
 
-    fun connect(paired: PairedHost, force: Boolean = true) {
+    fun connect(paired: PairedHost) {
         synchronized(lock) {
-            // Foreground resume must not cancel a live socket or reset an active retry cycle.
-            if (!force && connections[paired.host.id]?.isRunning == true) return
             invalidateSubscriptions(paired.host.id)
             val connection = HostConnection(paired)
             connections.put(paired.host.id, connection)?.stop()
@@ -105,7 +102,6 @@ internal class HostConnectionSupervisor(
         private val connectionGeneration = AtomicLong()
         private var job: Job? = null
         private var socket: WebSocket? = null
-        val isRunning: Boolean get() = job?.isActive == true
 
         fun subscribe(sessionId: String, fresh: Boolean = false) {
             val cached = cachedSession(paired.host.id, sessionId)
@@ -123,26 +119,16 @@ internal class HostConnectionSupervisor(
             val currentGeneration = connectionGeneration.incrementAndGet()
             job?.cancel()
             job = scope.launch {
-                var lastFailure: String? = null
-                for (attempt in 1..MaxConnectionAttempts) {
-                    if (!isActive || !isCurrent(currentGeneration)) return@launch
-                    // Socket opening and host synchronization are separate connection stages.
-                    val progress = ConnectionProgress(attempt, lastFailure)
-                    emitState(currentGeneration, ConnectionState.Connecting, progress)
-                    val disconnect = awaitSocket(currentGeneration, progress)
-                    if (!isCurrent(currentGeneration)) return@launch
-                    if (disconnect.authenticationRequired) {
+                if (!isActive || !isCurrent(currentGeneration)) return@launch
+                emitState(currentGeneration, ConnectionState.Connecting)
+                val disconnect = awaitSocket(currentGeneration)
+                if (!isCurrent(currentGeneration)) return@launch
+                when {
+                    disconnect.authenticationRequired ->
                         emitState(currentGeneration, ConnectionState.AuthenticationRequired)
-                        return@launch
-                    }
-                    if (disconnect.upgradeRequired) {
+                    disconnect.upgradeRequired ->
                         emitState(currentGeneration, ConnectionState.UpgradeRequired)
-                        return@launch
-                    }
-                    lastFailure = disconnect.failure.reason
-                    emitState(currentGeneration, disconnect.failure)
-                    if (attempt == MaxConnectionAttempts) return@launch
-                    delay(ReconnectIntervalMillis)
+                    else -> emitState(currentGeneration, disconnect.failure)
                 }
             }
         }
@@ -159,7 +145,7 @@ internal class HostConnectionSupervisor(
             stop()
             synchronized(lock) {
                 if (connections[paired.host.id] === this) {
-                    onState(paired.host.id, ConnectionState.Offline("Network unavailable", ConnectionFailure.NetworkUnavailable), null)
+                    onState(paired.host.id, ConnectionState.Offline("Network unavailable", ConnectionFailure.NetworkUnavailable))
                 }
             }
         }
@@ -169,12 +155,12 @@ internal class HostConnectionSupervisor(
                 connectionGeneration.get() == generation && connections[paired.host.id] === this
             }
 
-        private fun emitState(generation: Long, state: ConnectionState, progress: ConnectionProgress? = null) {
+        private fun emitState(generation: Long, state: ConnectionState) {
             synchronized(lock) {
                 if (connectionGeneration.get() == generation && connections[paired.host.id] === this) {
                     if (state is ConnectionState.Offline || state == ConnectionState.AuthenticationRequired ||
                         state == ConnectionState.UpgradeRequired) invalidateSubscriptions(paired.host.id)
-                    onState(paired.host.id, state, progress)
+                    onState(paired.host.id, state)
                 }
             }
         }
@@ -190,7 +176,7 @@ internal class HostConnectionSupervisor(
             }
         }
 
-        private suspend fun awaitSocket(generation: Long, progress: ConnectionProgress): Disconnect =
+        private suspend fun awaitSocket(generation: Long): Disconnect =
             suspendCancellableCoroutine { continuation ->
                 val known = cachedHost(paired.host.id)
                 val endpoint = (paired.url + "/api/v4/events").toHttpUrl().newBuilder().apply {
@@ -212,7 +198,7 @@ internal class HostConnectionSupervisor(
                                 return
                             }
                             gzipNegotiated = response.header("Sec-WebSocket-Protocol") == GzipSocketProtocol
-                            emitState(generation, ConnectionState.Synchronizing, progress)
+                            emitState(generation, ConnectionState.Synchronizing)
                             synchronized(lock) {
                                 socket = webSocket
                                 desiredSessions[paired.host.id]?.forEach(::subscribe)
@@ -287,5 +273,3 @@ internal fun connectionFailure(error: Throwable, httpCode: Int? = null): Connect
     else -> ConnectionState.Offline("Connection interrupted")
 }
 
-private const val MaxConnectionAttempts = 3
-private const val ReconnectIntervalMillis = 1_000L

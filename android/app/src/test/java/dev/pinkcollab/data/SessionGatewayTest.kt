@@ -140,7 +140,7 @@ class SessionGatewayTest {
             throw GatewayHttpException(503, "history_unavailable", "OMP history is unavailable")
         }
         val gateway = gatewayWith(state, transport)
-        val connections = HostConnectionSupervisor(this, transport, { _, _, _ -> }, { _, _ -> },
+        val connections = HostConnectionSupervisor(this, transport, { _, _ -> }, { _, _ -> },
             gateway::invalidateSubscription)
         connections.focus("host", "session")
         val initial = loadingDetail()
@@ -176,7 +176,7 @@ class SessionGatewayTest {
             val state = MutableStateFlow(AppState())
             val transport = NoNetworkTransport()
             val gateway = gatewayWith(state, transport)
-            val connections = HostConnectionSupervisor(this, transport, { _, _, _ -> }, { _, _ -> },
+            val connections = HostConnectionSupervisor(this, transport, { _, _ -> }, { _, _ -> },
                 gateway::invalidateSubscription)
             connections.focus("host", "session")
             state.value = AppState(details = mapOf(key to ready))
@@ -201,7 +201,7 @@ class SessionGatewayTest {
         val state = MutableStateFlow(AppState())
         val transport = HistoryTransport { response.await() }
         val gateway = gatewayWith(state, transport)
-        val connections = HostConnectionSupervisor(this, transport, { _, _, _ -> }, { _, _ -> },
+        val connections = HostConnectionSupervisor(this, transport, { _, _ -> }, { _, _ -> },
             gateway::invalidateSubscription)
         connections.focus("host", "session")
         state.value = AppState(details = mapOf(key to loadingDetail()))
@@ -314,5 +314,31 @@ class SessionGatewayTest {
         assertEquals(listOf("tool-ui", "old-ui", "live-ui"), saved.map { it.id })
         assertTrue(saved.first().tool!!.completed)
         assertEquals("complete reply", saved.last().text)
+    }
+
+    @Test fun offline_host_does_not_wait_for_a_session_snapshot() = runTest {
+        val paired = PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client")
+        val state = MutableStateFlow(AppState(hosts = mapOf(
+            "host" to HostState(paired, connection = ConnectionState.Offline()),
+        )))
+        var focused = false
+        val gateway = SessionGateway(state, NoNetworkTransport(), { paired }, { _, _ -> focused = true })
+        gateway.detail("host", "session")
+        assertFalse(focused)
+    }
+
+    @Test fun detail_wait_ends_when_the_host_goes_offline() = runTest {
+        val paired = PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client")
+        val state = MutableStateFlow(AppState(hosts = mapOf(
+            "host" to HostState(paired, connection = ConnectionState.Online(1)),
+        )))
+        val focused = CompletableDeferred<Unit>()
+        val gateway = SessionGateway(state, NoNetworkTransport(), { paired }, { _, _ -> focused.complete(Unit) })
+        val waiting = async { gateway.detail("host", "session") }
+        focused.await()
+        state.update {
+            it.copy(hosts = mapOf("host" to it.hosts.getValue("host").copy(connection = ConnectionState.Offline())))
+        }
+        waiting.await()
     }
 }

@@ -82,8 +82,7 @@ internal fun ResourcesScreen(
             val connectionPending = host.connection == ConnectionState.Connecting ||
                 host.connection == ConnectionState.Synchronizing
             val (connectionLabel, connectionColor) = when (host.connection) {
-                ConnectionState.Connecting, ConnectionState.Synchronizing ->
-                    (if ((host.connectionProgress?.attempt ?: 1) > 1) "Reconnecting" else "Connecting") to BrandPink
+                ConnectionState.Connecting, ConnectionState.Synchronizing -> "Connecting" to BrandPink
                 is ConnectionState.Online -> "$activeTasks active" to Teal300
                 is ConnectionState.Offline -> "Offline" to Gray400
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400

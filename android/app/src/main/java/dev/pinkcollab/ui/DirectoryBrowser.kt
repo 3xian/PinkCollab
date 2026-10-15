@@ -311,11 +311,7 @@ private fun DirectoryCreateBar(folder: String, creating: Boolean, onCreate: () -
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         ) {
             if (creating) {
-                CircularProgressIndicator(
-                    Modifier.size(18.dp),
-                    color = LocalContentColor.current,
-                    strokeWidth = 2.dp,
-                )
+                OrbitDots(Modifier.size(18.dp), LocalContentColor.current)
                 Spacer(Modifier.width(8.dp))
                 Text("Creating session")
             } else {

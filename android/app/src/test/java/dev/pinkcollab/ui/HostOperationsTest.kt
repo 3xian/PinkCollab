@@ -31,7 +31,6 @@ class HostOperationsTest {
         }
         override suspend fun refreshHost(hostId: String) { calls += "refresh:$hostId" }
         override fun reconnect(hostId: String) { calls += "reconnect:$hostId" }
-        override fun reconnectHosts() { calls += "reconnect-hosts" }
         override suspend fun forget(hostId: String) { calls += "forget:$hostId" }
         var renameGate: CompletableDeferred<Unit>? = null
         override suspend fun rename(hostId: String, name: String) {

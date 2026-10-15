@@ -5,7 +5,6 @@ import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.InitialSyncState
-import dev.pinkcollab.data.ConnectionProgress
 import dev.pinkcollab.data.PairedHost
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
@@ -111,7 +110,6 @@ class PresentationFlowsTest {
             initial.copy(hosts = mapOf("host" to host.copy(connection = ConnectionState.Offline()))),
             initial.copy(hosts = mapOf("host" to host.copy(snapshotToken = "reconnected"))),
             initial.copy(hosts = mapOf("host" to host.copy(initialSync = InitialSyncState.Ready))),
-            initial.copy(hosts = mapOf("host" to host.copy(connectionProgress = ConnectionProgress(2)))),
             initial.copy(hosts = mapOf("host" to host.copy(sessions = listOf(session.copy(title = "Edited"))))),
         )) assertFalse(sessionListState(initial).samePresentation(sessionListState(changed)))
         assertEquals(TaskListLoadState.Ready, sessionListState(initial).loadState)
@@ -128,13 +126,13 @@ class PresentationFlowsTest {
             }
         }
         assertEquals(TaskListEmptyState.Loading, presentation.value.emptyState)
-        val offline = host.withConnectionState(ConnectionState.Offline("Failed"), ConnectionProgress(2, "Failed"))
+        val offline = host.withConnectionState(ConnectionState.Offline("Failed"))
         assertEquals(TaskListEmptyState.Recovery, publish(offline).emptyState)
         // No Tasks collector exists between these publications, as when Workspaces is open.
-        val retrying = offline.withConnectionState(ConnectionState.Connecting, ConnectionProgress(2, "Failed"))
+        val retrying = offline.withConnectionState(ConnectionState.Connecting)
         assertEquals(TaskListEmptyState.Recovery, publish(retrying).emptyState)
         assertEquals(TaskListEmptyState.Recovery,
-            publish(retrying.withConnectionState(ConnectionState.Synchronizing, ConnectionProgress(2, "Failed"))).emptyState)
+            publish(retrying.withConnectionState(ConnectionState.Synchronizing)).emptyState)
         val ready = host.copy(connection = ConnectionState.Online(1), initialSync = InitialSyncState.Ready)
         assertEquals(TaskListEmptyState.Ready, publish(ready).emptyState)
         assertEquals(TaskListEmptyState.Loading, publish(host).emptyState)

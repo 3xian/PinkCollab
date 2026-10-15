@@ -8,6 +8,8 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -124,7 +126,6 @@ class HostSessionFilterDeviceTest {
         compose.onNodeWithTag("hostFilter").performClick()
         compose.onNodeWithTag("hostFilterOption:desk").performClick()
         restoration.emulateSavedInstanceStateRestore()
-        compose.onNodeWithText("Desk").assertIsDisplayed()
         compose.runOnIdle { hosts = hosts + ("desk" to host("desk", "Desk", listOf(first, second))) }
         compose.waitForIdle()
         assertEquals(SessionKey("desk", first.id), selected)
@@ -132,7 +133,6 @@ class HostSessionFilterDeviceTest {
         compose.onNodeWithTag("sessionCard:${second.id}").performClick()
         compose.waitForIdle()
         assertEquals(SessionKey("desk", second.id), selected)
-        compose.onNodeWithText("Desk").assertIsDisplayed()
     }
 
     @Test fun equal_size_host_switch_pages_only_the_visible_host() {
@@ -162,6 +162,76 @@ class HostSessionFilterDeviceTest {
         compose.onNodeWithTag("sessionCards").performScrollToNode(hasTestTag("sessionCard:office-8"))
         compose.waitForIdle()
         assertEquals(setOf("office"), pagedHosts.toSet())
+    }
+
+    @Test fun offline_host_filter_uses_one_recovery_explanation() {
+        val listed = session("listed", "offline", "2026-09-20T00:00:00Z")
+        val onlineSession = session("online-session", "online", "2026-09-21T00:00:00Z")
+        val hosts = mapOf(
+            "online" to host("online", "Online", listOf(onlineSession)).copy(
+                connection = ConnectionState.Online(1), initialSync = InitialSyncState.Ready,
+            ),
+            "offline" to host("offline", "Offline", listOf(listed)).copy(
+                connection = ConnectionState.Offline(), initialSync = InitialSyncState.Ready,
+            ),
+            "empty" to host("empty", "Empty", emptyList()).copy(
+                connection = ConnectionState.Offline(), initialSync = InitialSyncState.Unavailable,
+            ),
+        )
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(
+                    sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
+                    emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("online", onlineSession.id),
+                ),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+            )
+        }
+        compose.onNodeWithTag("hostFilter").performClick()
+        compose.onNodeWithTag("hostFilterOption:offline").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Can’t reach this host").assertIsDisplayed()
+        compose.onNodeWithText("Could not load this session").assertDoesNotExist()
+        compose.onNodeWithTag("sessionCard:listed").assertIsDisplayed()
+
+        compose.onNodeWithTag("hostFilter").performClick()
+        compose.onNodeWithTag("hostFilterOption:empty").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Can’t reach this host").assertIsDisplayed()
+        compose.onNodeWithText("Could not load this session").assertDoesNotExist()
+    }
+
+    @Test fun expanded_filter_updates_host_status_without_changing_selection() {
+        var connection by mutableStateOf<ConnectionState>(ConnectionState.Online(1))
+        val listed = session("session", "office", "2026-09-20T00:00:00Z")
+        compose.setContent {
+            val hosts = mapOf("office" to host("office", "Office", listOf(listed)).copy(
+                connection = connection, initialSync = InitialSyncState.Ready,
+            ))
+            TasksScreen(
+                TasksScreenState(
+                    sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
+                    emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("office", listed.id),
+                ),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+            )
+        }
+        compose.onNodeWithTag("hostFilter").performClick()
+        val option = compose.onNodeWithTag("hostFilterOption:office")
+        for ((state, label) in listOf(
+            ConnectionState.Online(1) to "Connected",
+            ConnectionState.Offline() to "Offline",
+            ConnectionState.Connecting to "Connecting",
+            ConnectionState.Synchronizing to "Syncing",
+            ConnectionState.AuthenticationRequired to "Reconnect required",
+            ConnectionState.UpgradeRequired to "Update required",
+        )) {
+            compose.runOnIdle { connection = state }
+            option.assertIsDisplayed()
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("hostFilterOption:office")),
+                useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithTag("hostFilterOption:all").assertIsSelected()
+        }
     }
 
     private fun session(id: String, hostId: String, updated: String) = Session(

@@ -53,12 +53,12 @@ class TaskListLoadStateTest {
     }
 
     @Test
-    fun `network recovery clears initial failure until snapshot arrives`() {
+    fun `a new connection attempt clears initial failure until snapshot arrives`() {
         var host = HostState(paired)
-        host = host.withConnectionState(ConnectionState.Offline("Network unavailable"), null)
+        host = host.withConnectionState(ConnectionState.Offline("Network unavailable"))
         assertEquals(TaskListLoadState.Unavailable, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
         for (connection in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing)) {
-            host = host.withConnectionState(connection, ConnectionProgress(2))
+            host = host.withConnectionState(connection)
             assertEquals(InitialSyncState.Pending, host.initialSync)
             assertEquals(TaskListLoadState.Loading, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
         }
@@ -68,7 +68,7 @@ class TaskListLoadStateTest {
     fun `terminal connection failures remain unavailable before first snapshot`() {
         for (connection in listOf(ConnectionState.Offline("Unreachable"),
             ConnectionState.AuthenticationRequired, ConnectionState.UpgradeRequired)) {
-            val host = HostState(paired).withConnectionState(connection, null)
+            val host = HostState(paired).withConnectionState(connection)
             assertEquals(TaskListLoadState.Unavailable, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
         }
     }
@@ -76,7 +76,7 @@ class TaskListLoadStateTest {
     @Test
     fun `connection loss preserves a known empty snapshot`() {
         val host = HostState(paired, initialSync = InitialSyncState.Ready)
-            .withConnectionState(ConnectionState.Offline("Network unavailable"), null)
+            .withConnectionState(ConnectionState.Offline("Network unavailable"))
         assertEquals(TaskListLoadState.Ready, AppState(hosts = mapOf(paired.host.id to host)).taskListLoadState)
     }
 

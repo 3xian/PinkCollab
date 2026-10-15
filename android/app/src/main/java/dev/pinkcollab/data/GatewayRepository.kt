@@ -103,10 +103,10 @@ internal class GatewayRepository(
         connections.connect(paired)
     }
 
-    private fun connectionState(hostId: String, connection: ConnectionState, progress: ConnectionProgress?) {
+    private fun connectionState(hostId: String, connection: ConnectionState) {
         mutable.update { app ->
             val host = app.hosts[hostId] ?: return@update app
-            app.copy(hosts = app.hosts + (hostId to host.withConnectionState(connection, progress)))
+            app.copy(hosts = app.hosts + (hostId to host.withConnectionState(connection)))
         }
     }
 
@@ -144,14 +144,6 @@ internal class GatewayRepository(
             app.copy(hosts = app.hosts + (id to host.copy(initialSync = InitialSyncState.Pending)))
         }
         state.value.hosts[id]?.paired?.let(::connect)
-    }
-
-    fun reconnectHosts(force: Boolean = false) {
-        // Keep running connections on foreground resume; network changes can force replacement.
-        state.value.hosts.values.forEach { host ->
-            if (host.connection != ConnectionState.AuthenticationRequired &&
-                host.connection != ConnectionState.UpgradeRequired) connections.connect(host.paired, force)
-        }
     }
 
     fun networkUnavailable() {

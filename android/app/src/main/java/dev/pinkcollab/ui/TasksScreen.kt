@@ -189,7 +189,9 @@ internal fun TasksScreen(
         if (sessions.isEmpty()) {
             Box(Modifier.weight(1f)) {
                 when (visibleState.emptyState) {
-                    TaskListEmptyState.Loading -> TaskListLoadingState()
+                    TaskListEmptyState.Loading -> TaskListLoadingState(
+                        hostFilter?.let { id -> hostFilterOptions(hosts).firstOrNull { it.hostId == id }?.label },
+                    )
                     TaskListEmptyState.Recovery -> SessionRecoveryScreen(visibleHosts.values.toList(), actions)
 
                     TaskListEmptyState.Ready -> if (hosts.isEmpty()) {
@@ -217,58 +219,66 @@ internal fun TasksScreen(
                 val key = SessionKey(session.hostId, session.id)
                 val detail = state.details[key]
                 val displayed = sessionDetailForDisplay(detail, displayCache[key])
-                val detailState = displayed?.let { LoadState.Ready(it.detail) }
-                    ?: when (val request = detailLoads[key]) {
-                        is LoadState.Failed -> request
-                        else -> LoadState.Loading
-                    }
-                SessionPage(
-                    isActive = pageIndex == pagerState.settledPage,
-                    state = SessionPageState(
-                        detail = detailState,
-                        summary = session,
-                        host = hosts[session.hostId],
-                        draft = drafts[key] ?: SessionDraft(),
-                        selectingFiles = fileSelections[key] ?: 0,
-                        activity = sessionOperations.activity(key),
-                        sendProgress = sendProgress[key],
-                        model = modelLoads[key],
-                        usage = state.usageLoads[session.hostId],
-                        runtimeStart = state.runtimeStarts[key],
-                        historyItems = displayed?.historyItems,
-                        refreshError = if (detailLoads[key] is LoadState.Failed)
-                            "Could not refresh this conversation" else null,
-                    ),
-                    onAction = { action -> actions.session(session, action) },
-                    onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
-                    loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
-                )
+                val host = hosts[session.hostId]
+                if (sessionNeedsHostRecovery(displayed != null, host) && host != null) {
+                    SessionRecoveryScreen(listOf(host), actions)
+                } else {
+                    val detailState = displayed?.let { LoadState.Ready(it.detail) }
+                        ?: if (host?.connected != true) LoadState.Loading
+                        else when (val request = detailLoads[key]) {
+                            is LoadState.Failed -> request
+                            else -> LoadState.Loading
+                        }
+                    SessionPage(
+                        isActive = pageIndex == pagerState.settledPage,
+                        state = SessionPageState(
+                            detail = detailState,
+                            summary = session,
+                            host = host,
+                            draft = drafts[key] ?: SessionDraft(),
+                            selectingFiles = fileSelections[key] ?: 0,
+                            activity = sessionOperations.activity(key),
+                            sendProgress = sendProgress[key],
+                            model = modelLoads[key],
+                            usage = state.usageLoads[session.hostId],
+                            runtimeStart = state.runtimeStarts[key],
+                            historyItems = displayed?.historyItems,
+                            refreshError = if (host?.connected == true && detailLoads[key] is LoadState.Failed)
+                                "Could not refresh this conversation" else null,
+                        ),
+                        onAction = { action -> actions.session(session, action) },
+                        onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
+                        loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TaskListLoadingState() {
+private fun TaskListLoadingState(hostName: String?) {
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator(color = Purple400)
+        MorphIndicator(color = Purple400)
         Spacer(Modifier.height(20.dp))
         Text(
             "Syncing sessions…",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
         )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Waiting for the paired hosts to send their session lists.",
-            color = TextMid,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-        )
+        if (!hostName.isNullOrBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                hostName,
+                color = TextMid,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -456,7 +466,7 @@ private fun HostSessionFilter(
         Box(Modifier.widthIn(max = filterMaxWidth)) {
             TopBarTextButton(
                 onClick = { expanded = true },
-                contentPadding = PaddingValues(start = 16.dp, end = 6.dp),
+                contentPadding = PaddingValues(start = 8.dp, end = 4.dp),
                 modifier = Modifier
                     .widthIn(max = filterMaxWidth)
                     .testTag("hostFilter")
@@ -467,7 +477,7 @@ private fun HostSessionFilter(
             ) {
                 Text(
                     label,
-                    Modifier.widthIn(max = (filterMaxWidth - 43.dp).coerceAtLeast(0.dp)),
+                    Modifier.widthIn(max = (filterMaxWidth - 33.dp).coerceAtLeast(0.dp)),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Medium,
                     color = Purple400,
@@ -493,7 +503,8 @@ private fun HostSessionFilter(
                     onSelect(null)
                 }
                 options.forEach { option ->
-                    HostFilterMenuItem(option.label, selected = option.hostId == selectedHostId, tag = "hostFilterOption:${option.hostId}") {
+                    HostFilterMenuItem(option.label, selected = option.hostId == selectedHostId,
+                        tag = "hostFilterOption:${option.hostId}", connection = hosts.getValue(option.hostId).connection) {
                         expanded = false
                         onSelect(option.hostId)
                     }
@@ -504,9 +515,30 @@ private fun HostSessionFilter(
 }
 
 @Composable
-private fun HostFilterMenuItem(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+private fun HostFilterMenuItem(
+    label: String,
+    selected: Boolean,
+    tag: String,
+    connection: ConnectionState? = null,
+    onClick: () -> Unit,
+) {
     DropdownMenuItem(
-        text = { Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (connection != null) {
+                    val (status, color) = when (connection) {
+                        ConnectionState.Connecting -> "Connecting" to BrandPink
+                        ConnectionState.Synchronizing -> "Syncing" to BrandPink
+                        is ConnectionState.Online -> "Connected" to Teal300
+                        is ConnectionState.Offline -> "Offline" to Gray400
+                        ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
+                        ConnectionState.UpgradeRequired -> "Update required" to Red400
+                    }
+                    Text(status, style = MaterialTheme.typography.labelSmall, color = color)
+                }
+            }
+        },
         onClick = rememberHapticOnClick(onClick),
         leadingIcon = {
             Icon(

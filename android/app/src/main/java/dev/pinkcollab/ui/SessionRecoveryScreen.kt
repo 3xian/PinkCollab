@@ -42,6 +42,18 @@ internal fun recoveryHostDetail(host: HostState): String = when (val connection 
 
 internal data class RecoveryPrimaryAction(val label: String, val enabled: Boolean, val onClick: () -> Unit)
 
+internal data class RecoveryCopy(val title: String, val description: String?)
+
+/** Empty catalogs and unlistable sessions must name the same blocker. */
+internal fun recoveryCopy(hosts: List<HostState>): RecoveryCopy = when {
+    hosts.any { it.connected } -> RecoveryCopy("Couldn’t load sessions", "Try again to load your sessions.")
+    hosts.size == 1 -> RecoveryCopy("Can’t reach this host", null)
+    else -> RecoveryCopy("Can’t reach your hosts", "Reconnect a host to load your sessions.")
+}
+
+internal fun sessionNeedsHostRecovery(hasRetainedConversation: Boolean, host: HostState?): Boolean =
+    !hasRetainedConversation && host?.blocksSessionDetail == true
+
 internal fun recoveryPrimaryAction(hosts: List<HostState>, actions: TasksScreenActions): RecoveryPrimaryAction {
     val retryIds = hosts.filter {
         it.connection is ConnectionState.Offline ||
@@ -68,6 +80,7 @@ internal fun recoveryPrimaryAction(hosts: List<HostState>, actions: TasksScreenA
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenActions) {
+    val copy = recoveryCopy(hosts)
     val primaryAction = recoveryPrimaryAction(hosts, actions)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         Column(
@@ -95,19 +108,20 @@ internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenA
             )
             Spacer(Modifier.height(20.dp))
             Text(
-                if (hosts.any { it.connected }) "Couldn’t load sessions" else "Can’t reach your hosts",
+                copy.title,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 textAlign = TextAlign.Center,
             )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (hosts.any { it.connected }) "Try again to load your sessions."
-                else "Reconnect a host to load your sessions.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextMid,
-                textAlign = TextAlign.Center,
-            )
+            copy.description?.let { description ->
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMid,
+                    textAlign = TextAlign.Center,
+                )
+            }
             Spacer(Modifier.height(24.dp))
             Column(Modifier.widthIn(max = 440.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 hosts.forEach { host ->

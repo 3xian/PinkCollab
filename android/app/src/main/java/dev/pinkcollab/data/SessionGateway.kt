@@ -36,9 +36,13 @@ internal class SessionGateway(
 
     suspend fun detail(hostId: String, id: String) {
         val key = SessionKey(hostId, id)
+        // A blocked host cannot send a snapshot. Waiting would surface a session timeout for a connection failure.
+        if (state.value.hosts[hostId]?.blocksSessionDetail == true) return
         invalidateSubscription(hostId, id)
         focus(hostId, id)
-        awaitSnapshot(state, "Timed out waiting for the session snapshot") { it.details[key]?.snapshotToken != null }
+        awaitSnapshot(state, "Timed out waiting for the session snapshot") {
+            it.details[key]?.snapshotToken != null || it.hosts[hostId]?.blocksSessionDetail == true
+        }
     }
 
     /** Release subscription-owned work without evicting the last visible session or transcript. */

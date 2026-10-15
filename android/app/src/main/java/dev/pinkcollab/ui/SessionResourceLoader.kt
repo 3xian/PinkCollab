@@ -1,6 +1,7 @@
 package dev.pinkcollab.ui
 
 import dev.pinkcollab.data.ModelCatalog
+import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -29,9 +30,14 @@ internal class SessionResourceLoader(
     private val detailVersions = mutableMapOf<SessionKey, Long>()
     private var nextDetailVersion = 0L
 
+    // Only available models are host-scoped. The fallback levels describe the
+    // requesting runtime's active model and must never be reused by a sibling.
     private val mutableModelLoads = MutableStateFlow<Map<SessionKey, LoadState<ModelCatalog>>>(emptyMap())
     val modelLoads = mutableModelLoads.asStateFlow()
     private val modelLoadLock = Any()
+    private val hostModels = mutableMapOf<String, List<ModelInfo>>()
+    private val hostModelVersions = mutableMapOf<String, Long>()
+    private val thinkingLoads = mutableMapOf<SessionKey, LoadState<List<String>>>()
     private val modelJobs = mutableMapOf<SessionKey, Job>()
     private val modelVersions = mutableMapOf<SessionKey, Long>()
     private val modelGenerations = mutableMapOf<SessionKey, String?>()
@@ -80,28 +86,40 @@ internal class SessionResourceLoader(
     }
 
     fun loadModels(session: Session, force: Boolean = false) {
-        val key = SessionKey(session.hostId, session.id)
+        val hostId = session.hostId
+        val key = SessionKey(hostId, session.id)
         val request = synchronized(modelLoadLock) {
-            val current = mutableModelLoads.value[key]
-            val sameGeneration = key in modelGenerations && modelGenerations[key] == session.generation
-            if (((current == LoadState.Loading || (current is LoadState.Ready && current.refreshing)) && sameGeneration) ||
-                (!force && current is LoadState.Ready && sameGeneration)) {
+            val current = thinkingLoads[key]
+            val runtimeChanged = key in modelGenerations && modelGenerations[key] != session.generation
+            val inFlight = current == LoadState.Loading || (current is LoadState.Ready && current.refreshing)
+            if ((inFlight && !runtimeChanged) || (!force && !runtimeChanged && current is LoadState.Ready)) {
                 null
             } else {
-                val cached = (current as? LoadState.Ready)?.takeIf { sameGeneration }
-                mutableModelLoads.value += key to (cached?.copy(refreshing = true) ?: LoadState.Loading)
+                // A replaced runtime cannot use its predecessor's active-model fallback.
+                val previous = if (runtimeChanged) null else current as? LoadState.Ready
+                thinkingLoads[key] = previous?.copy(refreshing = true) ?: LoadState.Loading
+                publishModelLoads()
                 modelGenerations[key] = session.generation
                 val version = (++nextModelVersion).also { modelVersions[key] = it }
-                version to cached
+                version to previous
             }
         }
         if (request == null) return
-        val (version, cached) = request
+        val (version, previous) = request
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val models = actions.models(session)
                 synchronized(modelLoadLock) {
-                    if (modelVersions[key] == version) mutableModelLoads.value += key to LoadState.Ready(models)
+                    if (modelVersions[key] == version) {
+                        // Concurrent sessions may finish out of order. Keep the newest
+                        // successful request's host list, but each runtime's own levels.
+                        if (version > (hostModelVersions[hostId] ?: 0L)) {
+                            hostModels[hostId] = models.models
+                            hostModelVersions[hostId] = version
+                        }
+                        thinkingLoads[key] = LoadState.Ready(models.thinkingLevels)
+                        publishModelLoads()
+                    }
                 }
             } catch (failure: CancellationException) {
                 throw failure
@@ -109,11 +127,12 @@ internal class SessionResourceLoader(
                 val message = failure.message ?: "Unable to load models"
                 val current = synchronized(modelLoadLock) {
                     if (modelVersions[key] != version) false else {
-                        mutableModelLoads.value += key to (cached ?: LoadState.Failed(message))
+                        thinkingLoads[key] = previous?.copy(refreshing = false) ?: LoadState.Failed(message)
+                        publishModelLoads()
                         true
                     }
                 }
-                if (current && cached != null) reportError(message)
+                if (current && previous != null) reportError(message)
             }
         }
         synchronized(modelLoadLock) {
@@ -121,6 +140,19 @@ internal class SessionResourceLoader(
         }
         job.invokeOnCompletion { synchronized(modelLoadLock) { if (modelJobs[key] === job) modelJobs.remove(key) } }
         job.start()
+    }
+
+    /** Called under modelLoadLock; ready catalogs share only the host's model list. */
+    private fun publishModelLoads() {
+        mutableModelLoads.value = thinkingLoads.mapValues { (key, state) ->
+            when (state) {
+                is LoadState.Ready -> LoadState.Ready(
+                    ModelCatalog(hostModels.getValue(key.hostId), state.value), state.refreshing,
+                )
+                is LoadState.Failed -> state
+                LoadState.Loading -> LoadState.Loading
+            }
+        }
     }
 
     fun removeHost(hostId: String) {
@@ -132,9 +164,12 @@ internal class SessionResourceLoader(
             }
         }
         val modelToCancel = synchronized(modelLoadLock) {
+            hostModels.remove(hostId)
+            hostModelVersions.remove(hostId)
             modelVersions.keys.removeAll { it.hostId == hostId }
             modelGenerations.keys.removeAll { it.hostId == hostId }
-            mutableModelLoads.value = mutableModelLoads.value.filterKeys { it.hostId != hostId }
+            thinkingLoads.keys.removeAll { it.hostId == hostId }
+            publishModelLoads()
             modelJobs.filterKeys { it.hostId == hostId }.values.toList().also {
                 modelJobs.keys.removeAll { key -> key.hostId == hostId }
             }

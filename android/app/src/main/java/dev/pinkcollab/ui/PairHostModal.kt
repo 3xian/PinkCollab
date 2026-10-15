@@ -21,7 +21,6 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -203,7 +202,7 @@ private fun PairHostSheet(
                 enabled = url.isNotBlank() && token.isNotBlank() && !busy,
             ) {
                 if (busy) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    OrbitDots(Modifier.size(18.dp))
                     Spacer(Modifier.size(8.dp))
                 }
                 Text(if (busy) "Pairing…" else "Pair")

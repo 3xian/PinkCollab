@@ -90,4 +90,20 @@ class SessionRecoveryTest {
         assertEquals("Couldn’t load sessions from this host.",
             recoveryHostDetail(host(ConnectionState.Online(1))))
     }
+
+    @Test fun one_unreachable_host_uses_the_same_copy_as_a_filtered_empty_catalog() {
+        val offline = host(ConnectionState.Offline())
+        val copy = recoveryCopy(listOf(offline))
+        assertEquals("Can’t reach this host", copy.title)
+        assertNull(copy.description)
+        assertEquals("Can’t reach your hosts", recoveryCopy(listOf(offline, host(ConnectionState.Offline(), id = "other"))).title)
+        assertEquals("Couldn’t load sessions", recoveryCopy(listOf(host(ConnectionState.Online(1)))).title)
+        assertTrue(sessionNeedsHostRecovery(false, offline))
+        assertTrue(sessionNeedsHostRecovery(false, host(ConnectionState.AuthenticationRequired)))
+        assertTrue(sessionNeedsHostRecovery(false, host(ConnectionState.UpgradeRequired)))
+        assertFalse(sessionNeedsHostRecovery(true, offline))
+        assertFalse(sessionNeedsHostRecovery(false, host(ConnectionState.Online(1))))
+        assertFalse(sessionNeedsHostRecovery(false, host(ConnectionState.Connecting)))
+        assertFalse(sessionNeedsHostRecovery(false, null))
+    }
 }

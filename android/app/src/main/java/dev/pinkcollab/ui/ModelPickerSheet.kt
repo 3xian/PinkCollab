@@ -160,7 +160,7 @@ internal fun ModelPickerSheet(
                     } else {
                         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                             when {
-                                state == null || state == LoadState.Loading -> CircularProgressIndicator(color = Purple400)
+                                state == null || state == LoadState.Loading -> MorphIndicator(color = Purple400)
                                 state is LoadState.Failed -> Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -229,7 +229,7 @@ private fun DefaultModelContent(starting: Boolean, canStart: Boolean, start: () 
     ) {
         if (starting) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator(Modifier.size(20.dp), color = Purple400, strokeWidth = 2.dp)
+                MorphIndicator(Modifier.size(20.dp), Purple400)
                 Text("Starting OMP…", style = MaterialTheme.typography.bodyMedium, color = TextMid)
             }
         } else if (error != null) {

@@ -184,7 +184,6 @@ enum class ConnectionFailure {
     NetworkUnavailable, HostNotFound, TimedOut, Unreachable, SecureConnectionFailed,
     HostRejected, InvalidData, HostClosed, Interrupted,
 }
-data class ConnectionProgress(val attempt: Int, val failure: String? = null)
 
 data class HostState(
     val paired: PairedHost,
@@ -195,7 +194,6 @@ data class HostState(
     val snapshotToken: String? = null,
     val lastSyncedAtEpochMillis: Long? = null,
     val initialSync: InitialSyncState = InitialSyncState.Pending,
-    val connectionProgress: ConnectionProgress? = null,
     val serverEpoch: String? = null,
     val wireSequence: Long = 0,
     val todoPlans: Map<String, List<TodoPhase>> = emptyMap(),
@@ -205,7 +203,13 @@ data class HostState(
 ) {
     val connected: Boolean get() = connection is ConnectionState.Online
 
-    internal fun withConnectionState(connection: ConnectionState, progress: ConnectionProgress?): HostState {
+    /** Offline, sign-in, and update blocks cannot answer a session subscribe. */
+    val blocksSessionDetail: Boolean
+        get() = connection is ConnectionState.Offline ||
+            connection == ConnectionState.AuthenticationRequired ||
+            connection == ConnectionState.UpgradeRequired
+
+    internal fun withConnectionState(connection: ConnectionState): HostState {
         val initial = when {
             initialSync == InitialSyncState.Ready -> InitialSyncState.Ready
             connection is ConnectionState.Offline ||
@@ -213,7 +217,7 @@ data class HostState(
                 connection == ConnectionState.UpgradeRequired -> InitialSyncState.Unavailable
             else -> InitialSyncState.Pending
         }
-        return copy(connection = connection, connectionProgress = progress, initialSync = initial)
+        return copy(connection = connection, initialSync = initial)
     }
 }
 data class AppState(

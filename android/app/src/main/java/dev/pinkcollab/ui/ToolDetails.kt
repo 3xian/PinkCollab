@@ -110,7 +110,7 @@ internal fun ToolDetailPanel(callId: String, version: String, controller: ToolDe
                 style = MaterialTheme.typography.bodySmall, color = TextMid)
         }
         if (state.loading) {
-            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            OrbitDots(Modifier.size(18.dp))
             Text("Loading details…", style = MaterialTheme.typography.labelSmall, color = TextMid)
         }
         if (state.error != null) {

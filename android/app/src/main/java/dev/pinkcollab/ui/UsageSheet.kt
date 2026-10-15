@@ -52,7 +52,7 @@ internal fun UsageSheet(state: LoadState<UsageSnapshot>?, reload: () -> Unit, ba
                     }
                     when (state) {
                         null, LoadState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
+                            MorphIndicator()
                         }
                         is LoadState.Failed -> Column(Modifier.fillMaxWidth().padding(24.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)) {

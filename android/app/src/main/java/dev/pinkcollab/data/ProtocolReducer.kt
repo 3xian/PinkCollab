@@ -19,7 +19,7 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
     if (type == "host_sync") {
         require(frame.getInt("protocolVersion") == 4 && epoch == host.serverEpoch)
         return ProtocolReduction(app.copy(hosts = app.hosts + (hostId to host.copy(
-            connection = ConnectionState.Online(nowEpochMillis), connectionProgress = null,
+            connection = ConnectionState.Online(nowEpochMillis),
             snapshotToken = UUID.randomUUID().toString(), revision = host.revision + 1,
             catalogVersion = frame.opt("catalogVersion") as? String ?: host.catalogVersion,
             totalSessions = frame.optInt("totalSessions", host.totalSessions ?: host.sessions.size),
@@ -33,7 +33,6 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
         return ProtocolReduction(app.copy(
             hosts = app.hosts + (hostId to host.copy(
                 paired = host.paired.copy(host = identity), connection = ConnectionState.Online(nowEpochMillis),
-                connectionProgress = null,
                 sessions = frame.getJSONArray("sessions").objects().map { it.sessionSummary() },
                 workspaces = frame.getJSONArray("workspaces").objects().map { it.workspace() },
                 snapshotToken = UUID.randomUUID().toString(), revision = host.revision + 1,

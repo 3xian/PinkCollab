@@ -65,10 +65,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     private fun showError(message: String) = showToast(message)
     private val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            repository.reconnectHosts(force = true)
-        }
-
         override fun onLost(network: Network) {
             if (connectivity.activeNetwork == null) repository.networkUnavailable()
         }
@@ -145,7 +141,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     )
     internal fun forgetHost(hostId: String) = hostOperations.forget(hostId)
     internal fun renameHost(hostId: String, name: String) = hostOperations.rename(hostId, name)
-    internal fun reconnectHosts() = hostOperations.reconnectHosts()
     internal fun loadDirectory(key: BrowserKey, forceRefresh: Boolean = false) = hostOperations.loadDirectory(key, forceRefresh)
     internal fun createSession(hostId: String, path: String) = hostOperations.create(hostId, path)
     internal fun checkForUpdates(manual: Boolean) {

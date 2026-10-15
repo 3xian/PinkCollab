@@ -83,7 +83,7 @@ Android consumes the flat protocol 4 events through `ProtocolReducer`; OMP frame
 
 `runtime.state` is the sole wire status: `starting`, `idle`, `running`, `waiting_input`, or `stopping`. A null runtime clears generation, model, pending input, and work timing. Generation changes clear the live tail and invalidate in-flight history reads; saved history reloads when a mapping exists. Local snapshot tokens and history epochs reject stale responses and are never sent over the wire. The UI does not parse runtime `phase` or `execution`, or choose prompt delivery; the Gateway chooses normal versus steering at dispatch.
 
-Switching sessions invalidates the subscription snapshot, not the host connection. While an online host supplies a fresh snapshot, retained messages remain readable and the page shows conversation synchronization instead of current work or `Host offline`; runtime controls stay disabled. Actual host connection failures still take precedence, even when the session snapshot is missing.
+Switching sessions invalidates the subscription snapshot, not the host connection. While an online host supplies a fresh snapshot, retained messages remain readable and the page shows conversation synchronization instead of current work or `Host offline`; runtime controls stay disabled. Actual host connection failures still take precedence, even when the session snapshot is missing. With no retained conversation, that failure uses the host recovery surface rather than a session-load failure.
 
 ### Session switcher status
 
@@ -250,7 +250,7 @@ Evaluate top to bottom; the first matching row wins.
 
 | Priority | Condition | `WorkStatusKind` | Meaning / title | Active indicator |
 | --- | --- | --- | --- | --- |
-| 1 | Host absent or not connected | `Offline` | Connecting, syncing, reconnecting, sign-in/update required, or offline; current work cannot be confirmed | No |
+| 1 | Host absent or not connected | `Offline` | Connecting, syncing, sign-in/update required, or offline; current work cannot be confirmed | No |
 | 2 | Session starting | `Starting` | Starting agent | No |
 | 3 | Session stopping | `Stopping` | Stopping agent | No |
 | 4 | Attention object, attention flag, or needs-input status | `Attention` | Waiting for your input; the conversation card owns request content | No |
@@ -317,6 +317,7 @@ Receipt notices must not be interpreted as individual tool outcomes or as automa
 | --- | --- |
 | Session detail loading | Gently pulsing conversation skeleton centered above the composer; show Loading conversation in the existing composer status row; preserve composer/draft and keep runtime actions disabled |
 | Session detail failed | Failure surface without a Retry button; preserve draft |
+| Host unreachable with no retained conversation | The same recovery surface as an empty session list for that host, including its title, connection explanation, and actions |
 | Initial history loading with no visible content | The same centered skeleton; show Loading conversation in the existing composer status row instead of Ready or OnHost, without hiding known current work or connection status; never claim “no saved messages” |
 | Initial content becomes available | Fade the conversation layer in over 300ms after the loading wait ends; keep the composer and status row outside the fade |
 | Earlier history available | Pull down at the top, or invoke the timeline's “Load earlier messages” accessibility action; both preserve reading position and are unavailable while loading, disconnected, or inactive |
@@ -334,22 +335,23 @@ Timeline loading and failure surfaces contain no Retry buttons. The conversation
 
 | Surface | Visual / interaction contract |
 | --- | --- |
-| Host filter | The clickable control starts at the same 12dp leading inset as the first session card; its internal text padding remains independent of the aligned hit-target edge |
+| Host filter | The clickable control starts at the same 12dp leading inset as the first session card; its internal text padding remains independent of the aligned hit-target edge. Expanded host options keep the selection radio and show a second, live-updating status line: Connected, Connecting, Syncing, Offline, Reconnect required, or Update required. Status uses the existing host-state colors and remains explicit text rather than color alone; All hosts has no individual status. While a selected host's session list is loading, the page shows that host's filter label under “Syncing sessions…”; All hosts leaves that line blank |
 | Session cards | Tap an unselected card to switch conversations. Tap the highlighted card again to open a read-only Session info dialog without reselecting or refreshing the session. The scrollable, selectable summary shows the full title, local host name, full working directory, connectivity-qualified card status, local creation/update times and session ID. The dialog is bound to the selected host/session identity, not a pager index: list reordering preserves it and refreshed metadata updates its content. Close, Back or an outside tap dismisses it; changing the selection or removing the target session also dismisses it without reopening on later updates |
 | User message | Distinct leading rail and static tint; plain text |
 | Agent message | Quiet static band; Markdown body |
 | Timeline card spacing | Messages, tool groups, errors, retained entries and streaming replies use 12dp content padding; their content edges align with the floating Todo panel's 12dp outer inset |
 | Floating Todo panel | Borderless 13dp rounded surface with a raised graphite-purple base (`#211D2B`), shadow and a stronger left-to-right status-tinted gradient; violet while active, amber when blocked, and subdued teal after settlement. Collapsed and expanded states share the same background |
 | Message copy | Long-press a copyable message body to copy its source text. There is no copy button and no reserved footer; the body uses the full content width. A short toast confirms the copy. Only zero-length text is not copyable. Assistant Markdown keeps link taps, but a long press copies the message instead of starting a selection. |
-| Running tool | Violet status icon beside the header title; small spinner only when live-qualified; explicit status in accessibility/details |
+| Running tool | Violet status icon beside the header title; small orbiting dots only when live-qualified; explicit status in accessibility/details |
 | Completed tool | Teal check; Completed status remains accessible without repeated visible text |
 | Failed tool | Red cross beside the header title; Failed status in accessibility/details |
-| Unconfirmed unfinished tool | Hourglass beside the header title; Last seen running in accessibility/details; no spinner |
+| Unconfirmed unfinished tool | Hourglass beside the header title; Last seen running in accessibility/details; no orbiting dots |
 | Work-status row | Above the input card in the fixed composer area; icon, single-line action and optional duration are vertically centered; ellipsis for title overflow; no auxiliary line |
 | Attention | Amber status cue and explicit response controls |
 | Offline / ready strip | Distinct icon and text; no active indicator |
 | Backgrounds | Static fills/tints; no animated noise or moving background effects |
 | Conversation loading skeleton | 24dp top inset; each placeholder breathes in sequence on a shared 2.4-second cycle with 240ms phase spacing; only opacity changes, not layout |
+| Indeterminate resource progress | Orbiting dots default to 18dp for compact controls; morphing silhouettes default to 48dp for larger loading surfaces. Caller dimensions take precedence, and both expose indeterminate progress accessibility semantics |
 
 - Color is supplementary; state remains distinguishable through text and icons.
 - The Android app uses only the platform default font and the bundled Maple Mono face. UI labels, speaker titles, model chips, timestamps, tool status labels and detail toggles use the default font. Session body text, tool activity titles and Markdown code blocks use Maple; native Markdown font fallback uses the platform default, never a separate system monospace face.
