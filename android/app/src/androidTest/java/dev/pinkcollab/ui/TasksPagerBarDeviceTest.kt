@@ -426,8 +426,9 @@ class TasksPagerBarDeviceTest {
             }
         }
         compose.waitForIdle()
-        val workspace = compose.onNodeWithText("project", useUnmergedTree = true)
-        val status = compose.onNodeWithText(SessionCardStatus.UpdateRequired.label, useUnmergedTree = true)
+        val card = hasAnyAncestor(hasTestTag("sessionCard:${session.id}"))
+        val workspace = compose.onNode(hasText("project") and card, useUnmergedTree = true)
+        val status = compose.onNode(hasText(SessionCardStatus.UpdateRequired.label) and card, useUnmergedTree = true)
         workspace.assertIsDisplayed()
         status.assertIsDisplayed()
         val workspaceBounds = workspace.fetchSemanticsNode().boundsInRoot
