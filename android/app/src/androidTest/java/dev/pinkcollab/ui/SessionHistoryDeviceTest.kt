@@ -30,6 +30,8 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -65,6 +67,11 @@ class SessionHistoryDeviceTest {
         null, "", "", true, "generation")
     private val saved = TimelineItem("saved", "user", "Earlier question", "", "2026-09-20T00:00:00Z")
     private val live = TimelineItem("live", "user", "Current question", "", "2026-09-20T00:00:01Z")
+
+    /** The composer placeholder repeats the latest user text, so timeline checks must not use it. */
+    private fun timelineMessage(text: String) = compose.onNode(
+        hasText(text) and hasAnyAncestor(hasTestTag("sessionTimeline")),
+    )
 
     @Test fun feedback_preserves_and_copies_whitespace_but_not_an_empty_answer() {
         val whitespace = " \t\n "
@@ -110,7 +117,7 @@ class SessionHistoryDeviceTest {
                 SessionActivity(), null, null, historyItems = listOf(saved)),
                 onAction = {}, onApplyModelSettings = { true })
         }
-        compose.onNodeWithText("Earlier question").assertIsDisplayed()
+        timelineMessage("Earlier question").assertIsDisplayed()
         compose.onNodeWithTag("historyLoading").assertDoesNotExist()
         compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)).assertCountEquals(0)
         compose.onNodeWithTag("sessionInput").assertIsNotEnabled()
@@ -209,13 +216,13 @@ class SessionHistoryDeviceTest {
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true },
                 isActive = active.value)
         }
-        compose.onNodeWithText("Question 40").assertIsDisplayed()
+        timelineMessage("Question 40").assertIsDisplayed()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Question 0"))
         compose.onNodeWithText("Question 0").assertIsDisplayed()
         compose.runOnIdle { active.value = false }
         compose.waitForIdle()
         compose.runOnIdle { active.value = true }
-        compose.onNodeWithText("Question 40").assertIsDisplayed()
+        timelineMessage("Question 40").assertIsDisplayed()
     }
 
     @Test fun saved_messages_and_live_updates_share_one_scrollable_timeline() {
@@ -230,7 +237,7 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithText("Earlier question").assertExists()
         compose.onNodeWithText("Live updates", substring = true).assertDoesNotExist()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Current question"))
-        compose.onNodeWithText("Current question").assertExists()
+        timelineMessage("Current question").assertExists()
         compose.onNodeWithText("Show saved messages").assertDoesNotExist()
     }
 
@@ -395,7 +402,7 @@ class SessionHistoryDeviceTest {
         compose.onNodeWithTag("historyLoading").assertIsDisplayed()
         compose.onNodeWithText("Old snapshot timeout").assertDoesNotExist()
         compose.runOnIdle { detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, listOf(saved), null)) }
-        compose.onNodeWithText("Earlier question").assertIsDisplayed()
+        timelineMessage("Earlier question").assertIsDisplayed()
         compose.onNodeWithTag("historyLoading").assertDoesNotExist()
         compose.onNodeWithText("Retry").assertDoesNotExist()
     }
@@ -411,7 +418,7 @@ class SessionHistoryDeviceTest {
             detail.value = detail.value.copy(savedHistory = SavedHistory.Ready(null, listOf(saved), null))
         }
         compose.onNodeWithTag("historyLoading").assertDoesNotExist()
-        compose.onNodeWithText("Earlier question").assertIsDisplayed()
+        timelineMessage("Earlier question").assertIsDisplayed()
     }
 
     @Test fun detached_session_without_saved_history_has_no_empty_message() {
@@ -433,6 +440,6 @@ class SessionHistoryDeviceTest {
                 SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
         }
 
-        compose.onNodeWithText("Earlier question").assertExists()
+        timelineMessage("Earlier question").assertExists()
     }
 }

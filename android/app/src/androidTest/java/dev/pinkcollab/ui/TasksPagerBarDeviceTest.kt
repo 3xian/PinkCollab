@@ -49,6 +49,11 @@ import kotlin.math.abs
 class TasksPagerBarDeviceTest {
     @get:Rule val compose = createComposeRule()
 
+    /** The composer placeholder repeats the latest user text, so timeline checks must not use it. */
+    private fun timelineMessage(text: String) = compose.onNode(
+        hasText(text) and hasAnyAncestor(hasTestTag("sessionTimeline")),
+    )
+
     private val sessions = (0..5).map { index ->
         val timestamp = "2026-09-${(28 - index).toString().padStart(2, '0')}T00:00:00Z"
         Session("s$index", "host", "/work/project-$index/", "Session $index",
@@ -179,11 +184,11 @@ class TasksPagerBarDeviceTest {
                     emptyMap(), emptyMap(), key),
                 TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }), retainedDisplay = cache)
         }
-        compose.onNodeWithText("Retained conversation").assertIsDisplayed()
+        timelineMessage("Retained conversation").assertIsDisplayed()
         compose.runOnIdle { showTasks = false; app = app.copy(details = emptyMap()) }
         compose.onNodeWithText("Retained conversation").assertDoesNotExist()
         compose.runOnIdle { showTasks = true }
-        compose.onNodeWithText("Retained conversation").assertIsDisplayed()
+        timelineMessage("Retained conversation").assertIsDisplayed()
         compose.onNodeWithTag("historyLoading").assertDoesNotExist()
     }
 
@@ -200,13 +205,13 @@ class TasksPagerBarDeviceTest {
                 emptyMap(), emptyMap(), key),
                 TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
         }
-        compose.onNodeWithText("Keep this visible").assertIsDisplayed()
+        timelineMessage("Keep this visible").assertIsDisplayed()
         compose.runOnIdle { app = app.copy(details = emptyMap()) }
-        compose.onNodeWithText("Keep this visible").assertIsDisplayed()
+        timelineMessage("Keep this visible").assertIsDisplayed()
         compose.runOnIdle { app = app.copy(details = mapOf(key to detail.copy(savedHistory = SavedHistory.Loading))) }
-        compose.onNodeWithText("Keep this visible").assertIsDisplayed()
+        timelineMessage("Keep this visible").assertIsDisplayed()
         compose.runOnIdle { app = app.copy(details = mapOf(key to detail.copy(savedHistory = SavedHistory.Failed))) }
-        compose.onNodeWithText("Keep this visible").assertIsDisplayed()
+        timelineMessage("Keep this visible").assertIsDisplayed()
         compose.onNodeWithText("Could not load message history").assertIsDisplayed()
     }
 
