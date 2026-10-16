@@ -422,24 +422,14 @@ async fn api_history_sync(
     Path(id): Path<String>,
     Json(request): Json<crate::history::HistorySync>,
 ) -> Result<Json<Value>, ApiError> {
-    let view = app
-        .sessions
-        .history_view(&id)
-        .await
-        .map_err(|_| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "history_unavailable",
-                "History unavailable".into(),
-            )
-        })?
-        .ok_or_else(|| {
-            ApiError(
-                StatusCode::NOT_FOUND,
-                "session_not_found",
-                "Session not found".into(),
-            )
-        })?;
+    let view = history_view(&app, &id, || {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "history_unavailable",
+            "History unavailable".into(),
+        )
+    })
+    .await?;
     let Some(path) = view.session.engine_session_ref else {
         return Ok(Json(json!({"items":[],"source":null,"nextCursor":null})));
     };
@@ -490,18 +480,7 @@ async fn api_tool_detail(
             "Tool details are temporarily unavailable".into(),
         )
     };
-    let view = app
-        .sessions
-        .history_view(&id)
-        .await
-        .map_err(|_| unavailable())?
-        .ok_or_else(|| {
-            ApiError(
-                StatusCode::NOT_FOUND,
-                "session_not_found",
-                "Session not found".into(),
-            )
-        })?;
+    let view = history_view(&app, &id, unavailable).await?;
     let tool = match app.sessions.live_tool(&id, &call_id).await {
         Some(tool) => Some(tool),
         None => match view.session.engine_session_ref {
@@ -537,26 +516,33 @@ async fn api_tool_detail(
         })
 }
 
-async fn read_history(app: &App, id: &str, query: &ApiHistoryQuery) -> Result<Value, ApiError> {
-    let read_id = id.to_owned();
-    let session = app
-        .sessions
-        .history_view(&read_id)
+async fn history_view(
+    app: &App,
+    id: &str,
+    unavailable: impl FnOnce() -> ApiError,
+) -> Result<crate::domain::SessionView, ApiError> {
+    app.sessions
+        .history_view(id)
         .await
-        .map_err(|_| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "history_unavailable",
-                "OMP history is unavailable".into(),
-            )
-        })?
+        .map_err(|_| unavailable())?
         .ok_or_else(|| {
             ApiError(
                 StatusCode::NOT_FOUND,
                 "session_not_found",
                 "Session not found".into(),
             )
-        })?;
+        })
+}
+
+async fn read_history(app: &App, id: &str, query: &ApiHistoryQuery) -> Result<Value, ApiError> {
+    let session = history_view(app, id, || {
+        ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "history_unavailable",
+            "OMP history is unavailable".into(),
+        )
+    })
+    .await?;
     let Some(reference) = session.session.engine_session_ref else {
         return Ok(json!({"items":[],"source":null,"nextCursor":null}));
     };

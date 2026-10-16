@@ -499,6 +499,119 @@ async fn corrupt_or_missing_omp_history_is_not_an_empty_conversation() {
     );
 }
 
+fn operation_receipt(index: i64) -> OperationRecord {
+    let created_at = chrono::DateTime::parse_from_rfc3339("2026-01-01T08:00:00+08:00")
+        .unwrap()
+        .with_timezone(&chrono::Utc)
+        + chrono::Duration::seconds(index);
+    OperationRecord {
+        command_id: format!("command-{index}"),
+        client_id: format!("client-{}", index % 2),
+        session_id: "session".into(),
+        command_type: "prompt".into(),
+        request_fingerprint: format!("fingerprint-{index}"),
+        runtime_generation: (index % 2 == 0).then(|| "generation".into()),
+        status: "succeeded".into(),
+        result: (index % 2 == 0).then(|| json!({"nested":[null, true, "结果", index]})),
+        error: (index % 2 != 0).then(|| json!({"code":"example","message":"错误"})),
+        created_at,
+        updated_at: created_at + chrono::Duration::seconds(1),
+    }
+}
+
+#[test]
+fn recent_operations_preserve_fields_filter_order_and_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    assert!(store.recent_operations("session", 100).unwrap().is_empty());
+    assert!(
+        store
+            .operation("client-0", "session", "missing")
+            .unwrap()
+            .is_none()
+    );
+
+    for index in 0..120 {
+        let expected = operation_receipt(index);
+        store.insert_operation(&expected).unwrap();
+        if index == 0 {
+            let rows = store.recent_operations("session", 100).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].command_id, expected.command_id);
+        }
+    }
+    let mut other = operation_receipt(120);
+    other.session_id = "other-session".into();
+    store.insert_operation(&other).unwrap();
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    db.execute(
+        "UPDATE operation_records SET updated_at='2026-01-01T08:02:00+08:00' WHERE command_id='command-119'",
+        [],
+    )
+    .unwrap();
+    for limit in [0, 1, 7, 100, 101, usize::MAX] {
+        let rows = store.recent_operations("session", limit).unwrap();
+        assert_eq!(rows.len(), limit.min(100));
+        for (offset, actual) in rows.iter().enumerate() {
+            let expected = operation_receipt(119 - offset as i64);
+            let single = store
+                .operation(&expected.client_id, "session", &expected.command_id)
+                .unwrap()
+                .unwrap();
+            for record in [actual, &single] {
+                assert_eq!(record.client_id, expected.client_id);
+                assert_eq!(record.session_id, expected.session_id);
+                assert_eq!(record.command_id, expected.command_id);
+                assert_eq!(record.command_type, expected.command_type);
+                assert_eq!(record.request_fingerprint, expected.request_fingerprint);
+                assert_eq!(record.runtime_generation, expected.runtime_generation);
+                assert_eq!(record.status, expected.status);
+                assert_eq!(record.result, expected.result);
+                assert_eq!(record.error, expected.error);
+                assert_eq!(record.created_at, expected.created_at);
+                assert_eq!(record.updated_at, expected.updated_at);
+            }
+        }
+    }
+}
+
+#[test]
+fn operation_reads_reject_corrupt_fields_without_returning_partial_results() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    let receipt = operation_receipt(0);
+    // SQLite accepts these values despite TEXT affinity; both readers must still reject them.
+    for assignment in [
+        "result='{invalid'",
+        "error='{invalid'",
+        "created_at='0000-invalid-time'",
+        "updated_at='not-a-time'",
+        "command_type=X'FF'",
+        "runtime_generation=X'FF'",
+    ] {
+        db.execute("DELETE FROM operation_records", []).unwrap();
+        store.insert_operation(&receipt).unwrap();
+        store.insert_operation(&operation_receipt(1)).unwrap();
+        db.execute(
+            &format!("UPDATE operation_records SET {assignment} WHERE command_id='command-0'"),
+            [],
+        )
+        .unwrap();
+        assert!(
+            store
+                .operation(&receipt.client_id, "session", &receipt.command_id)
+                .is_err()
+        );
+        assert!(store.recent_operations("session", 100).is_err());
+        // Invalid rows outside the selected window do not poison the read.
+        assert_eq!(
+            store.recent_operations("session", 1).unwrap()[0].command_id,
+            "command-1"
+        );
+    }
+}
+
 #[test]
 fn restart_never_replays_unfinished_operations() {
     let dir = tempfile::tempdir().unwrap();

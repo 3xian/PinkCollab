@@ -487,37 +487,13 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         command_id: &str,
     ) -> Result<Option<OperationRecord>> {
         let db = self.db.lock();
-        let raw = db.query_row(
-            "SELECT command_type,request_fingerprint,runtime_generation,status,result,error,created_at,updated_at FROM operation_records WHERE client_id=?1 AND session_id=?2 AND command_id=?3",
-            params![client_id,session_id,command_id],
-            |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,String>(6)?,r.get::<_,String>(7)?)),
-        ).optional()?;
-        raw.map(
-            |(
-                command_type,
-                request_fingerprint,
-                runtime_generation,
-                status,
-                result,
-                error,
-                created_at,
-                updated_at,
-            )| {
-                Ok(OperationRecord {
-                    command_id: command_id.into(),
-                    client_id: client_id.into(),
-                    session_id: session_id.into(),
-                    command_type,
-                    request_fingerprint,
-                    runtime_generation,
-                    status,
-                    result: result.map(|v| serde_json::from_str(&v)).transpose()?,
-                    error: error.map(|v| serde_json::from_str(&v)).transpose()?,
-                    created_at: parse_time(&created_at)?,
-                    updated_at: parse_time(&updated_at)?,
-                })
-            },
+        db.query_row(
+            "SELECT client_id,session_id,command_id,command_type,request_fingerprint,runtime_generation,status,result,error,created_at,updated_at FROM operation_records WHERE client_id=?1 AND session_id=?2 AND command_id=?3",
+            params![client_id, session_id, command_id],
+            operation_columns,
         )
+        .optional()?
+        .map(parse_operation)
         .transpose()
     }
 
@@ -568,20 +544,16 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         session_id: &str,
         limit: usize,
     ) -> Result<Vec<OperationRecord>> {
-        let keys = {
-            let db = self.db.lock();
-            let mut query = db.prepare("SELECT client_id,command_id FROM operation_records WHERE session_id=?1 ORDER BY created_at DESC LIMIT ?2")?;
-            query
-                .query_map(params![session_id, limit.min(100) as i64], |r| {
-                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?
-        };
-        keys.into_iter()
-            .map(|(client_id, command_id)| {
-                self.operation(&client_id, session_id, &command_id)?
-                    .context("operation disappeared")
-            })
+        let db = self.db.lock();
+        let mut query = db.prepare(
+            "SELECT client_id,session_id,command_id,command_type,request_fingerprint,runtime_generation,status,result,error,created_at,updated_at FROM operation_records WHERE session_id=?1 ORDER BY created_at DESC LIMIT ?2",
+        )?;
+        query
+            .query_map(
+                params![session_id, limit.min(100) as i64],
+                operation_columns,
+            )?
+            .map(|row| parse_operation(row?))
             .collect()
     }
 
@@ -694,6 +666,66 @@ fn write_operation(db: &Connection, op: &OperationRecord) -> Result<bool> {
             op.client_id,op.session_id,op.command_id],
     )?;
     Ok(changed == 1)
+}
+
+type OperationColumns = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
+
+fn operation_columns(row: &rusqlite::Row<'_>) -> rusqlite::Result<OperationColumns> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+    ))
+}
+
+fn parse_operation(
+    (
+        client_id,
+        session_id,
+        command_id,
+        command_type,
+        request_fingerprint,
+        runtime_generation,
+        status,
+        result,
+        error,
+        created_at,
+        updated_at,
+    ): OperationColumns,
+) -> Result<OperationRecord> {
+    Ok(OperationRecord {
+        client_id,
+        session_id,
+        command_id,
+        command_type,
+        request_fingerprint,
+        runtime_generation,
+        status,
+        result: result.map(|v| serde_json::from_str(&v)).transpose()?,
+        error: error.map(|v| serde_json::from_str(&v)).transpose()?,
+        created_at: parse_time(&created_at)?,
+        updated_at: parse_time(&updated_at)?,
+    })
 }
 
 type SessionColumns = (

@@ -69,6 +69,35 @@ fn transcript_length(metadata: &Option<std::fs::Metadata>) -> u64 {
     metadata.as_ref().map_or(0, std::fs::Metadata::len)
 }
 
+type BuiltHistory = (
+    Vec<TimelineItem>,
+    String,
+    String,
+    std::collections::HashSet<String>,
+    HashMap<String, usize>,
+);
+
+async fn read_history(
+    source: HistorySource<'_>,
+    feedback: &[FeedbackRecord],
+    error_context: Option<&'static str>,
+) -> Result<(BuiltHistory, Option<std::fs::Metadata>)> {
+    let read: Result<_> = async {
+        let before = transcript_metadata(source.path, source.allow_missing).await?;
+        let history = build_history(source.path, true, feedback, source.allow_missing).await?;
+        let after = transcript_metadata(source.path, source.allow_missing).await?;
+        Ok((history, before, after))
+    }
+    .await;
+    let (history, before, after) = match error_context {
+        Some(context) => read.context(context)?,
+        None => read?,
+    };
+    // Metadata/build errors have caller-specific context; comparison errors do not.
+    ensure!(transcript_unchanged(&before, &after)?, "stale_cursor");
+    Ok((history, after))
+}
+
 /// Capture the insertion boundary before writing a response. Only entry identities are
 /// needed here; reconstructing tools/messages would do unnecessary work on the control path.
 pub(crate) async fn response_anchor(source: HistorySource<'_>) -> Result<(String, bool)> {
@@ -123,19 +152,12 @@ pub async fn sync_history(
     request: &HistorySync,
     feedback: &[FeedbackRecord],
 ) -> Result<Value> {
-    let HistorySource {
-        path,
-        allow_missing,
-    } = source;
     ensure!(request.known.len() <= 512, "invalid_sync");
     let permit = HISTORY_READERS
         .try_acquire()
         .context("history_unavailable")?;
-    let before = transcript_metadata(path, allow_missing).await?;
-    let (timeline, leaf, revision, ancestors, positions) =
-        build_history(path, true, feedback, allow_missing).await?;
-    let after = transcript_metadata(path, allow_missing).await?;
-    ensure!(transcript_unchanged(&before, &after)?, "stale_cursor");
+    let ((timeline, leaf, revision, ancestors, positions), after) =
+        read_history(source, feedback, None).await?;
     let Some(anchor) = request
         .anchor
         .as_deref()
@@ -263,25 +285,12 @@ pub async fn history_page_with_anchor(
     oldest: Option<&str>,
     feedback: &[FeedbackRecord],
 ) -> Result<Value> {
-    let HistorySource {
-        path,
-        allow_missing,
-    } = source;
     ensure!((1..=100).contains(&limit), "invalid_page_limit");
     let _permit = HISTORY_READERS
         .try_acquire()
         .context("history_unavailable: history readers busy")?;
-    let before = transcript_metadata(path, allow_missing)
-        .await
-        .context("history_unavailable")?;
-    let (timeline, leaf, _revision, ancestors, _) =
-        build_history(path, true, feedback, allow_missing)
-            .await
-            .context("history_unavailable")?;
-    let after = transcript_metadata(path, allow_missing)
-        .await
-        .context("history_unavailable")?;
-    ensure!(transcript_unchanged(&before, &after)?, "stale_cursor");
+    let ((timeline, leaf, _revision, ancestors, _), after) =
+        read_history(source, feedback, Some("history_unavailable")).await?;
     let end = match cursor {
         Some(raw) => {
             let decoded: Value = serde_json::from_slice(&hex::decode(raw).context("stale_cursor")?)
@@ -344,13 +353,7 @@ async fn build_history(
     strict: bool,
     feedback: &[FeedbackRecord],
     allow_missing: bool,
-) -> Result<(
-    Vec<TimelineItem>,
-    String,
-    String,
-    std::collections::HashSet<String>,
-    HashMap<String, usize>,
-)> {
+) -> Result<BuiltHistory> {
     use futures_util::StreamExt;
     use tokio_util::codec::{FramedRead, LinesCodec};
     let file = transcript_file(path, allow_missing).await?;
@@ -572,6 +575,186 @@ pub(crate) fn trim_timeline(timeline: &mut Vec<TimelineItem>, limit: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn checked_history_read_preserves_missing_file_and_parse_error_contexts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let source = HistorySource {
+            path: &path,
+            allow_missing: false,
+        };
+        for context in [None, Some("history_unavailable")] {
+            let error = read_history(source, &[], context).await.err().unwrap();
+            assert!(error.downcast_ref::<std::io::Error>().is_some());
+            if let Some(context) = context {
+                assert_eq!(error.to_string(), context);
+            } else {
+                assert_eq!(error.to_string(), error.root_cause().to_string());
+            }
+        }
+        let ((timeline, leaf, _, ancestors, positions), metadata) = read_history(
+            HistorySource {
+                allow_missing: true,
+                ..source
+            },
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(timeline.is_empty());
+        assert!(leaf.is_empty());
+        assert!(ancestors.contains(""));
+        assert_eq!(positions.get(""), Some(&0));
+        assert!(metadata.is_none());
+
+        std::fs::write(&path, "{invalid JSON}\n").unwrap();
+        for context in [None, Some("history_unavailable")] {
+            let error = read_history(source, &[], context).await.err().unwrap();
+            assert!(error.downcast_ref::<serde_json::Error>().is_some());
+            if let Some(context) = context {
+                assert_eq!(error.to_string(), context);
+            } else {
+                assert_eq!(error.to_string(), error.root_cause().to_string());
+            }
+        }
+
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(128 * 1024 * 1024).unwrap();
+        assert!(transcript_metadata(&path, false).await.is_ok());
+        file.set_len(128 * 1024 * 1024 + 1).unwrap();
+        for context in [None, Some("history_unavailable")] {
+            let error = read_history(source, &[], context).await.err().unwrap();
+            assert_eq!(error.to_string(), "history_unavailable");
+            assert_eq!(error.root_cause().to_string(), "history_unavailable");
+        }
+    }
+
+    #[test]
+    fn transcript_comparison_detects_size_time_and_missing_file_changes() {
+        use std::time::{Duration, SystemTime};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(1).unwrap();
+        file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(100))
+            .unwrap();
+        let before = Some(file.metadata().unwrap());
+        assert!(transcript_unchanged(&before, &before).unwrap());
+
+        file.set_len(2).unwrap();
+        let longer = Some(file.metadata().unwrap());
+        assert!(!transcript_unchanged(&before, &longer).unwrap());
+        file.set_len(1).unwrap();
+        file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(200))
+            .unwrap();
+        let rewritten = Some(file.metadata().unwrap());
+        assert!(!transcript_unchanged(&before, &rewritten).unwrap());
+        assert!(!transcript_unchanged(&before, &None).unwrap());
+        assert!(!transcript_unchanged(&None, &before).unwrap());
+        assert!(transcript_unchanged(&None, &None).unwrap());
+    }
+
+    // Keep all tests that acquire the process-wide history permits in this one scenario.
+    // The other unit tests exercise only private, permit-free helpers.
+    #[tokio::test]
+    async fn history_reader_limit_and_sync_fallback_preserve_paging_and_cursor_behavior() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.jsonl");
+        let entries: Vec<_> = (0..3)
+            .map(|index| {
+                serde_json::json!({
+                    "id":format!("e{index}"),
+                    "parentId":(index > 0).then(|| format!("e{}", index - 1)),
+                    "type":"message",
+                    "timestamp":"2026-01-01T00:00:00Z",
+                    "message":{"role":"user","content":format!("body-{index}")}
+                })
+                .to_string()
+            })
+            .collect();
+        std::fs::write(&path, entries.join("\n")).unwrap();
+        let source = HistorySource {
+            path: &path,
+            allow_missing: false,
+        };
+        let mut request = HistorySync {
+            anchor: Some("e0".into()),
+            oldest: None,
+            known: vec![],
+            cursor: None,
+        };
+        let blocker = HISTORY_READERS.try_acquire().unwrap();
+        let second = HISTORY_READERS.try_acquire().unwrap();
+        assert_eq!(
+            history_page(&path, "session", None, 2)
+                .await
+                .unwrap_err()
+                .to_string(),
+            "history_unavailable: history readers busy"
+        );
+        assert_eq!(
+            sync_history(source, "session", &request, &[])
+                .await
+                .unwrap_err()
+                .to_string(),
+            "history_unavailable"
+        );
+        assert_eq!(
+            tool_detail(&path, "call").await.err().unwrap().to_string(),
+            "history_unavailable"
+        );
+        drop(second);
+
+        let latest = history_page(&path, "session", None, 2).await.unwrap();
+        assert_eq!(latest["items"][0]["id"], "e1");
+        assert_eq!(latest["items"][1]["id"], "e2");
+        let older = history_page(&path, "session", latest["nextCursor"].as_str(), 2)
+            .await
+            .unwrap();
+        assert_eq!(older["items"].as_array().unwrap().len(), 1);
+        assert_eq!(older["items"][0]["id"], "e0");
+        assert!(older["nextCursor"].is_null());
+        let synced = sync_history(source, "session", &request, &[])
+            .await
+            .unwrap();
+        assert_eq!(synced["items"], latest["items"]);
+        assert_eq!(synced["source"]["continues"], true);
+        assert!(synced["syncCursor"].is_null());
+
+        for cursor in ["not-hex".to_owned(), hex::encode(b"not JSON")] {
+            assert_eq!(
+                history_page(&path, "session", Some(&cursor), 2)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "stale_cursor"
+            );
+            request.cursor = Some(cursor);
+            assert_eq!(
+                sync_history(source, "session", &request, &[])
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "stale_cursor"
+            );
+        }
+        request.cursor = None;
+        let expected = history_page(&path, "session", None, 10).await.unwrap();
+        for anchor in [None, Some("unknown-branch".into())] {
+            request.anchor = anchor;
+            // Only one slot is free: fallback fails if sync retains its own permit.
+            let fallback = sync_history(source, "session", &request, &[])
+                .await
+                .unwrap();
+            assert_eq!(fallback, expected);
+            assert_eq!(HISTORY_READERS.available_permits(), 1);
+        }
+        drop(blocker);
+        assert_eq!(HISTORY_READERS.available_permits(), 2);
+    }
 
     #[test]
     fn blank_feedback_is_retained_as_a_visible_boundary_before_hidden_tools() {

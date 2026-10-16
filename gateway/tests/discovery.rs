@@ -103,6 +103,169 @@ async fn get(client: &reqwest::Client, url: &str, token: &str) -> Value {
     response.json().await.unwrap()
 }
 
+async fn assert_api_error(
+    request: reqwest::RequestBuilder,
+    status: u16,
+    code: &str,
+    message: &str,
+) {
+    let response = request.send().await.unwrap();
+    assert_eq!(response.status(), status);
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({"code":code,"message":message})
+    );
+}
+
+#[tokio::test]
+async fn history_routes_preserve_distinct_http_errors() {
+    let files = tempfile::tempdir().unwrap();
+    let h = Harness::new(1, args(files.path())).await;
+    let path = files.path().join("errors.jsonl");
+    transcript(&path, Path::new(&h.cwd("history-errors")), "error-source");
+    let mut body = std::fs::read_to_string(&path).unwrap();
+    for entry in [
+        json!({"type":"message","id":"m3","parentId":"m2","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"bash","arguments":{"command":"echo hello"}}]}}),
+        json!({"type":"message","id":"m4","parentId":"m3","timestamp":"2026-01-01T00:00:04Z","message":{"role":"toolResult","toolCallId":"call","toolName":"bash","content":[{"type":"text","text":"hello"}]}}),
+    ] {
+        body.push_str(&format!("{entry}\n"));
+    }
+    std::fs::write(&path, body).unwrap();
+    let client = reqwest::Client::new();
+    let token = h.pair().await;
+    let sessions = format!("{}/api/v4/sessions", h.url);
+    let list = get(&client, &sessions, &token).await;
+    let id = list["sessions"][0]["session"]["id"].as_str().unwrap();
+    let url = format!("{sessions}/{id}");
+    let page = get(&client, &format!("{url}/history"), &token).await;
+    assert!(!page["items"].as_array().unwrap().is_empty());
+    let response = client
+        .post(format!("{url}/history/sync"))
+        .bearer_auth(&token)
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["items"],
+        page["items"]
+    );
+    let tool = get(&client, &format!("{url}/tools/call"), &token).await;
+    assert!(tool["text"].as_str().unwrap().contains("hello"));
+
+    for (method, suffix) in [
+        (reqwest::Method::GET, "history"),
+        (reqwest::Method::POST, "history/sync"),
+        (reqwest::Method::GET, "tools/call"),
+    ] {
+        assert_api_error(
+            client
+                .request(method, format!("{sessions}/missing/{suffix}"))
+                .bearer_auth(&token)
+                .json(&json!({})),
+            404,
+            "session_not_found",
+            "Session not found",
+        )
+        .await;
+    }
+    assert_api_error(
+        client
+            .get(format!("{url}/history?limit=0"))
+            .bearer_auth(&token),
+        400,
+        "invalid_page_limit",
+        "Limit must be 1..100",
+    )
+    .await;
+    assert_api_error(
+        client
+            .get(format!("{url}/history?cursor=invalid"))
+            .bearer_auth(&token),
+        409,
+        "stale_cursor",
+        "History changed; reload from the first page",
+    )
+    .await;
+    assert_api_error(
+        client
+            .post(format!("{url}/history/sync"))
+            .bearer_auth(&token)
+            .json(&json!({"known":vec![json!({});513]})),
+        400,
+        "invalid_request",
+        "History synchronization unavailable",
+    )
+    .await;
+    assert_api_error(
+        client
+            .post(format!("{url}/history/sync"))
+            .bearer_auth(&token)
+            .json(&json!({"anchor":"m4","cursor":"invalid"})),
+        409,
+        "stale_cursor",
+        "History synchronization unavailable",
+    )
+    .await;
+    assert_api_error(
+        client
+            .get(format!("{url}/tools/call?cursor=invalid"))
+            .bearer_auth(&token),
+        400,
+        "invalid_detail_cursor",
+        "Invalid tool detail cursor",
+    )
+    .await;
+    assert_api_error(
+        client
+            .get(format!("{url}/tools/call?cursor=wrong:0"))
+            .bearer_auth(&token),
+        409,
+        "stale_detail",
+        "Tool details changed; reload the first page",
+    )
+    .await;
+
+    // Adoption pins the source identity; replacing it fails in history_view,
+    // before each route's intentionally different downstream error mapping.
+    let browser = Browser::new(&[h.dir.path().join("projects")]).unwrap();
+    let source = Discovery::new(&args(files.path())).list(&browser).remove(0);
+    h.store.adopt(&source).unwrap();
+    transcript(&path, Path::new(&h.cwd("history-errors")), "replacement");
+    for (method, suffix, code, message) in [
+        (
+            reqwest::Method::GET,
+            "history",
+            "history_unavailable",
+            "OMP history is unavailable",
+        ),
+        (
+            reqwest::Method::POST,
+            "history/sync",
+            "history_unavailable",
+            "History unavailable",
+        ),
+        (
+            reqwest::Method::GET,
+            "tools/call",
+            "tool_detail_unavailable",
+            "Tool details are temporarily unavailable",
+        ),
+    ] {
+        assert_api_error(
+            client
+                .request(method, format!("{url}/{suffix}"))
+                .bearer_auth(&token)
+                .json(&json!({})),
+            503,
+            code,
+            message,
+        )
+        .await;
+    }
+}
+
 #[tokio::test]
 async fn external_history_first_prompt_adopts_once_and_resumes_original_transcript() {
     let files = tempfile::tempdir().unwrap();

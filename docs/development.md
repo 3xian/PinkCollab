@@ -44,6 +44,16 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-features --locked
 ```
 
+Focused Gateway history/receipt regressions:
+
+```sh
+cargo test --all-features --locked --lib history::tests
+cargo test --all-features --locked --test core
+cargo test --all-features --locked --test discovery history_routes_preserve_distinct_http_errors
+```
+
+Receipt reads share field decoding and use one query for the bounded recent-operation window; `core` covers ordering, session filtering, the 100-record cap, optional/JSON/timestamp fields, and corrupt selected records. History unit tests cover missing-file policy, the 128 MiB limit, metadata changes, cursors, and the two-reader limit. Sync must release its reader permit before falling back to ordinary paging. The HTTP regression preserves the distinct paging, synchronization, and tool-detail error responses; `feedback_history` and `lazy_tools` cover feedback merging, branches, and incremental tool updates.
+
 Real-OMP smoke test (needs OMP or `OMP_EXECUTABLE`): `cargo test --test omp_smoke -- --ignored`.
 
 On Windows, `cargo test --all-features --locked --test windows_background` checks the hidden login launcher, duplicate starts, graceful stop/restart, external setup, and preserved host identity using isolated temporary directories. It runs the dedicated `gateway-fixture` binary, which uses the real CLI and desktop lifecycle but injects an empty legacy SCM lookup at the service factory. It neither queries nor modifies machine-wide Windows services and does not register real login startup. The production `pinkcollab-gateway` binary retains legacy service discovery and ownership checks, including when built with `test-fixtures`.
