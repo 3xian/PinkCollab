@@ -118,7 +118,7 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
 }
 
-// An unsigned release artifact installs but cannot upgrade an installed one.
+// Release artifacts must be signed; APK upgrades require the installed app's certificate.
 tasks.matching { it.name == "packageRelease" || it.name == "bundleRelease" }.configureEach {
     doFirst {
         check(signingReady) { signingFailure }

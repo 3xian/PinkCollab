@@ -7,6 +7,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
@@ -232,6 +236,51 @@ class HostSessionFilterDeviceTest {
                 useUnmergedTree = true).assertIsDisplayed()
             compose.onNodeWithTag("hostFilterOption:all").assertIsSelected()
         }
+    }
+
+    @Test fun refresh_progress_survives_missed_connection_transitions_and_fades_after_completion() {
+        val hosts = mapOf(
+            "office" to host("office", "Office", emptyList()).copy(connection = ConnectionState.Online(1)),
+            "desk" to host("desk", "Desk", emptyList()).copy(connection = ConnectionState.Offline()),
+            "busy" to host("busy", "Busy", emptyList()),
+        )
+        var batch by mutableStateOf<HostRefreshBatch?>(null)
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(
+                    sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
+                    emptySet(), emptyMap(), emptyMap(), emptyMap(), null,
+                    refreshBatch = batch,
+                ),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true },
+                    refreshHosts = { ids ->
+                        batch = HostRefreshBatch(1, ids.size)
+                    }),
+            )
+        }
+        compose.mainClock.autoAdvance = false
+        val filter = compose.onNodeWithTag("hostFilter")
+        fun assertProgress(value: Float) {
+            filter.assert(SemanticsMatcher.expectValue(
+                SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(value, 0f..1f),
+            ))
+        }
+        compose.onNodeWithTag("refreshHosts").performClick()
+        compose.mainClock.advanceTimeBy(32)
+        assertProgress(0f)
+        // Connection states need not change: operation completion is durable.
+        compose.runOnIdle {
+            batch = batch!!.copy(completed = 1)
+        }
+        compose.mainClock.advanceTimeBy(400)
+        assertProgress(0.5f)
+        compose.runOnIdle {
+            batch = batch!!.copy(completed = 2)
+        }
+        compose.mainClock.advanceTimeBy(32)
+        assertProgress(1f)
+        compose.mainClock.advanceTimeBy(1000)
+        filter.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ProgressBarRangeInfo))
     }
 
     private fun session(id: String, hostId: String, updated: String) = Session(

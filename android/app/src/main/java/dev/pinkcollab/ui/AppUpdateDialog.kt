@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.AppRelease
+import dev.pinkcollab.ui.theme.DialogHeadlineStyle
 
 @Composable
 internal fun AppUpdateDialog(
@@ -27,7 +28,7 @@ internal fun AppUpdateDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("PinkCollab update available") },
+        title = { Text("PinkCollab update available", style = DialogHeadlineStyle) },
         text = {
             Column(Modifier.heightIn(max = 360.dp)) {
                 Text("Current version: $currentVersion")

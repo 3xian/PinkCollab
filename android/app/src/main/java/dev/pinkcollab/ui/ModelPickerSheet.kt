@@ -200,7 +200,7 @@ internal fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, showRefre
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("Models", Modifier.width(IntrinsicSize.Max), style = MaterialTheme.typography.titleLarge,
+        Text("Models", Modifier.width(IntrinsicSize.Max), style = SheetTitleStyle,
             fontWeight = FontWeight.SemiBold)
         FlowRow(
             Modifier.weight(1f).padding(start = 8.dp),

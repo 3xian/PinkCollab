@@ -25,12 +25,16 @@ class HostOperationsTest {
         var directoryFailure: Exception? = null
         var firstDirectoryGate: CompletableDeferred<Unit>? = null
         var listingDelegate: (suspend (String, String, Boolean) -> Listing)? = null
+        val reconnectGates = mutableMapOf<String, CompletableDeferred<Unit>>()
         override suspend fun pair(url: String, token: String) {
             calls += "pair:$url:$token"
             pairFailure?.let { throw it }
         }
         override suspend fun refreshHost(hostId: String) { calls += "refresh:$hostId" }
-        override fun reconnect(hostId: String) { calls += "reconnect:$hostId" }
+        override suspend fun reconnect(hostId: String) {
+            calls += "reconnect:$hostId"
+            reconnectGates[hostId]?.await()
+        }
         override suspend fun forget(hostId: String) { calls += "forget:$hostId" }
         var renameGate: CompletableDeferred<Unit>? = null
         override suspend fun rename(hostId: String, name: String) {
@@ -50,6 +54,35 @@ class HostOperationsTest {
             return Session("session", hostId, path, "Work", dev.pinkcollab.data.SessionStatus.Idle, "Ready", false, null,
                 "2026-01-01", "2026-01-01", false)
         }
+    }
+
+    @Test fun refresh_batch_finishes_without_presentation_collectors_and_can_restart() = runTest {
+        val actions = FakeActions()
+        val first = CompletableDeferred<Unit>()
+        val second = CompletableDeferred<Unit>()
+        actions.reconnectGates.putAll(mapOf("first" to first, "second" to second))
+        val operations = HostOperations(backgroundScope, actions, {}, {}, {}, {})
+        operations.refreshHosts(mapOf("first" to false, "second" to false))
+        runCurrent()
+        val batchId = operations.refreshBatch.value!!.id
+        assertEquals(0f, operations.refreshBatch.value!!.progress)
+        assertEquals(setOf(OperationKey.Host("first"), OperationKey.Host("second")), operations.operations.value)
+        operations.refreshHosts(mapOf("third" to false))
+        runCurrent()
+        assertFalse("reconnect:third" in actions.calls)
+        first.complete(Unit)
+        runCurrent()
+        assertEquals(0.5f, operations.refreshBatch.value!!.progress)
+        second.complete(Unit)
+        runCurrent()
+        // No presentation collector was active during either completion.
+        assertTrue(operations.refreshBatch.value!!.finished)
+        assertTrue(operations.operations.value.isEmpty())
+        operations.refreshHosts(mapOf("first" to false))
+        runCurrent()
+        assertTrue(operations.refreshBatch.value!!.id > batchId)
+        assertTrue(operations.refreshBatch.value!!.finished)
+        assertEquals(2, actions.calls.count { it == "reconnect:first" })
     }
 
     @Test fun creation_emits_identity_and_refreshes_host() = runTest {

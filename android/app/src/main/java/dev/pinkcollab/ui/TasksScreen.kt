@@ -1,5 +1,8 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,6 +21,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.RadioButtonChecked
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
@@ -30,6 +34,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
@@ -39,6 +44,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -65,6 +73,8 @@ internal data class TasksScreenState(
     val selectedSession: SessionKey?,
     val usageLoads: Map<String, LoadState<UsageSnapshot>> = emptyMap(),
     val runtimeStarts: Map<SessionKey, RuntimeStartAttempt> = emptyMap(),
+    val hostOperations: Set<OperationKey> = emptySet(),
+    val refreshBatch: HostRefreshBatch? = null,
 )
 
 internal data class TasksScreenActions(
@@ -79,6 +89,8 @@ internal data class TasksScreenActions(
     val loadMoreSessions: (String) -> Unit = {},
     val ensureSessionListed: (SessionKey) -> Unit = {},
     val loadToolDetails: suspend (Session, String, String?) -> ToolDetailPage = { _, _, _ -> error("Tool details unavailable") },
+    val createSession: (String, String) -> Unit = { _, _ -> },
+    val refreshHosts: (List<String>) -> Unit = {},
 )
 
 @Composable
@@ -119,7 +131,13 @@ internal fun TasksScreen(
         if (infoTarget != null && infoSession == null) infoTarget = null
     }
     if (infoSession != null) {
-        SessionInfoDialog(infoSession, hosts[infoSession.hostId]) { infoTarget = null }
+        SessionInfoDialog(
+            session = infoSession,
+            host = hosts[infoSession.hostId],
+            creating = OperationKey.CreateTask(infoSession.hostId, infoSession.cwd) in state.hostOperations,
+            create = { actions.createSession(infoSession.hostId, infoSession.cwd) },
+            dismiss = { infoTarget = null },
+        )
     }
     val pagerKeys = remember(sessionKeys) { sessionKeys.map { it.pagerKey() } }
     val localDisplayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
@@ -168,6 +186,8 @@ internal fun TasksScreen(
                 sessionToSelectForHostFilter(selectedSession, sessionsForHostFilter(hosts, hostId?.takeIf { it in hosts }))
                     ?.let(onSessionSelected)
             },
+            refreshHosts = actions.refreshHosts,
+            batch = state.refreshBatch,
             showWorkspaces = hosts.isNotEmpty(),
             openResources = openResources,
             checkForUpdates = actions.checkForUpdates,
@@ -410,12 +430,35 @@ private fun TasksTopBar(
     hosts: Map<String, HostState>,
     selectedHostId: String?,
     onSelectHost: (String?) -> Unit,
+    refreshHosts: (List<String>) -> Unit,
+    batch: HostRefreshBatch?,
     showWorkspaces: Boolean,
     openResources: () -> Unit,
     checkForUpdates: () -> Unit,
     showVersion: () -> Unit,
 ) {
     var showConfMenu by remember { mutableStateOf(false) }
+    var dismissedBatch by remember { mutableStateOf<Long?>(null) }
+    val refreshBatch = batch?.takeUnless { it.id == dismissedBatch }
+    val refreshFill = remember(batch?.id) { Animatable(0f) }
+    val refreshOpacity = remember(batch?.id) { Animatable(0f) }
+    LaunchedEffect(refreshBatch) {
+        val current = refreshBatch ?: return@LaunchedEffect
+        refreshOpacity.snapTo(1f)
+        refreshFill.animateTo(current.progress, tween(360, easing = FastOutSlowInEasing))
+        if (current.finished) {
+            delay(180)
+            refreshOpacity.animateTo(0f, tween(220))
+            dismissedBatch = current.id
+        }
+    }
+    val scopedHosts = if (selectedHostId == null) hosts.values else listOfNotNull(hosts[selectedHostId])
+    val refreshing = scopedHosts.any {
+        it.connection == ConnectionState.Connecting || it.connection == ConnectionState.Synchronizing
+    }
+    val refreshableHosts = scopedHosts.filter {
+        it.connection is ConnectionState.Online || it.connection is ConnectionState.Offline
+    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -425,7 +468,35 @@ private fun TasksTopBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (hosts.isNotEmpty()) {
-            HostSessionFilter(hosts, selectedHostId, onSelectHost, Modifier.weight(1f))
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                HostSessionFilter(
+                    hosts, selectedHostId, onSelectHost, Modifier.weight(1f, fill = false),
+                    refreshProgress = refreshBatch?.progress,
+                    refreshFill = { refreshFill.value },
+                    refreshOpacity = { refreshOpacity.value },
+                )
+                IconButton(
+                    onClick = rememberHapticOnClick {
+                        refreshHosts(refreshableHosts.map { it.paired.host.id })
+                    },
+                    enabled = refreshableHosts.isNotEmpty() && refreshBatch == null,
+                    modifier = Modifier.testTag("refreshHosts").semantics {
+                        contentDescription = if (selectedHostId == null) "Refresh all hosts" else "Refresh host"
+                        if (refreshing) stateDescription = "Connecting or syncing"
+                    },
+                ) {
+                    if (refreshing) {
+                        OrbitDots(Modifier.size(18.dp), Purple400)
+                    } else {
+                        Icon(
+                            Icons.Outlined.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = if (refreshableHosts.isNotEmpty()) Purple400 else Gray400,
+                        )
+                    }
+                }
+            }
         } else {
             Spacer(Modifier.weight(1f))
         }
@@ -457,22 +528,37 @@ private fun HostSessionFilter(
     selectedHostId: String?,
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    refreshProgress: Float? = null,
+    refreshFill: () -> Float = { 0f },
+    refreshOpacity: () -> Float = { 0f },
 ) {
     val options = remember(hosts) { hostFilterOptions(hosts) }
     val label = options.firstOrNull { it.hostId == selectedHostId }?.label ?: AllHostsFilterLabel
     var expanded by remember { mutableStateOf(false) }
+    val refreshColor = MaterialTheme.colorScheme.tertiary
     BoxWithConstraints(modifier) {
         val filterMaxWidth = maxWidth
         Box(Modifier.widthIn(max = filterMaxWidth)) {
             TopBarTextButton(
                 onClick = { expanded = true },
                 contentPadding = PaddingValues(start = 8.dp, end = 4.dp),
+                contentModifier = Modifier
+                    .clip(ButtonDefaults.textShape)
+                    .drawBehind {
+                        drawRect(
+                            color = refreshColor.copy(alpha = 0.8f * refreshOpacity()),
+                            size = size.copy(width = size.width * refreshFill()),
+                        )
+                    },
                 modifier = Modifier
                     .widthIn(max = filterMaxWidth)
                     .testTag("hostFilter")
                     .semantics {
                         contentDescription = "Filter sessions by host"
                         stateDescription = if (expanded) "$label, expanded" else label
+                        if (refreshProgress != null) {
+                            progressBarRangeInfo = ProgressBarRangeInfo(refreshProgress, 0f..1f)
+                        }
                     },
             ) {
                 Text(
@@ -557,6 +643,7 @@ private fun TopBarTextButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(horizontal = 6.dp),
+    contentModifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
     TextButton(
@@ -565,7 +652,7 @@ private fun TopBarTextButton(
         contentPadding = PaddingValues(0.dp),
     ) {
         Row(
-            Modifier.height(30.dp).padding(contentPadding),
+            Modifier.height(30.dp).then(contentModifier).padding(contentPadding),
             verticalAlignment = Alignment.CenterVertically,
             content = content,
         )
@@ -719,13 +806,19 @@ private fun TasksPagerBar(
 }
 
 @Composable
-private fun SessionInfoDialog(session: Session, host: HostState?, dismiss: () -> Unit) {
+private fun SessionInfoDialog(
+    session: Session,
+    host: HostState?,
+    creating: Boolean,
+    create: () -> Unit,
+    dismiss: () -> Unit,
+) {
     val created = remember(session.createdAt) { sessionInfoTime(session.createdAt) }
     val updated = remember(session.updatedAt) { sessionInfoTime(session.updatedAt) }
     AlertDialog(
         onDismissRequest = dismiss,
         modifier = Modifier.testTag("sessionInfo"),
-        title = { Text("Session info") },
+        title = { Text("Session info", style = DialogHeadlineStyle) },
         text = {
             SelectionContainer {
                 Column(
@@ -742,8 +835,21 @@ private fun SessionInfoDialog(session: Session, host: HostState?, dismiss: () ->
                 }
             }
         },
-        confirmButton = {
+        dismissButton = {
             TextButton(onClick = rememberHapticOnClick(dismiss)) { Text("Close") }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = rememberHapticOnClick(create),
+                enabled = host?.connected == true && !creating,
+                modifier = Modifier.testTag("newSessionFromInfo"),
+            ) {
+                if (creating) {
+                    OrbitDots(Modifier.size(18.dp), LocalContentColor.current)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (creating) "Creating…" else "New session here")
+            }
         },
         shape = RoundedCornerShape(24.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,

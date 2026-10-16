@@ -15,6 +15,12 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.text.TextLayoutResult
+import dev.pinkcollab.data.SavedHistory
+import dev.pinkcollab.data.TimelineItem
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.AttentionResponse
 import dev.pinkcollab.data.Host
@@ -36,6 +42,55 @@ import java.io.IOException
 @RunWith(AndroidJUnit4::class)
 class ComposerRailDeviceTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun composer_placeholder_tracks_latest_user_and_ellipsizes_without_restricting_draft() {
+        val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
+            "", "", true, "generation")
+        val host = HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client"),
+            connection = ConnectionState.Online(1L),
+        )
+        val latest = "请检查 Android session 输入框的占位文本，确保这是一条足够长的用户指令，超出可用宽度时末尾显示省略号。\n第二行不能另起一行。"
+        val saved = TimelineItem("saved", "user", "Earlier instruction", "", "")
+        var detail = SessionDetail(session, snapshotToken = "subscription",
+            savedHistory = SavedHistory.Ready(null, listOf(saved), null))
+        var page by mutableStateOf(SessionPageState(LoadState.Ready(detail), host,
+            SessionDraft(), 0, SessionActivity(), null, null))
+        compose.setContent {
+            SessionPage(page, onAction = { action ->
+                if (action is SessionAction.DraftChanged) page = page.copy(draft = SessionDraft(text = action.text))
+            }, onApplyModelSettings = { true })
+        }
+        // The same text also appears in the timeline; query within the composer.
+        fun composerText(text: String) = compose.onAllNodes(
+            androidx.compose.ui.test.hasText(text) and
+                androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("sessionComposer")),
+            useUnmergedTree = true,
+        )[0]
+        composerText(saved.text).assertIsDisplayed()
+        compose.runOnIdle {
+            detail = detail.copy(liveItems = listOf(
+                TimelineItem("live", "user", latest, "", ""),
+                TimelineItem("reply", "assistant", "Not a user instruction", "", ""),
+            ))
+            page = page.copy(detail = LoadState.Ready(detail))
+        }
+        val layouts = mutableListOf<TextLayoutResult>()
+        composerText(latest).assertIsDisplayed().performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+            it(layouts)
+        }
+        compose.runOnIdle {
+            assertEquals(1, layouts.single().lineCount)
+            assertTrue(layouts.single().isLineEllipsized(0))
+        }
+        compose.onNodeWithTag("sessionInput").performTextInput("new draft\nsecond line")
+        composerText("new draft\nsecond line").assertIsDisplayed()
+        compose.runOnIdle {
+            page = page.copy(draft = SessionDraft(), detail = LoadState.Ready(SessionDetail(
+                session.copy(id = "empty"), snapshotToken = "subscription")))
+        }
+        composerText("What should OMP do?").assertIsDisplayed()
+    }
 
     @Test fun fast_switch_is_clickable_for_detached_and_attached_sessions_without_fast_state() {
         val host = HostState(

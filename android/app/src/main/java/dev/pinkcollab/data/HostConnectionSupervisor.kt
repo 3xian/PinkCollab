@@ -1,6 +1,8 @@
 package dev.pinkcollab.data
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -31,14 +33,14 @@ internal class HostConnectionSupervisor(
     private val connections = mutableMapOf<String, HostConnection>()
     private val desiredSessions = mutableMapOf<String, MutableSet<String>>()
 
-    fun connect(paired: PairedHost) {
+    fun connect(paired: PairedHost): Deferred<Unit> =
         synchronized(lock) {
             invalidateSubscriptions(paired.host.id)
             val connection = HostConnection(paired)
             connections.put(paired.host.id, connection)?.stop()
             connection.start()
+            connection.settled
         }
-    }
 
     fun forget(hostId: String) {
         synchronized(lock) {
@@ -102,6 +104,7 @@ internal class HostConnectionSupervisor(
         private val connectionGeneration = AtomicLong()
         private var job: Job? = null
         private var socket: WebSocket? = null
+        val settled = CompletableDeferred<Unit>()
 
         fun subscribe(sessionId: String, fresh: Boolean = false) {
             val cached = cachedSession(paired.host.id, sessionId)
@@ -130,6 +133,7 @@ internal class HostConnectionSupervisor(
                         emitState(currentGeneration, ConnectionState.UpgradeRequired)
                     else -> emitState(currentGeneration, disconnect.failure)
                 }
+                settled.complete(Unit)
             }
         }
 
@@ -139,6 +143,7 @@ internal class HostConnectionSupervisor(
             socket = null
             job?.cancel()
             job = null
+            settled.complete(Unit)
         }
 
         fun markOffline() {
@@ -172,6 +177,7 @@ internal class HostConnectionSupervisor(
                     if (frame.optString("type") in setOf("session_snapshot", "session_resume", "session_sync", "timeline", "message_patch", "operation") &&
                         desiredSessions[paired.host.id]?.contains(sessionId) != true) return
                     onFrame(paired.host.id, frame)
+                    if (cachedHost(paired.host.id)?.connection is ConnectionState.Online) settled.complete(Unit)
                 }
             }
         }

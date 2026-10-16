@@ -5,9 +5,16 @@ import dev.pinkcollab.data.Listing
 import dev.pinkcollab.data.Session
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+internal data class HostRefreshBatch(val id: Long, val total: Int, val completed: Int = 0) {
+    val progress: Float get() = completed.toFloat() / total
+    val finished: Boolean get() = completed == total
+}
 
 internal data class BrowserKey(val hostId: String, val path: String)
 internal data class DirectoryLoad(val key: BrowserKey, val state: LoadState<Listing>)
@@ -22,7 +29,7 @@ internal sealed interface UiEffect {
 internal interface HostActions {
     suspend fun pair(url: String, token: String)
     suspend fun refreshHost(hostId: String)
-    fun reconnect(hostId: String)
+    suspend fun reconnect(hostId: String)
     suspend fun forget(hostId: String)
     suspend fun rename(hostId: String, name: String)
     suspend fun listing(hostId: String, path: String, forceRefresh: Boolean): Listing
@@ -33,7 +40,7 @@ internal interface HostActions {
 internal class RepositoryHostActions(private val repository: GatewayRepository) : HostActions {
     override suspend fun pair(url: String, token: String) = repository.pair(url, token)
     override suspend fun refreshHost(hostId: String) = repository.refreshHost(hostId)
-    override fun reconnect(hostId: String) = repository.requestReconnect(hostId)
+    override suspend fun reconnect(hostId: String) = repository.requestReconnect(hostId)
     override suspend fun forget(hostId: String) = repository.forget(hostId)
     override suspend fun rename(hostId: String, name: String) = repository.renameHost(hostId, name)
     override suspend fun listing(hostId: String, path: String, forceRefresh: Boolean) =
@@ -54,6 +61,9 @@ internal class HostOperations(
     private val lock = Any()
     private val mutableOperations = MutableStateFlow<Set<OperationKey>>(emptySet())
     val operations = mutableOperations.asStateFlow()
+    private val mutableRefreshBatch = MutableStateFlow<HostRefreshBatch?>(null)
+    val refreshBatch = mutableRefreshBatch.asStateFlow()
+    private var nextRefreshBatch = 0L
     private val mutableDirectory = MutableStateFlow<DirectoryLoad?>(null)
     val directory = mutableDirectory.asStateFlow()
     private var directoryRequest: Long? = null
@@ -65,9 +75,26 @@ internal class HostOperations(
         emit(UiEffect.HostPaired(attemptId))
     }
 
-    fun refresh(hostId: String, isOnline: Boolean) {
-        if (isOnline) run(OperationKey.Host(hostId)) { actions.refreshHost(hostId) }
-        else actions.reconnect(hostId)
+    fun refresh(hostId: String, isOnline: Boolean): Job? = run(OperationKey.Host(hostId)) {
+        if (isOnline) actions.refreshHost(hostId) else actions.reconnect(hostId)
+    }
+
+    fun refreshHosts(hosts: Map<String, Boolean>) {
+        val batch = synchronized(lock) {
+            if (hosts.isEmpty() || mutableRefreshBatch.value?.finished == false) return
+            HostRefreshBatch(++nextRefreshBatch, hosts.size).also { mutableRefreshBatch.value = it }
+        }
+        hosts.forEach { (id, online) ->
+            val request = refresh(id, online)
+            scope.launch {
+                if (request != null) request.join()
+                else operations.first { OperationKey.Host(id) !in it }
+                synchronized(lock) {
+                    val current = mutableRefreshBatch.value
+                    if (current?.id == batch.id) mutableRefreshBatch.value = current.copy(completed = current.completed + 1)
+                }
+            }
+        }
     }
 
     fun forget(hostId: String) = run(OperationKey.Host(hostId)) {
@@ -155,12 +182,12 @@ internal class HostOperations(
         fallbackError: String = "Action failed",
         onError: (String) -> Unit = { emit(UiEffect.ShowToast(it)) },
         action: suspend () -> Unit,
-    ) {
+    ): Job? {
         synchronized(lock) {
-            if (key in mutableOperations.value) return
+            if (key in mutableOperations.value) return null
             mutableOperations.value += key
         }
-        scope.launch {
+        return scope.launch {
             try {
                 action()
             } catch (failure: CancellationException) {

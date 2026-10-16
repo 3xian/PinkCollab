@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /** Three dots chase a circle. Used in the 18dp slots that used to spin a ring. */
 @Composable
@@ -45,30 +46,30 @@ internal fun OrbitDots(
     }
 }
 
-/** A filled silhouette eases between rounded shapes. Replaces the larger ring indicators. */
+/** Distinct filled silhouettes pause briefly between smooth, continuous morphs. */
 @Composable
 internal fun MorphIndicator(
     modifier: Modifier = Modifier,
     color: Color = MaterialTheme.colorScheme.primary,
 ) {
     val phase = rememberInfiniteTransition(label = "morphIndicator").animateFloat(
-        0f, SHAPES.toFloat(), infiniteRepeatable(tween(3_200, easing = LinearEasing)), label = "morphPhase",
+        0f, SHAPES.toFloat(), infiniteRepeatable(tween(2_800, easing = LinearEasing)), label = "morphPhase",
     )
     val path = remember { Path() }
     IndicatorCanvas(modifier.size(48.dp)) {
         val cycle = phase.value
         val from = cycle.toInt() % SHAPES
-        val local = cycle - cycle.toInt()
+        // Each 700ms stage spends 420ms morphing and 280ms holding its endpoints.
+        val local = ((cycle - cycle.toInt() - 0.20f) / 0.60f).coerceIn(0f, 1f)
         val eased = local * local * (3f - 2f * local)
+        val start = MorphOutlines[from]
+        val end = MorphOutlines[(from + 1) % SHAPES]
         val radius = size.minDimension * 0.42f
         path.reset()
-        val steps = 56
-        for (step in 0..steps) {
-            val angle = step / steps.toFloat() * (2f * PI.toFloat())
-            val fromRadius = shapeRadius(from, angle)
-            val extent = fromRadius + (shapeRadius(from + 1, angle) - fromRadius) * eased
-            val point = center + Offset(cos(angle) * radius * extent, sin(angle) * radius * extent)
-            if (step == 0) path.moveTo(point.x, point.y) else path.lineTo(point.x, point.y)
+        for (step in 0 until MORPH_STEPS) {
+            val x = center.x + radius * (start[step * 2] + (end[step * 2] - start[step * 2]) * eased)
+            val y = center.y + radius * (start[step * 2 + 1] + (end[step * 2 + 1] - start[step * 2 + 1]) * eased)
+            if (step == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         path.close()
         drawPath(path, color)
@@ -87,11 +88,24 @@ private fun IndicatorCanvas(
 }
 
 private const val SHAPES = 4
+private const val MORPH_STEPS = 64
 
-/** Radius relative to a circle. Consecutive shapes meet so the loop does not pop. */
-private fun shapeRadius(shape: Int, angle: Float): Float = when (Math.floorMod(shape, SHAPES)) {
-    0 -> 1f
-    1 -> 0.84f + 0.16f * kotlin.math.abs(cos(2f * angle))
-    2 -> 0.78f + 0.22f * (0.5f + 0.5f * cos(3f * angle))
-    else -> 0.82f + 0.12f * cos(2f * angle) + 0.06f * sin(angle)
+// Sample once, not on every animation frame. All outlines use matching radial
+// points so interpolation stays continuous, including the last-to-first morph.
+private val MorphOutlines = Array(SHAPES) { shape ->
+    FloatArray(MORPH_STEPS * 2).apply {
+        repeat(MORPH_STEPS) { step ->
+            val angle = step / MORPH_STEPS.toFloat() * (2f * PI.toFloat())
+            val x = cos(angle)
+            val y = sin(angle)
+            val radius = when (shape) {
+                0 -> 1f
+                1 -> 0.84f / sqrt(sqrt(x * x * x * x + y * y * y * y)) // Rounded square.
+                2 -> 0.68f + 0.32f * cos(3f * angle) // Deep three-lobed silhouette.
+                else -> 1f / sqrt(x * x + y * y / (0.42f * 0.42f)) // Flattened ellipse.
+            }
+            this[step * 2] = x * radius
+            this[step * 2 + 1] = y * radius
+        }
+    }
 }

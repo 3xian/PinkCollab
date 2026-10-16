@@ -55,7 +55,6 @@ internal data class SessionControlsState(
     val canChooseModel: Boolean,
     val canInterrupt: Boolean,
     val canStop: Boolean,
-    val placeholder: String,
 )
 
 internal fun sessionControls(
@@ -70,12 +69,6 @@ internal fun sessionControls(
     val attached = session.runtimeAttached && connected
     val inputEnabled = connected && !activity.inputBusy && session.attention == null &&
         session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping
-    val hasMessages = detail.savedHistory.items.isNotEmpty() || detail.liveItems.isNotEmpty()
-    val placeholder = when {
-        !hasMessages -> "What should OMP do?"
-        session.status == SessionStatus.Running -> "Steer OMP…"
-        else -> "Send another prompt…"
-    }
     return SessionControlsState(
         attached = attached,
         inputEnabled = inputEnabled,
@@ -86,7 +79,6 @@ internal fun sessionControls(
             !activity.inputBusy,
         canInterrupt = attached && !activity.control && session.status in setOf(SessionStatus.Running, SessionStatus.NeedsInput),
         canStop = attached && !activity.control,
-        placeholder = placeholder,
     )
 }
 

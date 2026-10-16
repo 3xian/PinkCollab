@@ -129,6 +129,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             retainedDisplay = sessionDisplayCache,
                             vm = vm,
                             selectedSession = selectedSession,
+                            hostOperations = operations,
                             actions = TasksScreenActions(
                                 selectSession = { selectedSession = it },
                                 openResources = { route = AppRoute.Resources },
@@ -143,6 +144,8 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                                 retryHost = vm::refreshHost,
                                 loadMoreSessions = vm::loadMoreSessions,
                                 ensureSessionListed = vm::ensureSessionListed,
+                                createSession = vm::createSession,
+                                refreshHosts = vm::refreshHosts,
                             ),
                         )
 
@@ -212,6 +215,7 @@ private fun TasksRoute(
     selectedSession: SessionKey?,
     actions: TasksScreenActions,
     retainedDisplay: androidx.compose.runtime.snapshots.SnapshotStateMap<SessionKey, SessionDisplay>,
+    hostOperations: Set<OperationKey>,
 ) {
     val sessions by vm.sessionListState.collectAsStateWithLifecycle()
     val details by vm.sessionDetails.collectAsStateWithLifecycle()
@@ -223,9 +227,10 @@ private fun TasksRoute(
     val usageLoads by vm.usageLoads.collectAsStateWithLifecycle()
     val drafts by vm.drafts.collectAsStateWithLifecycle()
     val fileSelections by vm.fileSelections.collectAsStateWithLifecycle()
+    val refreshBatch by vm.hostRefreshBatch.collectAsStateWithLifecycle()
     TasksScreen(
         state = TasksScreenState(sessions, details, detailLoads, modelLoads, sessionOperations,
-            sendProgress, drafts, fileSelections, selectedSession, usageLoads, runtimeStarts),
+            sendProgress, drafts, fileSelections, selectedSession, usageLoads, runtimeStarts, hostOperations, refreshBatch),
         actions = actions,
         retainedDisplay = retainedDisplay,
     )

@@ -203,17 +203,23 @@ jobs:
           for package_dir in npm/platforms/*; do
             npm pack "./$package_dir" --dry-run
           done
+      - name: Select npm dist-tag
+        run: |
+          case "$RELEASE_TAG" in
+            *-*) echo "NPM_DIST_TAG=next" >> "$GITHUB_ENV" ;;
+            *) echo "NPM_DIST_TAG=latest" >> "$GITHUB_ENV" ;;
+          esac
       - name: Publish platform packages first
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           for package_dir in npm/platforms/*; do
-            npm publish "./$package_dir" --access public --provenance
+            npm publish "./$package_dir" --access public --provenance --tag "$NPM_DIST_TAG"
           done
       - name: Publish main package last
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish ./npm/pinkcollab --access public --provenance
+        run: npm publish ./npm/pinkcollab --access public --provenance --tag "$NPM_DIST_TAG"
 
 
   github-release:

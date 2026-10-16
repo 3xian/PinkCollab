@@ -95,6 +95,9 @@ val PinkCollabTypography = Typography(
     ),
 )
 
+internal val DialogHeadlineStyle = PinkCollabTypography.headlineSmall.copy(fontSize = 22.sp)
+internal val SheetTitleStyle = PinkCollabTypography.titleLarge.copy(fontSize = 20.sp)
+
 /** Message list only. Heavier weights are synthesized from the bundled regular face. */
 internal val SessionTypography = PinkCollabTypography.sessionFont()
 

@@ -51,6 +51,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
 
@@ -224,7 +225,9 @@ internal fun SessionPage(
         )
         .clip(composerShape)
         .background(composerFill)
-    val placeholder = controls.placeholder
+    val placeholder = remember(conversation) {
+        conversation.lastOrNull { it.kind == "user" }?.text ?: "What should OMP do?"
+    }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val stackComposerControls = maxWidth < 360.dp * density.fontScale
@@ -390,6 +393,9 @@ internal fun SessionPage(
                                             placeholder,
                                             style = composerTextStyle,
                                             color = Gray400.copy(alpha = if (inputEnabled) 0.82f else 0.48f),
+                                            maxLines = 1,
+                                            softWrap = false,
+                                            overflow = TextOverflow.Ellipsis,
                                         )
                                     }
                                     innerTextField()

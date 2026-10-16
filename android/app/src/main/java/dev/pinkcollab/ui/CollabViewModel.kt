@@ -91,6 +91,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             sessionCommand(session, SessionUserCommand.Start)
         },
     )
+    internal val hostRefreshBatch = hostOperations.refreshBatch
     internal val operations = hostOperations.operations
     internal val directory = hostOperations.directory
     private val sessionCoordinator = SessionOperations(
@@ -139,6 +140,15 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun refreshHost(hostId: String) = hostOperations.refresh(
         hostId, repository.state.value.hosts[hostId]?.connection is ConnectionState.Online,
     )
+    internal fun refreshHosts(hostIds: List<String>) {
+        val hosts = repository.state.value.hosts
+        hostOperations.refreshHosts(hostIds.mapNotNull { id ->
+            val connection = hosts[id]?.connection
+            if (connection is ConnectionState.Online || connection is ConnectionState.Offline) {
+                id to (connection is ConnectionState.Online)
+            } else null
+        }.toMap())
+    }
     internal fun forgetHost(hostId: String) = hostOperations.forget(hostId)
     internal fun renameHost(hostId: String, name: String) = hostOperations.rename(hostId, name)
     internal fun loadDirectory(key: BrowserKey, forceRefresh: Boolean = false) = hostOperations.loadDirectory(key, forceRefresh)

@@ -137,13 +137,13 @@ internal class GatewayRepository(
         }
     }
 
-    fun requestReconnect(id: String) {
+    suspend fun requestReconnect(id: String) {
         if (state.value.hosts[id] == null) return
         mutable.update { app ->
             val host = app.hosts[id] ?: return@update app
             app.copy(hosts = app.hosts + (id to host.copy(initialSync = InitialSyncState.Pending)))
         }
-        state.value.hosts[id]?.paired?.let(::connect)
+        state.value.hosts[id]?.paired?.let { connections.connect(it).await() }
     }
 
     fun networkUnavailable() {

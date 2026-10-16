@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material3.*
@@ -26,6 +27,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.layout
+import kotlin.math.roundToInt
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.ui.theme.*
 
@@ -37,7 +40,7 @@ internal fun ExitConfirmationDialog(
     AlertDialog(
         onDismissRequest = dismiss,
         icon = { Icon(Icons.AutoMirrored.Outlined.Logout, null, tint = TextMid) },
-        title = { Text("End this runtime?") },
+        title = { Text("End this runtime?", style = DialogHeadlineStyle) },
         text = {
             Text(
                 "This ends the current OMP process. The conversation stays, but this cannot be undone.",
@@ -166,6 +169,7 @@ internal fun ComposerFastSwitch(
         checked -> Purple200
         else -> TextMid
     }
+    val switchScale = 0.8f
     Row(
         Modifier
             .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
@@ -184,6 +188,13 @@ internal fun ComposerFastSwitch(
             checked = checked,
             onCheckedChange = null,
             enabled = enabled,
+            modifier = Modifier.layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val width = (placeable.width * switchScale).roundToInt()
+                layout(width, placeable.height) {
+                    placeable.place((width - placeable.width) / 2, 0)
+                }
+            }.scale(switchScale),
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
                 checkedTrackColor = Purple400,

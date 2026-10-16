@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
+import dev.pinkcollab.ui.theme.SheetTitleStyle
 import dev.pinkcollab.data.UsageAccount
 import dev.pinkcollab.data.UsageLimit
 import dev.pinkcollab.data.UsageSnapshot
@@ -43,7 +44,7 @@ internal fun UsageSheet(state: LoadState<UsageSnapshot>?, reload: () -> Unit, ba
                         IconButton(onClick = rememberHapticOnClick(back)) {
                             Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back to models")
                         }
-                        Text("Usage", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
+                        Text("Usage", Modifier.weight(1f), style = SheetTitleStyle,
                             fontWeight = FontWeight.SemiBold)
                         TextButton(onClick = rememberHapticOnClick(reload), enabled = state != LoadState.Loading) {
                             Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp))
@@ -105,11 +106,8 @@ private fun UsageAccountCard(account: UsageAccount) {
 
 @Composable
 private fun UsageLimitRow(limit: UsageLimit) {
-    val color = when (limit.status) {
-        "exhausted" -> MaterialTheme.colorScheme.error
-        "warning" -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.primary
-    }
+    val color = if (limit.status == "exhausted") MaterialTheme.colorScheme.error
+        else MaterialTheme.colorScheme.tertiary
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(listOfNotNull(limit.label, limit.modelId, limit.tier).distinct().joinToString(" · "),
             style = MaterialTheme.typography.bodyMedium)
@@ -122,13 +120,10 @@ private fun UsageLimitRow(limit: UsageLimit) {
         }
         limit.usedFraction?.let { fraction ->
             val progress = fraction.toFloat().coerceIn(0f, 1f)
-            val fillColor = when (limit.status) {
-                "exhausted" -> MaterialTheme.colorScheme.errorContainer
-                "warning" -> MaterialTheme.colorScheme.tertiaryContainer
-                else -> MaterialTheme.colorScheme.primaryContainer
-            }
+            val fillColor = if (limit.status == "exhausted") MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.tertiary.copy(alpha = 0.28f)
             Box(
-                Modifier.fillMaxWidth().heightIn(min = 32.dp).clip(RoundedCornerShape(50))
+                Modifier.fillMaxWidth().heightIn(min = 26.dp).clip(RoundedCornerShape(50))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                     .semantics(mergeDescendants = true) {
                         progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f)
@@ -139,7 +134,7 @@ private fun UsageLimitRow(limit: UsageLimit) {
                     Box(Modifier.fillMaxHeight().fillMaxWidth(progress).background(fillColor))
                 }
                 Text(String.format(Locale.US, "%.1f%% used", fraction * 100),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface)
             }

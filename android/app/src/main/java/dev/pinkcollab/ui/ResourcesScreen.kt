@@ -207,7 +207,7 @@ internal fun ResourcesScreen(
         AlertDialog(
             onDismissRequest = { hostPendingRemoval = null },
             icon = { Icon(Icons.Outlined.DeleteOutline, null, tint = Red400) },
-            title = { Text("Remove host?") },
+            title = { Text("Remove host?", style = DialogHeadlineStyle) },
             text = { Text("This removes “${host.displayName}” and its saved connection from this phone. The host itself will not be changed.") },
             confirmButton = {
                 TextButton(
@@ -227,7 +227,7 @@ internal fun ResourcesScreen(
         var draft by remember(host.host.id) { mutableStateOf(host.displayName) }
         AlertDialog(
             onDismissRequest = { renaming = null },
-            title = { Text("Rename host") },
+            title = { Text("Rename host", style = DialogHeadlineStyle) },
             text = {
                 Column {
                     OutlinedTextField(

@@ -14,6 +14,33 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HostConnectionResumeTest {
+    @Test fun repeated_equal_failures_complete_each_attempt_without_state_collectors() = runBlocking {
+        val server = MockWebServer()
+        repeat(2) { server.enqueue(MockResponse().setResponseCode(503)) }
+        server.start()
+        val client = OkHttpClient()
+        val transport = object : GatewayTransport by GatewayApi() { override val client = client }
+        var state: ConnectionState = ConnectionState.Offline()
+        val supervisor = HostConnectionSupervisor(this, transport,
+            { _, next -> state = next }, { _, _ -> }, { _, _ -> })
+        val paired = PairedHost(Host("host", "Desktop", "linux", "", ""),
+            server.url("/").toString().trimEnd('/'), "token", "client")
+        try {
+            withTimeout(5_000) { supervisor.connect(paired).await() }
+            val firstFailure = state
+            assertEquals(ConnectionState.Offline("Host rejected the connection (HTTP 503)",
+                ConnectionFailure.HostRejected), firstFailure)
+            withTimeout(5_000) { supervisor.connect(paired).await() }
+            assertEquals(firstFailure, state)
+            assertEquals(2, server.requestCount)
+        } finally {
+            supervisor.forget("host")
+            server.shutdown()
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
+        }
+    }
+
     @Test fun closed_socket_stays_offline_until_an_explicit_connect() = runBlocking {
         val server = MockWebServer()
         val sockets = Channel<WebSocket>(Channel.UNLIMITED)

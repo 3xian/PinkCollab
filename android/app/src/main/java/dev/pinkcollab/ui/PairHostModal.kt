@@ -42,6 +42,7 @@ import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import dev.pinkcollab.ui.theme.Base0
+import dev.pinkcollab.ui.theme.DialogHeadlineStyle
 import dev.pinkcollab.ui.theme.PrimaryButton
 import dev.pinkcollab.ui.theme.Purple700
 import dev.pinkcollab.ui.theme.TextMid
@@ -154,7 +155,7 @@ private fun PairHostSheet(
         Column {
             Text(
                 "Connect OMP host",
-                style = MaterialTheme.typography.headlineSmall,
+                style = DialogHeadlineStyle,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White,
             )
