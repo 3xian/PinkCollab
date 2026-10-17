@@ -62,6 +62,7 @@ import dev.pinkcollab.ui.theme.Amber300
 import dev.pinkcollab.ui.theme.Purple400
 import dev.pinkcollab.ui.theme.TextHigh
 import dev.pinkcollab.ui.theme.TextMid
+import java.util.Locale
 
 internal enum class WorkStatusKind { Loading, Sending, Working, Starting, Stopping, Attention, Offline, Ready, OnHost }
 
@@ -70,6 +71,7 @@ internal data class SessionWorkStatus(
     val title: String,
     val active: Boolean = false,
     val timing: WorkTiming? = null,
+    val tokensPerSecond: Double? = null,
 )
 
 internal fun sessionWorkStatus(
@@ -86,7 +88,12 @@ internal fun sessionWorkStatus(
             SendProgress.Submitting -> SessionWorkStatus(WorkStatusKind.Sending, "Sending message")
         }
     }
-    val status = deriveSessionWorkStatus(detail, host)
+    val status = deriveSessionWorkStatus(detail, host).copy(
+        tokensPerSecond = detail.session.tokensPerSecond?.takeIf {
+            host?.connected == true && detail.session.runtimeAttached &&
+                detail.session.status != SessionStatus.Starting && it.isFinite() && it >= 0.0
+        },
+    )
     val timing = detail.session.workTiming?.takeIf {
         host?.connected == true && detail.session.runtimeAttached &&
             detail.session.status != SessionStatus.Starting
@@ -254,6 +261,14 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
                 )
             }
         }
+        Text(
+            status.tokensPerSecond?.takeIf { it.isFinite() && it >= 0.0 }
+                ?.let { String.format(Locale.ROOT, "%.0f tok/s", it) } ?: "… tok/s",
+            modifier = Modifier.testTag("sessionWorkSpeed"),
+            color = TextMid,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+        )
     }
 }
 

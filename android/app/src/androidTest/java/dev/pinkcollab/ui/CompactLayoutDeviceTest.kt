@@ -3,6 +3,7 @@ package dev.pinkcollab.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
@@ -11,6 +12,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -88,5 +92,36 @@ class CompactLayoutDeviceTest {
         assertEquals(path.length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
         directory.performClick()
         assertEquals("host" to path, opened)
+    }
+
+    @Test fun narrow_model_button_keeps_effort_ring_visible_and_selection_gated() {
+        val modelName = "A model with a very long name that must leave room for thinking"
+        val enabled = mutableStateOf(true)
+        val level = mutableStateOf<String?>("high")
+        var opens = 0
+        compose.setContent {
+            val density = LocalDensity.current
+            PinkCollabTheme {
+                CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                    Box(Modifier.width(260.dp)) {
+                        ComposerModelButton(modelName, level.value, { opens++ }, enabled.value)
+                    }
+                }
+            }
+        }
+        val ring = compose.onNodeWithTag("composerThinkingIndicator", useUnmergedTree = true).assertIsDisplayed()
+        val label = compose.onNodeWithText(modelName, useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        label.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(1, layouts.single().lineCount)
+        assertTrue(layouts.single().isLineEllipsized(0))
+        assertTrue(label.fetchSemanticsNode().boundsInRoot.right <= ring.fetchSemanticsNode().boundsInRoot.left)
+        compose.onNodeWithText("high").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Choose model: $modelName, thinking high").performClick()
+        compose.runOnIdle { assertEquals(1, opens); enabled.value = false }
+        compose.onNodeWithContentDescription("Choose model: $modelName, thinking high").assertIsNotEnabled()
+        ring.assertIsDisplayed()
+        compose.runOnIdle { level.value = null }
+        compose.onNodeWithTag("composerThinkingIndicator", useUnmergedTree = true).assertDoesNotExist()
     }
 }

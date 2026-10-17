@@ -613,15 +613,7 @@ private fun HostFilterMenuItem(
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (connection != null) {
-                    val (status, color) = when (connection) {
-                        ConnectionState.Connecting -> "Connecting" to BrandPink
-                        ConnectionState.Synchronizing -> "Syncing" to BrandPink
-                        is ConnectionState.Online -> "Connected" to Teal300
-                        is ConnectionState.Offline -> "Offline" to Gray400
-                        ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
-                        ConnectionState.UpgradeRequired -> "Update required" to Red400
-                    }
-                    Text(status, style = MaterialTheme.typography.labelSmall, color = color)
+                    HostConnectionStatus(connection)
                 }
             }
         },
@@ -636,6 +628,19 @@ private fun HostFilterMenuItem(
         },
         modifier = Modifier.testTag(tag).semantics { this.selected = selected },
     )
+}
+
+@Composable
+private fun HostConnectionStatus(connection: ConnectionState) {
+    val (status, color) = when (connection) {
+        ConnectionState.Connecting -> "Connecting" to BrandPink
+        ConnectionState.Synchronizing -> "Syncing" to BrandPink
+        is ConnectionState.Online -> "Connected" to Teal300
+        is ConnectionState.Offline -> "Offline" to Gray400
+        ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
+        ConnectionState.UpgradeRequired -> "Update required" to Red400
+    }
+    Text(status, style = MaterialTheme.typography.labelSmall, color = color)
 }
 
 @Composable
@@ -826,7 +831,25 @@ private fun SessionInfoDialog(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     SessionInfoField("Title", session.title)
-                    SessionInfoField("Host", host?.paired?.displayName ?: session.hostId)
+                    Column(
+                        Modifier.testTag("sessionInfoHost"),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text("Host", style = MaterialTheme.typography.labelSmall, color = TextMid)
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                host?.paired?.displayName ?: session.hostId,
+                                modifier = Modifier.weight(1f, fill = false),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextHigh,
+                            )
+                            host?.let { HostConnectionStatus(it.connection) }
+                        }
+                    }
                     SessionInfoField("Working directory", session.cwd)
                     SessionInfoField("Status", sessionCardStatus(session, host?.connection).label)
                     SessionInfoField("Created (local time)", created)

@@ -85,6 +85,8 @@ class TasksPagerBarDeviceTest {
 
         compose.onNodeWithTag("sessionCard:s1").performClick()
         compose.onNodeWithTag("sessionInfo").assertIsDisplayed()
+        compose.onNode(hasText("Connected") and hasAnyAncestor(hasTestTag("sessionInfoHost")))
+            .assertIsDisplayed()
         for (value in listOf("Session 1", "My desktop", "/work/project-1/", "Inactive", "s1")) {
             compose.onNode(hasText(value) and hasAnyAncestor(hasTestTag("sessionInfo")))
                 .performScrollTo().assertIsDisplayed()
@@ -109,7 +111,7 @@ class TasksPagerBarDeviceTest {
             )
         }
         compose.onNodeWithText("/work/renamed-project/").performScrollTo().assertIsDisplayed()
-        compose.onNode(hasText("Offline") and hasAnyAncestor(hasTestTag("sessionInfo")))
+        compose.onNode(hasText("Offline") and hasAnyAncestor(hasTestTag("sessionInfoHost")))
             .performScrollTo().assertIsDisplayed()
         compose.onNode(hasText("Renamed desktop") and hasAnyAncestor(hasTestTag("sessionInfo")))
             .performScrollTo().assertIsDisplayed()

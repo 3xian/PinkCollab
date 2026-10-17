@@ -47,7 +47,11 @@ fn save_message(log: &std::path::Path, parent: &mut String, message: &Value) -> 
     id
 }
 fn finish(text: &str, log: &std::path::Path, parent: &mut String) {
-    let message = json!({"role":"assistant","timestamp":chrono::Utc::now().timestamp_millis(),"content":[{"type":"text","text":text}],"stopReason":"stop"});
+    let message = json!({
+        "role":"assistant","timestamp":chrono::Utc::now().timestamp_millis(),
+        "content":[{"type":"text","text":text}],"stopReason":"stop",
+        "usage":{"output":120,"input":9000},"duration":2500,"ttft":500
+    });
     let id = save_message(log, parent, &message);
     emit(json!({"type":"message_start","messageId":format!("rpc-{id}"),"message":message}));
     if text.starts_with("stream-fixture:") {
@@ -597,6 +601,29 @@ fn main() {
                         std::thread::sleep(std::time::Duration::from_secs(300));
                     }
                 } else if message == "hold" {
+                } else if message == "token speed" || message == "invalid token speed" {
+                    let assistant = json!({
+                        "role":"assistant","timestamp":chrono::Utc::now().timestamp_millis(),
+                        "content":[],"usage":{"output":120,"input":9000},
+                        "duration":2500,"ttft":500
+                    });
+                    emit(
+                        json!({"type":"message_end","messageId":format!("{id}-speed"),"message":assistant}),
+                    );
+                    save_message(&log, &mut parent, &assistant);
+                    if message == "invalid token speed" {
+                        // A later assistant completion in the same round must clear the sample.
+                        let missing = json!({"role":"assistant","content":[],"duration":2500});
+                        emit(
+                            json!({"type":"message_end","messageId":format!("{id}-missing"),"message":missing}),
+                        );
+                        save_message(&log, &mut parent, &missing);
+                    }
+                    emit(json!({"type":"agent_end"}));
+                    emit(
+                        json!({"type":"prompt_result","id":frame["id"],"agentInvoked":true,"status":"completed","sessionSettled":true}),
+                    );
+                    pending_prompt_id = None;
                 } else if message == "steer" {
                     if frame["streamingBehavior"] != "steer" {
                         emit(

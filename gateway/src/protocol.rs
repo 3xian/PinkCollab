@@ -49,6 +49,8 @@ pub struct RuntimeDto {
     pub model: Option<crate::model::ModelInfo>,
     pub pending_inputs: Vec<crate::model::Attention>,
     pub work_timing: Option<WorkTiming>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens_per_second: Option<f64>,
 }
 impl From<&RuntimeSnapshot> for RuntimeDto {
     fn from(r: &RuntimeSnapshot) -> Self {
@@ -67,6 +69,7 @@ impl From<&RuntimeSnapshot> for RuntimeDto {
             model: r.actual_model.clone(),
             pending_inputs: r.pending_inputs.clone(),
             work_timing: r.work_timing.clone(),
+            tokens_per_second: r.tokens_per_second,
         }
     }
 }

@@ -42,14 +42,6 @@ class ModelSelectionTest {
         assertEquals("claude-sonnet", composerModelLabel(ModelInfo("anthropic", "claude-sonnet", " ")))
     }
 
-    @Test
-    fun composer_thinking_label_is_separate_from_the_model_name() {
-        val model = ModelInfo("anthropic", "claude-sonnet", "Claude Sonnet", "high")
-        assertEquals("Claude Sonnet", composerModelLabel(model))
-        assertEquals("high", composerThinkingLabel(model))
-        assertNull(composerThinkingLabel(null))
-        assertNull(composerThinkingLabel(model.copy(thinkingLevel = " ")))
-    }
 
     @Test fun search_matches_name_provider_and_id_ignoring_case() {
         assertEquals(listOf(models[1]), filterModels(models, "SONNET"))

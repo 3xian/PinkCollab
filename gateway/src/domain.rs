@@ -49,6 +49,7 @@ pub struct RuntimeSnapshot {
     pub actual_model: Option<crate::model::ModelInfo>,
     pub pending_inputs: Vec<crate::model::Attention>,
     pub work_timing: Option<WorkTiming>,
+    pub tokens_per_second: Option<f64>,
 }
 
 #[derive(Clone, Debug)]

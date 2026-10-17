@@ -121,6 +121,7 @@ impl SessionController {
                 actual_model: None,
                 pending_inputs: Vec::new(),
                 work_timing: None,
+                tokens_per_second: None,
             });
             state.work_clock = None;
             state.settled_revision = 0;

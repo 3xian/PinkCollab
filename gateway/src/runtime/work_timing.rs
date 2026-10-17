@@ -44,7 +44,7 @@ impl ControllerState {
     }
 
     fn update_work_timing_at(&mut self, begin: bool, now: Instant) {
-        let Some(snapshot) = self.projection.as_ref() else {
+        let Some(snapshot) = self.projection.as_mut() else {
             self.work_clock = None;
             return;
         };
@@ -59,10 +59,12 @@ impl ControllerState {
                 .as_ref()
                 .is_some_and(|clock| clock.completed)
         {
+            snapshot.tokens_per_second = None;
             self.work_clock = None;
             return;
         }
         if begin && self.work_clock.as_ref().is_none_or(|clock| clock.completed) {
+            snapshot.tokens_per_second = None;
             self.work_clock = Some(WorkClock {
                 elapsed: Duration::ZERO,
                 running_since: None,
@@ -108,6 +110,7 @@ mod tests {
                 actual_model: None,
                 pending_inputs: vec![],
                 work_timing: None,
+                tokens_per_second: None,
             }),
             work_clock: None,
             messages: Vec::new(),
@@ -198,6 +201,35 @@ mod tests {
             timing(&mut state, start + Duration::from_secs(80)),
             None,
             "A state query cannot invent a start time"
+        );
+    }
+
+    #[test]
+    fn speed_survives_idle_capture_but_not_a_new_round() {
+        let mut state = state();
+        let start = Instant::now();
+        state.update_work_timing_at(true, start);
+        state.projection.as_mut().unwrap().tokens_per_second = Some(60.0);
+        // Prompt acknowledgement can follow the assistant sample; it is not new work.
+        state.update_work_timing_at(true, start + Duration::from_secs(1));
+        assert_eq!(
+            state.projection.as_ref().unwrap().tokens_per_second,
+            Some(60.0)
+        );
+        state.projection.as_mut().unwrap().execution = "quiescent".into();
+        state.update_work_timing_at(false, start + Duration::from_secs(2));
+        let captured = state.capture_runtime_at(start + Duration::from_secs(3));
+        let dto = crate::protocol::RuntimeDto::from(captured.as_ref().unwrap());
+        assert_eq!(serde_json::to_value(dto).unwrap()["tokensPerSecond"], 60.0);
+        state.projection.as_mut().unwrap().execution = "active".into();
+        state.update_work_timing_at(true, start + Duration::from_secs(4));
+        let captured = state.capture_runtime_at(start + Duration::from_secs(4));
+        let dto = crate::protocol::RuntimeDto::from(captured.as_ref().unwrap());
+        assert!(
+            serde_json::to_value(dto)
+                .unwrap()
+                .get("tokensPerSecond")
+                .is_none()
         );
     }
 

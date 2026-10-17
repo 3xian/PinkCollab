@@ -1,5 +1,6 @@
 package dev.pinkcollab.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -7,9 +8,14 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -219,7 +225,6 @@ internal fun ComposerModelButton(
 ) {
     val description = if (thinkingLevel == null) "Choose model: $label" else "Choose model: $label, thinking $thinkingLevel"
     val color = if (enabled) Purple200 else Gray400.copy(alpha = 0.34f)
-    val thinkingColor = if (enabled) TextMid else Gray400.copy(alpha = 0.34f)
     Row(
         modifier
             .fillMaxWidth()
@@ -233,7 +238,7 @@ internal fun ComposerModelButton(
         Spacer(Modifier.width(6.dp))
         Text(
             label,
-            modifier = Modifier.weight(if (thinkingLevel == null) 1f else 2f),
+            modifier = Modifier.weight(1f, fill = false),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.labelMedium,
@@ -241,16 +246,50 @@ internal fun ComposerModelButton(
         )
         if (thinkingLevel != null) {
             Spacer(Modifier.width(8.dp))
-            Text(
-                thinkingLevel,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelMedium,
-                color = thinkingColor,
+            ComposerThinkingIndicator(thinkingLevel, color)
+        }
+    }
+}
+
+/** Static effort gauge, not elapsed work or an indeterminate loading spinner. */
+@Composable
+private fun ComposerThinkingIndicator(level: String, color: Color) {
+    val fraction = when (level.trim().lowercase()) {
+        "off" -> 0f
+        "minimal" -> 0.125f
+        "low" -> 0.25f
+        "med", "medium" -> 0.5f
+        "high" -> 0.75f
+        "xhigh", "max" -> 1f
+        else -> null
+    }
+    val modifier = Modifier.size(14.dp).testTag("composerThinkingIndicator")
+    if (fraction == null) {
+        Icon(
+            if (level.trim().equals("auto", ignoreCase = true)) Icons.Outlined.Autorenew else Icons.AutoMirrored.Outlined.HelpOutline,
+            contentDescription = null,
+            modifier = modifier,
+            tint = color,
+        )
+        return
+    }
+    Canvas(modifier) {
+        val stroke = 2.dp.toPx()
+        val radius = (size.minDimension - stroke) / 2f
+        drawCircle(color.copy(alpha = color.alpha * 0.22f), radius, style = Stroke(stroke))
+        if (fraction > 0f) {
+            drawArc(
+                color = color,
+                startAngle = -90f,
+                sweepAngle = 360f * fraction,
+                useCenter = false,
+                topLeft = Offset(stroke / 2f, stroke / 2f),
+                size = Size(radius * 2f, radius * 2f),
+                style = Stroke(stroke),
             )
         }
-        Spacer(Modifier.width(4.dp))
-        Icon(Icons.Outlined.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
+        if (level.trim().equals("max", ignoreCase = true)) {
+            drawCircle(color, radius = 1.5.dp.toPx())
+        }
     }
 }

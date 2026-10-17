@@ -24,7 +24,7 @@ class SessionWorkStatusDeviceTest {
             connection = ConnectionState.Online(1L),
         )
         val session = Session("session", "host", "/work", "Work", SessionStatus.Running, "", false,
-            null, "", "", true, "generation", workTiming = WorkTiming(23_000, false, false))
+            null, "", "", true, "generation", workTiming = WorkTiming(23_000, false, false), tokensPerSecond = 42.3)
         val action = "Inspecting the composer clearance around a very long current tool action label"
         val target = "src/Session.kt"
         val tool = TimelineItem("read", "tool", "", "", "", ToolTrace("read", "read",
@@ -32,10 +32,11 @@ class SessionWorkStatusDeviceTest {
         val detail = mutableStateOf(SessionDetail(session, snapshotToken = "subscription",
             savedHistory = SavedHistory.Ready("history", emptyList(), null), liveItems = listOf(tool)))
         val actions = mutableListOf<SessionAction>()
+        val currentHost = mutableStateOf(host)
         compose.mainClock.autoAdvance = false
         compose.setContent {
             PinkCollabTheme {
-                SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
+                SessionPage(SessionPageState(LoadState.Ready(detail.value), currentHost.value, SessionDraft(), 0,
                     SessionActivity(), null, null), { actions += it }, { true })
             }
         }
@@ -56,6 +57,38 @@ class SessionWorkStatusDeviceTest {
         title.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layout) }
         assertEquals(1, layout.single().lineCount)
         assertTrue(layout.single().isLineEllipsized(0))
+        val speed = compose.onNodeWithTag("sessionWorkSpeed").assertTextEquals("42 tok/s").assertIsDisplayed()
+        val speedBounds = speed.fetchSemanticsNode().boundsInRoot
+        assertTrue(speedBounds.left >= elapsed.fetchSemanticsNode().boundsInRoot.right)
+        assertTrue(speedBounds.right <= statusBounds.right)
+        assertEquals(title.fetchSemanticsNode().boundsInRoot.center.y, speedBounds.center.y, 1f)
+        val speedLayout = mutableListOf<TextLayoutResult>()
+        speed.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(speedLayout) }
+        assertEquals(1, speedLayout.single().lineCount)
+        assertTrue("Speed width ${speedLayout.single().size.width}, line ${speedLayout.single().getLineRight(0)}",
+            speedLayout.single().getLineRight(0) <= speedLayout.single().size.width + 1f)
+        val speedRight = speedBounds.right
+        compose.runOnIdle {
+            detail.value = detail.value.copy(session = detail.value.session.copy(tokensPerSecond = 58.7))
+        }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithTag("sessionWorkSpeed").assertTextEquals("59 tok/s")
+        assertEquals(speedRight, compose.onNodeWithTag("sessionWorkSpeed").fetchSemanticsNode().boundsInRoot.right, 1f)
+        compose.runOnIdle {
+            detail.value = detail.value.copy(session = detail.value.session.copy(status = SessionStatus.Idle, tokensPerSecond = null))
+        }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithTag("sessionWorkSpeed").assertIsDisplayed()
+        assertEquals(speedRight, compose.onNodeWithTag("sessionWorkSpeed").fetchSemanticsNode().boundsInRoot.right, 1f)
+        compose.runOnIdle {
+            detail.value = detail.value.copy(session = session)
+            currentHost.value = host.copy(connection = ConnectionState.Offline())
+        }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithTag("sessionWorkSpeed").assertIsDisplayed()
+        compose.runOnIdle { currentHost.value = host }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithTag("sessionWorkSpeed").assertTextEquals("42 tok/s")
         compose.onAllNodes(hasText(target) and hasAnyAncestor(hasTestTag("sessionWorkStatus")))
             .assertCountEquals(0)
         compose.onNodeWithContentDescription("Fast mode").assertIsEnabled()

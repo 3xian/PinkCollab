@@ -79,6 +79,7 @@ impl SessionController {
             "agent_start" => {
                 if let Some(snapshot) = state.projection.as_mut() {
                     snapshot.execution = "active".into();
+                    snapshot.tokens_per_second = None;
                     changed_runtime = true;
                 }
                 state.update_work_timing(true);
@@ -279,6 +280,11 @@ impl SessionController {
                     }
                 }
                 if frame["message"]["role"] == "assistant" {
+                    if let Some(snapshot) = state.projection.as_mut() {
+                        let sample = assistant_tokens_per_second(&frame["message"]);
+                        changed_runtime |= snapshot.tokens_per_second != sample;
+                        snapshot.tokens_per_second = sample;
+                    }
                     // Keep only this message's declarations. They do not establish execution
                     // and must never resurrect calls retired from the bounded live timeline.
                     state.pending_tool_arguments.clear();
@@ -509,6 +515,72 @@ impl SessionController {
             && runtime.stop_confirmed().await.is_ok()
         {
             self.apply_exit(&generation, None).await;
+        }
+    }
+}
+
+/// OMP reports request duration and time to first token in milliseconds.
+/// Only provider usage is authoritative; text length is never a token count.
+fn assistant_tokens_per_second(message: &Value) -> Option<f64> {
+    let output = message["usage"]["output"].as_f64()?;
+    let duration = message["duration"].as_f64()?;
+    let ttft = match message.get("ttft").filter(|value| !value.is_null()) {
+        Some(value) => value.as_f64()?,
+        None => 0.0,
+    };
+    let generation_ms = duration - ttft;
+    if !output.is_finite()
+        || output <= 0.0
+        || !duration.is_finite()
+        || duration <= 0.0
+        || !ttft.is_finite()
+        || !generation_ms.is_finite()
+        || generation_ms <= 0.0
+    {
+        return None;
+    }
+    let speed = output * 1000.0 / generation_ms;
+    speed.is_finite().then_some(speed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn speed_uses_provider_output_and_generation_duration() {
+        assert_eq!(
+            assistant_tokens_per_second(&json!({
+                "usage": {"output": 120, "input": 9000, "reasoningTokens": 20},
+                "duration": 2500,
+                "ttft": 500,
+                "content": [{"type": "text", "text": "short"}]
+            })),
+            Some(60.0)
+        );
+        assert_eq!(
+            assistant_tokens_per_second(&json!({"usage":{"output":120},"duration":2000})),
+            Some(60.0)
+        );
+    }
+
+    #[test]
+    fn speed_requires_valid_usage_and_timing_without_estimating_text() {
+        for message in [
+            json!({"content":[{"type":"text","text":"many words"}],"duration":1000}),
+            json!({"usage":{"output":120}}),
+            json!({"usage":{"output":0},"duration":1000}),
+            json!({"usage":{"output":-1},"duration":1000}),
+            json!({"usage":{"output":"120"},"duration":1000}),
+            json!({"usage":{"output":120},"duration":0}),
+            json!({"usage":{"output":120},"duration":-1}),
+            json!({"usage":{"output":120},"duration":"1000"}),
+            json!({"usage":{"output":120},"duration":1000,"ttft":1000}),
+            json!({"usage":{"output":120},"duration":1000,"ttft":2000}),
+            json!({"usage":{"output":120},"duration":1000,"ttft":"bad"}),
+            json!({"usage":{"output":1e308},"duration":1}),
+        ] {
+            assert_eq!(assistant_tokens_per_second(&message), None, "{message}");
         }
     }
 }

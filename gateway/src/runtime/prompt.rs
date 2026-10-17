@@ -80,6 +80,7 @@ mod tests {
             actual_model: None,
             pending_inputs: vec![],
             work_timing: None,
+            tokens_per_second: None,
         };
         let prepare = || {
             PreparedPrompt::new(

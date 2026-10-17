@@ -28,6 +28,21 @@ class SessionTest {
         assertEquals(null, record.session().workTiming)
     }
 
+    @Test fun `speed parses optional finite nonnegative runtime samples`() {
+        val record = JSONObject("""{"id":"s","hostId":"h","cwd":"/w","title":"Work","createdAt":"","updatedAt":""}""")
+        val runtime = JSONObject("""{"state":"running","tokensPerSecond":42.3}""")
+        assertEquals(42.3, record.session(runtime).tokensPerSecond)
+        runtime.put("tokensPerSecond", 0.0)
+        assertEquals(0.0, record.session(runtime).tokensPerSecond)
+        for (sample in listOf(-1.0, "NaN", "Infinity", JSONObject.NULL)) {
+            runtime.put("tokensPerSecond", sample)
+            assertEquals(null, record.session(runtime).tokensPerSecond)
+        }
+        runtime.remove("tokensPerSecond")
+        assertEquals(null, record.session(runtime).tokensPerSecond)
+        assertEquals(null, record.session().tokensPerSecond)
+    }
+
     private fun session(status: SessionStatus, runtimeAttached: Boolean) = Session(
         id = "session",
         hostId = "host",

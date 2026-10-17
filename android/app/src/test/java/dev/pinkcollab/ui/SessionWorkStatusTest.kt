@@ -37,6 +37,25 @@ class SessionWorkStatusTest {
         completed: Boolean = false,
     ) = TimelineItem(id, "tool", "", "", "", ToolTrace(id, name, ToolArguments(strings = arguments), "", false, completed))
 
+    @Test fun speed_requires_a_valid_sample_and_online_attached_runtime() {
+        val detail = SessionDetail(session.copy(tokensPerSecond = 42.3))
+        assertEquals(42.3, sessionWorkStatus(detail, online).tokensPerSecond)
+        assertEquals(42.3, sessionWorkStatus(detail.copy(
+            session = detail.session.copy(status = SessionStatus.Idle)), online).tokensPerSecond)
+        assertEquals(null, sessionWorkStatus(detail, online.copy(connection = ConnectionState.Offline())).tokensPerSecond)
+        assertEquals(null, sessionWorkStatus(detail.copy(
+            session = detail.session.copy(runtimeAttached = false)), online).tokensPerSecond)
+        assertEquals(null, sessionWorkStatus(detail.copy(
+            session = detail.session.copy(status = SessionStatus.Starting)), online).tokensPerSecond)
+        assertEquals(null, sessionWorkStatus(detail, online, SendProgress.Submitting).tokensPerSecond)
+        for (sample in listOf(null, -1.0, Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY)) {
+            assertEquals(null, sessionWorkStatus(detail.copy(
+                session = session.copy(tokensPerSecond = sample)), online).tokensPerSecond)
+        }
+        assertEquals(0.0, sessionWorkStatus(detail.copy(
+            session = session.copy(tokensPerSecond = 0.0)), online).tokensPerSecond)
+    }
+
     @Test fun sending_overrides_attention_and_work_only_while_online() {
         val detail = SessionDetail(
             session.copy(
