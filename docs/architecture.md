@@ -1,6 +1,6 @@
 # Architecture
 
-PinkCollab keeps OMP on the host. Android uses Gateway API v3 over HTTPS and WebSocket; the Gateway starts OMP through its local NDJSON RPC interface. See the [protocol](protocol.md) for wire details.
+PinkCollab keeps OMP on the host. Android uses Gateway API v4 over HTTPS and WebSocket; the Gateway starts OMP through its local NDJSON RPC interface. See the [protocol](protocol.md) for wire details.
 
 ```mermaid
 flowchart LR
@@ -64,10 +64,6 @@ The host filter scopes loading and recovery to the visible host list as well as 
 Tasks has one route-owned session-focus collector, active only while the app lifecycle is started. It begins during startup and loads the initial session as soon as a host snapshot supplies its summary, using the pager's ordering and the current restored selection when it exists. Every focus change clears the previous session's pending detail request and error, including when the destination host is blocked. The Gateway boundary does not subscribe while the selected host is offline, needs pairing, or needs an app update. Settled pager selections feed the same collector; entering the pager reuses a pending request or valid subscription instead of forcing a second subscribe. Subsequent focus changes are debounced by 200 ms, and a new host snapshot reloads an invalidated subscription. Leaving Tasks or stopping the lifecycle cancels the snapshot wait and pending debounce, so a late startup snapshot cannot initiate focus from another route. Reentering Tasks resolves the current selection rather than replaying a startup capture.
 
 Startup navigation waits for the task list to become ready or unavailable, without a fixed navigation timeout. Before the first usable host snapshot, connecting or synchronizing hosts remain on the animated startup screen and report progress at its bottom instead of switching to a second “Syncing sessions” page. Offline, authentication-required, and upgrade-required hosts make the list unavailable once no initial synchronization remains pending, releasing startup into the existing recovery interface. An empty synchronized snapshot and an unpaired app also release startup. This gate runs only once per app composition; a later explicit reconnect uses the normal task-list recovery flow. Previously synchronized session lists remain available across disconnects.
-
-The startup screen centers the animated logo itself vertically and places the app name 20dp above its bounds; the title does not shift the logo downward. Connection and synchronization status text sits at the bottom, above the navigation-bar inset with 24dp of additional spacing. Its bounded history scrolls to the newest entry with a 1.2-second eased animation, following the measured content end rather than overshooting a list-item target. System animation-duration settings remain respected. It does not display an indeterminate loading bar.
-
-All startup progress entries use the same base text opacity. A single vertical alpha mask fixed to the 108dp viewport fades text at its top and bottom edges; appending a status does not change the preceding entry's color or opacity.
 
 Each compact session card displays the session title on its first line and the final component of its workspace path alongside the current status on its second line. Host names and position counters are not shown in the cards.
 

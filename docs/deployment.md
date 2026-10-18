@@ -52,7 +52,7 @@ Replace the hostname and upstream port. Caddy handles WebSocket forwarding; you 
 
 External setup does not invoke Tailscale or manage DNS, certificates, or the proxy. It checks **local Gateway health, not external reachability**. Verify the connection from the phone using the [deployment checks](#verify-the-deployment).
 
-When switching from Funnel, external setup does not remove the old Tailscale mapping. Inspect `tailscale funnel status` and remove the obsolete mapping if public access is no longer intended; see [Tailscale Funnel](#tailscale-funnel). Omitting `--transport external` on `setup` selects the default Funnel flow even if an external URL is already saved. `pinkcollab update` does not run setup and does not change the saved transport.
+When switching from Funnel, external setup does not remove the old Tailscale mapping. Inspect `tailscale funnel status` and remove the obsolete mapping if public access is no longer intended; see [Tailscale Funnel](#tailscale-funnel). Omitting `--transport external` selects the Funnel flow. If the saved `public_url` is not the current Tailscale host or a `*.ts.net` host, setup fails with “Existing remote address belongs to another transport.” Keep `--transport external --public-url …`, or change `public_url` before running Funnel setup. `pinkcollab update` does not run setup and does not change the saved transport.
 
 ### Automation
 
@@ -249,7 +249,7 @@ Start with `pinkcollab doctor`; it diagnoses without changing the installation. 
 | Pairing code expired or already used | Run `pinkcollab pair` again. In setup, press Enter after expiry to regenerate, or Ctrl+C to finish. |
 | History missing or conversation busy | See [host OMP conversations](#discovering-host-omp-conversations); close external writers before continuing on the phone. |
 
-Cancelling pairing leaves the Gateway running. Cancelling setup preserves completed steps for the next run. `status` exits nonzero if local health, managed background state, OMP, or a managed Funnel check fails; foreground-only operation is reported as degraded. Externally managed HTTPS does not require a verified Funnel.
+Cancelling pairing leaves the Gateway running. Cancelling setup preserves completed steps for the next run. `status` exits nonzero if local health, managed background state, OMP, or a managed Funnel check fails. A healthy Gateway that is not the managed background process prints “Gateway is running outside the managed background service.” and still exits nonzero. Externally managed HTTPS does not require a verified Funnel.
 
 ## CLI and configuration
 

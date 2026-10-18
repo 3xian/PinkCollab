@@ -87,7 +87,7 @@
           </div>
           <figure class="usage-photo">
             <a href="assets/pinkcollab-provider-usage.jpg" aria-label="View the PinkCollab provider usage screenshot at full size">
-              <img src="assets/pinkcollab-provider-usage.jpg" width="1200" height="675" loading="lazy" decoding="async" alt="PinkCollab 2.1.0 Usage screen showing a masked OpenAI Codex account, its plan, a seven-day quota with 14% used, reset time, provider update time, and Reload control.">
+              <img src="assets/pinkcollab-provider-usage.jpg" width="1200" height="675" loading="lazy" decoding="async" alt="PinkCollab Usage screen showing a masked OpenAI Codex account, its plan, a seven-day quota with 14% used, reset time, provider update time, and Reload control.">
             </a>
             <figcaption>Provider account quotas on your connected host. Available reports depend on the provider and require an OMP version supporting <code>usage --json</code>; unavailable data is not treated as zero usage.</figcaption>
           </figure>
@@ -107,16 +107,16 @@
           </div>
         </div>
         <ol class="compare-list">
-          <li><b>Start work, do not just watch it.</b><p><code>/collab</code> shares a session that is already running on a terminal you opened. PinkCollab creates the session itself and starts OMP in that directory, so a new task can begin without a keyboard in front of the host.</p></li>
+          <li><b>Start work, do not just watch it.</b><p><code>/collab</code> shares a session that is already running on a terminal you opened. PinkCollab creates the session itself. OMP starts there when you send the first prompt or open the model picker, so a new task can begin without a keyboard in front of the host.</p></li>
           <li><b>Persistent sessions.</b><p>A Collab room follows one process and ends when it does. PinkCollab keeps the session in your list after OMP exits, reloads its transcript, and starts a new runtime on the same conversation later.</p></li>
           <li><b>Bring files into the conversation.</b><p>A <code>/collab</code> guest cannot upload a file. Attach files from your phone with PinkCollab to give OMP the context for the next step.</p></li>
-          <li><b>Reachable without a relay.</b><p><code>/collab</code> reaches guests through OMP's hosted relay, and its production relay is not distributed for self-hosting. PinkCollab talks only to the Gateway you run: Tailscale Funnel, private Serve, or your own HTTPS proxy.</p></li>
+          <li><b>Reachable without a relay.</b><p><code>/collab</code> reaches guests through OMP's hosted relay, and its production relay is not distributed for self-hosting. Apart from the GitHub release check and APK download, PinkCollab talks only to the Gateway you run: Tailscale Funnel, private Serve, or your own HTTPS proxy.</p></li>
           <li><b>Swipe between live sessions.</b><p>A <code>/collab</code> link opens one session. PinkCollab keeps every session in one pager: swipe to read the next one and steer it, while the others keep running.</p></li>
           <li class="compare-caveat"><b>Gaps it does not close.</b><p>PinkCollab does not mirror the TUI, and OMP stays in control of tools, files, and credentials. Use <code>/collab</code> when you want a colleague inside your terminal session; use PinkCollab to run your own sessions from your phone.</p></li>
         </ol>
       </section>
       <section class="architecture section" id="architecture" aria-labelledby="architecture-title">
-        <div class="section-heading architecture-heading"><p class="eyebrow">FROM A TAP TO A RUNNING AGENT</p><h2 id="architecture-title">Your phone starts the session.<br>Your host stays in control.</h2><p>PinkCollab connects your phone directly to OMP running on your host.</p></div>
+        <div class="section-heading architecture-heading"><p class="eyebrow">FROM A TAP TO A RUNNING AGENT</p><h2 id="architecture-title">Your phone starts the session.<br>Your host stays in control.</h2><p>PinkCollab connects your phone to OMP on your host through the Gateway.</p></div>
         <figure class="architecture-panel">
           <div class="architecture-flow" aria-label="PinkCollab architecture: the Android app connects over HTTPS and WebSocket to a Rust gateway on your host. The gateway starts and controls Oh My Pi, which connects to your model provider. Workspaces, metadata, and session history stay on the host.">
             <article class="arch-node arch-external arch-phone-node"><span class="arch-icon" aria-hidden="true">▣</span><span class="arch-kicker">IN YOUR HAND</span><h3>Android app</h3><p>Start, follow, answer</p></article>

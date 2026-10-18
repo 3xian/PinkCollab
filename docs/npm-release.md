@@ -44,7 +44,7 @@ Keep both files outside the repository and `~/.gradle` so cache cleanup cannot d
 
 Update the Cargo, Android, and npm manifests together. From the user-visible changes since the previous release, write `docs/releases/vX.Y.Z.md` and commit it with that version bump. The same file becomes the annotated tag on GitHub's Tags page and the GitHub Release body.
 
-The first line must say what changed, not only the version (`PinkCollab vX.Y.Z: faster reconnects on Android`). Follow it with highlights, fixes, and any compatibility or upgrade steps. Omit empty sections and unverified claims. Review the notes with the release requester before publishing.
+The first line must say what changed, not only the version (`PinkCollab vX.Y.Z: large model catalogs load without truncation`). Follow it with highlights, fixes, and any compatibility or upgrade steps. Omit empty sections and unverified claims. Review the notes with the release requester before publishing.
 
 Run from the repository root on `main`, with unrelated changes kept out of the release commit. The version script updates all manifests and the Cargo lockfile, then validates them:
 

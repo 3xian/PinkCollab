@@ -62,7 +62,7 @@ Host bootstrap sends the newest 50 sessions by creation order plus every attache
 
 Assistant streaming begins with a complete `timeline` item and continues with `message_patch`: `{sessionId,id,baseHash,hash,append,metadata?}`. Hashes are SHA-256 of UTF-8 text. Apply `append` only when current text matches `baseHash`, verify the resulting `hash`, and apply optional metadata with the reconstructed text. A matching target hash is an already-applied patch; any other prefix requires a fresh session snapshot. Corrections use a complete item replacement. Final metadata supplies the persisted `sourceId`/`messageKey` without sending the same body again. Text is never truncated. Fresh live snapshots and REST history pages select fewer whole items around a 4 MiB target; earlier history remains pageable.
 
-Tool summaries omit null arguments and empty results. Identical Todo phases share a content-addressed `todoRef`; `todoPlans` supplies each referenced phase array once per socket connection and once per REST response. Hydrate references before reducing a frame, retaining the socket dictionary across a resumed connection. Publicly unchanged command receipts are coalesced even when internal dispatch/persistence state changes.
+Tool summaries omit null arguments, empty results, and absent summaries. Identical Todo phases share a content-addressed `todoRef`; `todoPlans` supplies each referenced phase array once per socket connection and once per REST response. Hydrate references before reducing a frame, retaining the socket dictionary across a resumed connection. Publicly unchanged command receipts are coalesced even when internal dispatch/persistence state changes.
 
 ## Commands and generation safety
 
@@ -112,7 +112,7 @@ Before a prompt or attention response reaches OMP, Gateway durably protects its 
 
 Other core reads: `GET /fs/list?path=...` returns `{path,parent,directories}` within allowed roots; `GET /sessions/:id/models` returns `{models,thinkingLevels}` from the attached runtime.
 
-Detached conversations display `OMP default`. When restoring their transcript, Gateway reads the new OMP process's default model before loading history, then selects that model before sending a prompt. The attached runtime reports the actual model name; later explicit model changes apply for that runtime.
+When restoring a detached transcript, Gateway reads the new OMP process's default model before loading history, then selects that model before sending a prompt. The attached runtime reports the actual model name; later explicit model changes apply for that runtime.
 
 ## Errors and optional REST reads
 

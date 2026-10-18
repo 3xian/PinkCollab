@@ -90,7 +90,7 @@ To upgrade, install the APK and CLI from the same release, then run `pinkcollab 
 
 - [Deployment and troubleshooting](docs/deployment.md): networking, pairing, services, upgrades, and CLI/configuration
 - [Session interface](docs/session-presentation.md): status display and interaction behavior
-- [Architecture](docs/architecture.md) · [Protocol 3](docs/protocol.md)
+- [Architecture](docs/architecture.md) · [Protocol 4](docs/protocol.md)
 - [Development](docs/development.md) · [Release publishing](docs/npm-release.md)
 
 ## License
