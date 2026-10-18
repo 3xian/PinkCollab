@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.PlatformTextStyle
@@ -62,6 +63,7 @@ internal fun SessionPage(
     onAction: (SessionAction) -> Unit,
     onApplyModelSettings: (ModelSettingsChanges) -> Boolean,
     isActive: Boolean = true,
+    contentTopInset: Dp = 0.dp,
     loadToolDetails: suspend (String, String?) -> ToolDetailPage = { _, _ -> error("Tool details unavailable") },
 ) {
     val load = state.detail
@@ -236,7 +238,9 @@ internal fun SessionPage(
         val keyboardHeight = with(density) {
             (imeInsets.getBottom(this) - navigationInsets.getBottom(this)).coerceAtLeast(0).toDp()
         }
-        val panelMaxHeight = (maxHeight - composerClearance - keyboardHeight - 12.dp).coerceAtLeast(todoHeaderHeight)
+        val todoOverlayTop = contentTopInset + 6.dp
+        val panelMaxHeight = (maxHeight - todoOverlayTop - composerClearance - keyboardHeight - 6.dp)
+            .coerceAtLeast(todoHeaderHeight)
         if (load is LoadState.Ready) MaterialTheme(
             colorScheme = MaterialTheme.colorScheme,
             typography = SessionTypography,
@@ -256,7 +260,7 @@ internal fun SessionPage(
                     },
                     state = timelineState,
                     contentPadding = PaddingValues(
-                        top = todoClearance + 8.dp,
+                        top = contentTopInset + todoClearance + 8.dp,
                         // Keeps the last timeline item clear of the floating composer card.
                         bottom = composerClearance,
                     ),
@@ -310,7 +314,7 @@ internal fun SessionPage(
                         state = historyPullState,
                         isRefreshing = activity.history,
                         modifier = Modifier.align(Alignment.TopCenter)
-                            .offset(y = todoClearance).testTag("historyPullIndicator"),
+                            .offset(y = contentTopInset + todoClearance).testTag("historyPullIndicator"),
                         color = BrandPink,
                     )
                 }
@@ -318,9 +322,9 @@ internal fun SessionPage(
         }
         if (load is LoadState.Failed) {
             EmptyState("Could not load this session", load.message,
-                modifier = Modifier.padding(bottom = composerClearance))
+                modifier = Modifier.padding(top = contentTopInset, bottom = composerClearance))
         } else if (load == LoadState.Loading || awaitingHistory) {
-            TimelineLoadingState(Modifier.padding(bottom = composerClearance)
+            TimelineLoadingState(Modifier.padding(top = contentTopInset, bottom = composerClearance)
                 .testTag(if (load == LoadState.Loading) "sessionLoading" else "historyLoading"))
         }
         Box(
@@ -495,7 +499,7 @@ internal fun SessionPage(
             }
         }
         if (todo != null) {
-            AnimatedVisibility(todoExpanded, modifier = Modifier.align(Alignment.TopCenter),
+            AnimatedVisibility(todoExpanded, modifier = Modifier.align(Alignment.TopCenter).offset(y = todoOverlayTop),
                 enter = fadeIn(), exit = fadeOut()) {
                 Box(Modifier.fillMaxWidth().height(panelMaxHeight).testTag("todoDismissArea")
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
@@ -506,8 +510,9 @@ internal fun SessionPage(
                 FloatingTodoPanel(todo, live = host?.connected == true && session.status == SessionStatus.Running &&
                     liveTodo is SessionTodo.Snapshot,
                     expanded = todoExpanded, onExpandedChange = { todoExpanded = it },
-                    maxHeight = panelMaxHeight.coerceAtMost(maxHeight * 0.65f),
-                    modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 6.dp))
+                    maxHeight = panelMaxHeight.coerceAtMost((maxHeight - contentTopInset).coerceAtLeast(0.dp) * 0.65f),
+                    modifier = Modifier.align(Alignment.TopCenter)
+                        .padding(start = 12.dp, end = 12.dp, top = todoOverlayTop, bottom = 6.dp))
             }
         }
     }

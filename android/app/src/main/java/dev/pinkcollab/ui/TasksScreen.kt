@@ -49,6 +49,7 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -177,6 +178,7 @@ internal fun TasksScreen(
         }.collect { key -> key?.let(onSessionSelected) }
     }
 
+    val cardStripHeight = 16.dp + 48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
     Column(Modifier.fillMaxSize()) {
         TasksTopBar(
             hosts = hosts,
@@ -192,19 +194,6 @@ internal fun TasksScreen(
             openResources = openResources,
             checkForUpdates = actions.checkForUpdates,
             showVersion = actions.showVersion,
-        )
-        TasksPagerBar(
-            hosts = visibleHosts,
-            sessions = sessions,
-            currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
-            selectedSession = selectedSession,
-            showInfo = { infoTarget = it },
-            selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
-            loadMore = {
-                visibleHosts.values.filter { it.connected && it.nextSessionsCursor != null }
-                    .forEach { actions.loadMoreSessions(it.paired.host.id) }
-            },
-            hasMore = visibleHosts.values.any { it.nextSessionsCursor != null },
         )
         if (sessions.isEmpty()) {
             Box(Modifier.weight(1f)) {
@@ -228,49 +217,68 @@ internal fun TasksScreen(
                 }
             }
         } else {
-            HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.weight(1f).testTag("sessionTimelinePager"),
-                beyondViewportPageCount = 1,
-                pageSpacing = 8.dp,
-                key = { pagerKeys[it] },
-            ) { pageIndex ->
-                val session = sessions[pageIndex]
-                val key = SessionKey(session.hostId, session.id)
-                val detail = state.details[key]
-                val displayed = sessionDetailForDisplay(detail, displayCache[key])
-                val host = hosts[session.hostId]
-                if (sessionNeedsHostRecovery(displayed != null, host) && host != null) {
-                    SessionRecoveryScreen(listOf(host), actions)
-                } else {
-                    val detailState = displayed?.let { LoadState.Ready(it.detail) }
-                        ?: if (host?.connected != true) LoadState.Loading
-                        else when (val request = detailLoads[key]) {
-                            is LoadState.Failed -> request
-                            else -> LoadState.Loading
+            Box(Modifier.weight(1f)) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize().testTag("sessionTimelinePager"),
+                    beyondViewportPageCount = 1,
+                    pageSpacing = 8.dp,
+                    key = { pagerKeys[it] },
+                ) { pageIndex ->
+                    val session = sessions[pageIndex]
+                    val key = SessionKey(session.hostId, session.id)
+                    val detail = state.details[key]
+                    val displayed = sessionDetailForDisplay(detail, displayCache[key])
+                    val host = hosts[session.hostId]
+                    if (sessionNeedsHostRecovery(displayed != null, host) && host != null) {
+                        Box(Modifier.fillMaxSize().padding(top = cardStripHeight)) {
+                            SessionRecoveryScreen(listOf(host), actions)
                         }
-                    SessionPage(
-                        isActive = pageIndex == pagerState.settledPage,
-                        state = SessionPageState(
-                            detail = detailState,
-                            summary = session,
-                            host = host,
-                            draft = drafts[key] ?: SessionDraft(),
-                            selectingFiles = fileSelections[key] ?: 0,
-                            activity = sessionOperations.activity(key),
-                            sendProgress = sendProgress[key],
-                            model = modelLoads[key],
-                            usage = state.usageLoads[session.hostId],
-                            runtimeStart = state.runtimeStarts[key],
-                            historyItems = displayed?.historyItems,
-                            refreshError = if (host?.connected == true && detailLoads[key] is LoadState.Failed)
-                                "Could not refresh this conversation" else null,
-                        ),
-                        onAction = { action -> actions.session(session, action) },
-                        onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
-                        loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
-                    )
+                    } else {
+                        val detailState = displayed?.let { LoadState.Ready(it.detail) }
+                            ?: if (host?.connected != true) LoadState.Loading
+                            else when (val request = detailLoads[key]) {
+                                is LoadState.Failed -> request
+                                else -> LoadState.Loading
+                            }
+                        SessionPage(
+                            isActive = pageIndex == pagerState.settledPage,
+                            contentTopInset = cardStripHeight,
+                            state = SessionPageState(
+                                detail = detailState,
+                                summary = session,
+                                host = host,
+                                draft = drafts[key] ?: SessionDraft(),
+                                selectingFiles = fileSelections[key] ?: 0,
+                                activity = sessionOperations.activity(key),
+                                sendProgress = sendProgress[key],
+                                model = modelLoads[key],
+                                usage = state.usageLoads[session.hostId],
+                                runtimeStart = state.runtimeStarts[key],
+                                historyItems = displayed?.historyItems,
+                                refreshError = if (host?.connected == true && detailLoads[key] is LoadState.Failed)
+                                    "Could not refresh this conversation" else null,
+                            ),
+                            onAction = { action -> actions.session(session, action) },
+                            onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
+                            loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
+                        )
+                    }
                 }
+                TasksPagerBar(
+                    hosts = visibleHosts,
+                    sessions = sessions,
+                    currentPage = pagerState.currentPage.coerceIn(0, sessions.lastIndex.coerceAtLeast(0)),
+                    selectedSession = selectedSession,
+                    showInfo = { infoTarget = it },
+                    selectPage = { page -> scope.launch { pagerState.scrollToPage(page) } },
+                    loadMore = {
+                        visibleHosts.values.filter { it.connected && it.nextSessionsCursor != null }
+                            .forEach { actions.loadMoreSessions(it.paired.host.id) }
+                    },
+                    hasMore = visibleHosts.values.any { it.nextSessionsCursor != null },
+                    height = cardStripHeight,
+                )
             }
         }
     }
@@ -688,6 +696,7 @@ private fun TasksPagerBar(
     selectPage: (Int) -> Unit,
     loadMore: () -> Unit,
     hasMore: Boolean,
+    height: Dp,
 ) {
     if (sessions.isEmpty()) return
     val listState = rememberLazyListState()
@@ -699,17 +708,31 @@ private fun TasksPagerBar(
     }
     val cardWidth = 168.dp
     val startPadding = 12.dp
-    val stripHeight = 16.dp + 48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
     val selectedCardFill = remember {
         Brush.linearGradient(listOf(lerp(Base1, BrandPurple, 0.46f), lerp(Base1, BrandPurple, 0.30f)))
     }
 
+    val backgroundHeight = height + 8.dp
+    val solidStop = (height / 2) / backgroundHeight
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
-            .height(stripHeight)
+            .height(height)
             .zIndex(1f),
     ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                .height(backgroundHeight)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Base0,
+                        solidStop to Base0,
+                        1f to Color.Transparent,
+                    ),
+                ),
+        )
         val centerOffset = ((maxWidth - cardWidth) / 2).coerceAtLeast(0.dp)
         val scrollOffsetPx = with(LocalDensity.current) { (startPadding - centerOffset).roundToPx() }
         LaunchedEffect(currentPage, sessionKeys, scrollOffsetPx) {
@@ -718,7 +741,7 @@ private fun TasksPagerBar(
         }
         LazyRow(
             state = listState,
-            modifier = Modifier.matchParentSize().background(Base0.copy(alpha = 0.90f)).testTag("sessionCards"),
+            modifier = Modifier.matchParentSize().testTag("sessionCards"),
             contentPadding = PaddingValues(start = startPadding, end = centerOffset.coerceAtLeast(startPadding), top = 5.dp, bottom = 5.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -734,6 +757,8 @@ private fun TasksPagerBar(
                     else -> if (selected) TextMid else Gray400
                 }
                 val fileName = session.cwd.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { session.cwd }
+                val hostName = hosts[session.hostId]?.paired?.displayName?.trim()?.ifEmpty { null } ?: session.hostId
+                val locationColor = if (selected) Purple200 else TextMid
                 val shape = RoundedCornerShape(13.dp)
                 Column(
                     Modifier
@@ -743,7 +768,7 @@ private fun TasksPagerBar(
                         .clip(shape)
                         .then(
                             if (selected) Modifier.background(selectedCardFill, shape)
-                            else Modifier.background(Color.White.copy(alpha = 0.055f), shape)
+                            else Modifier.background(lerp(Base0, Color.White, 0.055f), shape)
                         )
                         .semantics {
                             this.selected = selected
@@ -759,31 +784,43 @@ private fun TasksPagerBar(
                         .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Text(
-                        session.title,
-                        style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (selected) TextHigh else TextMid,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                        Text(
+                            session.title,
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                            color = if (selected) TextHigh else TextMid,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            cardStatus.label,
+                            Modifier.widthIn(max = 64.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp, lineHeight = 10.sp),
+                            color = cardColor,
+                            textAlign = TextAlign.End,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Spacer(Modifier.height(3.dp))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            hostName,
+                            Modifier.widthIn(max = 72.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = locationColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(" › ", style = MaterialTheme.typography.labelSmall, color = locationColor)
                         Text(
                             fileName,
                             Modifier.weight(1f),
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (selected) Purple200 else TextMid,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            cardStatus.label,
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = cardColor,
-                            textAlign = TextAlign.End,
+                            color = locationColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -795,18 +832,7 @@ private fun TasksPagerBar(
             }
 
         }
-        Box(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = 12.dp)
-                .fillMaxWidth()
-                .height(12.dp)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Black.copy(alpha = 0.46f), Color.Transparent),
-                    ),
-                ),
-        )
+
     }
 }
 

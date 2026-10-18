@@ -76,8 +76,8 @@ internal val ComposerContentInset = 14.dp
 
 private val ComposerRailMinWidth = 52.dp
 
-/** Each rail action keeps a 48 dp touch target even when the composer card is short. */
-private val ComposerRailActionMinHeight = 48.dp
+/** Compact rail surfaces; Compose expands clickable touch bounds to the minimum target. */
+private val ComposerRailActionMinHeight = 44.dp
 
 
 /** Stop aborts the turn; End opens confirmation before stopping the runtime. */
@@ -139,7 +139,7 @@ private fun ComposerRailButton(
             .clip(shape)
             .background(background)
             .clickable(enabled = enabled, role = Role.Button, onClick = rememberHapticOnClick(onClick))
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(

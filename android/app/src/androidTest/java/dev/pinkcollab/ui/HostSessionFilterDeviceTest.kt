@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -94,7 +95,7 @@ class HostSessionFilterDeviceTest {
 
         compose.waitForIdle()
         assertEquals(SessionKey("desk", "desk-session"), selected)
-        compose.onNodeWithText("Desk").assertIsDisplayed()
+        compose.onNodeWithTag("hostFilter").assertIsDisplayed().assertTextEquals("Desk")
         compose.onNodeWithTag("sessionCard:desk-session").assertIsDisplayed()
         compose.onAllNodesWithTag("sessionCard:office-session").assertCountEquals(0)
 

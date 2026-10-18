@@ -65,7 +65,7 @@ Tasks has one route-owned session-focus collector, active only while the app lif
 
 Startup navigation waits for the task list to become ready or unavailable, without a fixed navigation timeout. Before the first usable host snapshot, connecting or synchronizing hosts remain on the animated startup screen and report progress at its bottom instead of switching to a second “Syncing sessions” page. Offline, authentication-required, and upgrade-required hosts make the list unavailable once no initial synchronization remains pending, releasing startup into the existing recovery interface. An empty synchronized snapshot and an unpaired app also release startup. This gate runs only once per app composition; a later explicit reconnect uses the normal task-list recovery flow. Previously synchronized session lists remain available across disconnects.
 
-Each compact session card displays the session title on its first line and the final component of its workspace path alongside the current status on its second line. Host names and position counters are not shown in the cards.
+Each compact session card displays the session title on the first line, with the status in 8sp type at the top-right. The second line prefixes the phone host name to the final component of the workspace path. Position counters are not shown.
 
 The model picker keeps an unset thinking level distinct from the first supported level. Until a supported level is selected, it offers explicit level buttons, including the first level; afterward, multi-level models use a slider with the model's supported-level indices. Apply sends only the user's selected changes.
 

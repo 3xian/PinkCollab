@@ -268,7 +268,7 @@ private fun MessageTime(label: String, modifier: Modifier = Modifier) {
         maxLines = 1,
         style = MaterialTheme.typography.labelSmall,
         fontFamily = FontFamily.Default,
-        color = TextMid,
+        color = Gray400,
     )
 }
 

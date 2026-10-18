@@ -415,7 +415,7 @@ class TasksPagerBarDeviceTest {
         compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
     }
 
-    @Test fun long_status_keeps_workspace_visible_at_large_font_scale() {
+    @Test fun long_status_stays_in_the_corner_without_covering_the_project() {
         val session = sessions.first().copy(cwd = "/work/project")
         val host = HostState(PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
             connection = ConnectionState.UpgradeRequired, sessions = listOf(session))
@@ -433,14 +433,27 @@ class TasksPagerBarDeviceTest {
             }
         }
         compose.waitForIdle()
-        val card = hasAnyAncestor(hasTestTag("sessionCard:${session.id}"))
-        val workspace = compose.onNode(hasText("project") and card, useUnmergedTree = true)
-        val status = compose.onNode(hasText(SessionCardStatus.UpdateRequired.label) and card, useUnmergedTree = true)
+        val cardMatcher = hasAnyAncestor(hasTestTag("sessionCard:${session.id}"))
+        val cardBounds = compose.onNodeWithTag("sessionCard:${session.id}").fetchSemanticsNode().boundsInRoot
+        val title = compose.onNode(hasText("Session 0") and cardMatcher, useUnmergedTree = true)
+        val hostLabel = compose.onNode(hasText("Desktop") and cardMatcher, useUnmergedTree = true)
+        val workspace = compose.onNode(hasText("project") and cardMatcher, useUnmergedTree = true)
+        val status = compose.onNode(hasText(SessionCardStatus.UpdateRequired.label) and cardMatcher, useUnmergedTree = true)
+        title.assertIsDisplayed()
+        hostLabel.assertIsDisplayed()
         workspace.assertIsDisplayed()
         status.assertIsDisplayed()
+        val titleBounds = title.fetchSemanticsNode().boundsInRoot
+        val hostBounds = hostLabel.fetchSemanticsNode().boundsInRoot
         val workspaceBounds = workspace.fetchSemanticsNode().boundsInRoot
         val statusBounds = status.fetchSemanticsNode().boundsInRoot
-        assertTrue("Workspace and status must have separate visible space", workspaceBounds.right < statusBounds.left)
+        assertTrue(hostBounds.right <= workspaceBounds.left)
+        assertTrue(titleBounds.width > 8f)
+        assertTrue(titleBounds.right <= statusBounds.left + 1f)
+        assertTrue(statusBounds.top <= titleBounds.top + 1f)
+        assertTrue(statusBounds.bottom <= workspaceBounds.top + 1f)
+        assertTrue(statusBounds.left > cardBounds.center.x)
+        assertTrue(cardBounds.right - statusBounds.right <= 12f * compose.density.density)
     }
 
     private fun assertCentered(id: String) {

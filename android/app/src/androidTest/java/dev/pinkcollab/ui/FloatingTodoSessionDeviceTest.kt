@@ -16,6 +16,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -96,6 +97,31 @@ class FloatingTodoSessionDeviceTest {
         compose.runOnIdle { detail.value = detail.value.copy(session = session.copy(id = "other"), liveItems = listOf(message(21))) }
         compose.mainClock.advanceTimeBy(500)
         compose.onNodeWithTag("floatingTodoPanel").assertDoesNotExist()
+    }
+
+    @Test fun expandedPlanStaysAboveComposerWithCardStripInsetInShortViewport() {
+        val plan = TimelineItem("plan", "tool", "Finished · todo", "", "",
+            ToolTrace("plan", "todo", ToolArguments(), "", false, true,
+                listOf(TodoPhase("Build", (1..30).map {
+                    TodoTask("Task $it", if (it == 1) TodoStatus.Active else TodoStatus.Pending)
+                }))))
+        val detail = SessionDetail(session, snapshotToken = "sub", liveItems = listOf(plan))
+        compose.mainClock.autoAdvance = false
+        compose.setContent { PinkCollabTheme {
+            Box(Modifier.fillMaxWidth().height(500.dp)) {
+                SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
+                    SessionActivity(), null, null), {}, { true }, contentTopInset = 64.dp)
+            }
+        } }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithTag("todoHeader").performClick()
+        compose.mainClock.advanceTimeBy(1_000)
+        val panel = compose.onNodeWithTag("floatingTodoPanel").fetchSemanticsNode().boundsInRoot
+        val composer = compose.onNodeWithTag("sessionComposer").fetchSemanticsNode().boundsInRoot
+        assertTrue("Expanded plan $panel must stop above composer $composer", panel.bottom < composer.top)
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithText("Task 30").performScrollTo().assertIsDisplayed()
+        saveScreenshot("todo-short-viewport-card-inset.png")
     }
 
     @Test fun clearedLiveSnapshotRemovesPinnedPlan() {
