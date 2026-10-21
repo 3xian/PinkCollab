@@ -237,6 +237,7 @@ mod tests {
                     title: "a".into(),
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
+                    last_activity_at: chrono::Utc::now(),
                 },
             },
         });

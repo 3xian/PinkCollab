@@ -75,17 +75,17 @@ internal class HostOperations(
         emit(UiEffect.HostPaired(attemptId))
     }
 
-    fun refresh(hostId: String, isOnline: Boolean): Job? = run(OperationKey.Host(hostId)) {
-        if (isOnline) actions.refreshHost(hostId) else actions.reconnect(hostId)
+    fun refresh(hostId: String): Job? = run(OperationKey.Host(hostId)) {
+        actions.refreshHost(hostId)
     }
 
-    fun refreshHosts(hosts: Map<String, Boolean>) {
+    fun refreshHosts(hosts: Set<String>) {
         val batch = synchronized(lock) {
             if (hosts.isEmpty() || mutableRefreshBatch.value?.finished == false) return
             HostRefreshBatch(++nextRefreshBatch, hosts.size).also { mutableRefreshBatch.value = it }
         }
-        hosts.forEach { (id, online) ->
-            val request = refresh(id, online)
+        hosts.forEach { id ->
+            val request = refresh(id)
             scope.launch {
                 if (request != null) request.join()
                 else operations.first { OperationKey.Host(id) !in it }

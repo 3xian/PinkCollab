@@ -86,23 +86,29 @@ impl Store {
         &self,
         sources: Vec<crate::discovery::OmpDiscoveredSession>,
     ) -> Result<Vec<crate::discovery::OmpDiscoveredSession>> {
-        let db = self.db.lock();
-        let mut query = db.prepare(
-            "SELECT EXISTS(SELECT 1 FROM session_records WHERE id=?1)
-            OR EXISTS(SELECT 1 FROM engine_references WHERE reference_key=?2)",
-        )?;
-        let mut result = Vec::new();
-        for source in sources {
-            let mapped: bool = query
-                .query_row(params![source.id, canonical_key(&source.path)], |r| {
-                    r.get(0)
-                })?;
-            if !mapped {
-                result.push(source);
-            }
-        }
-        Ok(result)
+        unmanaged_sources(&self.db.lock(), sources)
     }
+}
+
+pub(super) fn unmanaged_sources(
+    db: &Connection,
+    sources: Vec<crate::discovery::OmpDiscoveredSession>,
+) -> Result<Vec<crate::discovery::OmpDiscoveredSession>> {
+    let mut query = db.prepare(
+        "SELECT EXISTS(SELECT 1 FROM session_records WHERE id=?1)
+         OR EXISTS(SELECT 1 FROM engine_references WHERE reference_key=?2)",
+    )?;
+    let mut result = Vec::new();
+    for source in sources {
+        let mapped: bool = query
+            .query_row(params![source.id, canonical_key(&source.path)], |r| {
+                r.get(0)
+            })?;
+        if !mapped {
+            result.push(source);
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -117,6 +123,7 @@ mod tests {
             metadata_revision: 1,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            last_activity_at: Utc::now(),
             archived_at: None,
             engine_session_ref: None,
         }

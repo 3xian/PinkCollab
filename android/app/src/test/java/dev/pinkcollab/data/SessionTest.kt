@@ -43,6 +43,17 @@ class SessionTest {
         assertEquals(null, record.session().tokensPerSecond)
     }
 
+    @Test fun `activity parses independently with a legacy fallback`() {
+        val record = JSONObject("""{"id":"s","hostId":"h","cwd":"/w","title":"Work","createdAt":"created","updatedAt":"metadata"}""")
+        assertEquals("metadata", record.session().lastActivityAt)
+        record.put("lastActivityAt", "chat")
+        assertEquals("chat", record.session().lastActivityAt)
+        assertEquals("metadata", record.session().updatedAt)
+        assertEquals("created", record.session().createdAt)
+        record.put("lastActivityAt", JSONObject.NULL)
+        assertEquals("metadata", record.session().lastActivityAt)
+    }
+
     private fun session(status: SessionStatus, runtimeAttached: Boolean) = Session(
         id = "session",
         hostId = "host",

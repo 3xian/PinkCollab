@@ -1,5 +1,5 @@
 //! Ordered v4 streaming, replay and independent scope recovery.
-use super::{ApiHistoryQuery, App, credential, read_history, snapshot};
+use super::{ApiHistoryQuery, App, capture_snapshot, credential, read_history, snapshot};
 use crate::{
     events::Event,
     protocol::{GATEWAY_PROTOCOL_VERSION, ServerEvent},
@@ -66,6 +66,7 @@ pub(super) struct StreamResume {
     catalog: Option<String>,
     epoch: Option<String>,
     sequence: Option<u64>,
+    refresh: Option<u8>,
 }
 
 async fn send_event(
@@ -77,6 +78,9 @@ async fn send_event(
     subscribed: bool,
     gzip: bool,
 ) -> bool {
+    if let ServerEvent::HostSnapshot { catalog, .. } = event {
+        wire.seed_catalog(catalog.clone());
+    }
     let Ok(value) = serde_json::to_value(event) else {
         return false;
     };
@@ -95,15 +99,21 @@ async fn events(socket: WebSocket, app: App, token: String, gzip: bool, resume: 
     let mut wire = crate::wire::WireState::default();
     wire.focus = resume.focus;
     let mut host_fence = resume.sequence.unwrap_or(0);
-    let replay = if resume.epoch.as_deref() == Some(app.bus.epoch.as_str()) {
-        let Ok(catalog) = app.sessions.list().await else {
+    let force_refresh = resume.refresh == Some(1);
+    if force_refresh && app.sessions.refresh_discovery().await.is_err() {
+        return;
+    }
+    let replay = if !force_refresh && resume.epoch.as_deref() == Some(app.bus.epoch.as_str()) {
+        let before = app.bus.sequence(None);
+        let Ok(catalog) = app.sessions.catalog_ledger().await else {
             return;
         };
-        wire.seed_catalog(catalog.into_iter().map(|s| s.session));
-        if resume
-            .catalog
-            .as_ref()
-            .is_none_or(|version| *version == wire.catalog_version())
+        wire.seed_catalog(catalog);
+        if before == app.bus.sequence(None)
+            && resume
+                .catalog
+                .as_ref()
+                .is_none_or(|version| *version == wire.catalog_version())
         {
             app.bus.replay(&app.bus.epoch, host_fence, None)
         } else {
@@ -123,7 +133,8 @@ async fn events(socket: WebSocket, app: App, token: String, gzip: bool, resume: 
         }
         if !send_value(&mut tx,&json!({"type":"host_sync","protocolVersion":GATEWAY_PROTOCOL_VERSION,"epoch":app.bus.epoch,"sequence":host_fence,"totalSessions":wire.catalog_count(),"catalogVersion":wire.catalog_version()}),gzip).await {return;}
     } else {
-        let Some((fence, initial)) = snapshot(&app, None).await else {
+        let Some((fence, initial)) = capture_snapshot(&app, None, wire.focus.as_deref()).await
+        else {
             return;
         };
         host_fence = fence;
@@ -145,7 +156,7 @@ async fn events(socket: WebSocket, app: App, token: String, gzip: bool, resume: 
                         let mut failed=false;
                         for (scope,fence) in scopes {
                             if let Some(events)=app.bus.replay(&app.bus.epoch,fence,scope.as_deref()) {recovered.extend(events);}
-                            else if let Some((new_fence,value))=snapshot(&app,scope.as_deref()).await {
+                            else if let Some((new_fence,value))=capture_snapshot(&app,scope.as_deref(),wire.focus.as_deref()).await {
                                 if !send_event(&mut tx,&value,new_fence,&app,&mut wire,scope.is_some(),gzip).await {failed=true;break;}
                                 if let Some(id)=scope {sessions.insert(id,new_fence);} else {host_fence=new_fence;}
                             } else {failed=true;break;}

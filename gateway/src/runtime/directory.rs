@@ -76,7 +76,7 @@ impl SessionDirectory {
         controllers.insert(id.into(), Arc::downgrade(&controller));
         Ok(Some(controller))
     }
-    async fn active_controller(&self, id: &str) -> Option<Arc<SessionController>> {
+    pub(super) async fn active_controller(&self, id: &str) -> Option<Arc<SessionController>> {
         let mut controllers = self.controllers.lock().await;
         let controller = controllers.get(id).and_then(std::sync::Weak::upgrade);
         if controller.is_none() {
@@ -247,10 +247,17 @@ impl SessionDirectory {
             .find(|tool| tool.call_id == call_id)
             .cloned()
     }
-    async fn discoveries(&self) -> Result<Vec<crate::discovery::OmpDiscoveredSession>> {
+    pub(super) async fn discoveries(&self) -> Result<Vec<crate::discovery::OmpDiscoveredSession>> {
         let mut discovery = self.discovery.clone().lock_owned().await;
         let browser = self.browser.clone();
         Ok(tokio::task::spawn_blocking(move || discovery.list(&browser)).await?)
+    }
+    pub async fn refresh_discovery(&self) -> Result<()> {
+        let requested = std::time::Instant::now();
+        let mut discovery = self.discovery.clone().lock_owned().await;
+        let browser = self.browser.clone();
+        tokio::task::spawn_blocking(move || discovery.refresh_since(requested, &browser)).await?;
+        Ok(())
     }
     async fn adopt(&self, id: &str) -> Result<()> {
         // A retry must not mistake the first request's new runtime for an external writer.
@@ -282,86 +289,24 @@ impl SessionDirectory {
         Ok(())
     }
     pub async fn list(&self) -> Result<Vec<SessionSummary>> {
-        Ok(self.catalog(None, None).await?.0)
-    }
-    pub async fn list_page(
-        &self,
-        after: Option<(&str, &str)>,
-        limit: usize,
-    ) -> Result<(Vec<SessionSummary>, bool)> {
-        self.catalog(
-            after.map(|(stamp, id)| (stamp.to_owned(), id.to_owned())),
-            Some(limit),
-        )
-        .await
-    }
-    async fn catalog(
-        &self,
-        after: Option<(String, String)>,
-        limit: Option<usize>,
-    ) -> Result<(Vec<SessionSummary>, bool)> {
-        use crate::protocol::SessionOrigin;
         let sources = self.discoveries().await?;
-        let (managed, discovered, managed_more) = self
+        let (managed, discovered) = self
             .store
             .run(move |store| {
                 let sources = store.unmanaged_sources(sources)?;
-                let cursor = after
-                    .as_ref()
-                    .map(|(stamp, id)| (stamp.as_str(), id.as_str()));
-                let (managed, more) = match limit {
-                    Some(limit) => store.v2_sessions_page(cursor, limit)?,
-                    None => (store.v2_sessions()?, false),
-                };
                 let host = store.host_id()?;
-                let discovered = sources
-                    .into_iter()
-                    .filter(|s| {
-                        cursor.is_none_or(|(stamp, id)| {
-                            let created = s.created_at.to_rfc3339();
-                            created.as_str() < stamp || (created == stamp && s.id.as_str() < id)
-                        })
-                    })
-                    .map(|s| s.record(host.clone()))
-                    .collect::<Vec<_>>();
-                Ok((managed, discovered, more))
+                Ok((
+                    store.v2_sessions()?,
+                    sources
+                        .into_iter()
+                        .map(|s| s.record(host.clone()))
+                        .collect(),
+                ))
             })
             .await?;
-        let ids: HashSet<_> = managed.iter().map(|s| s.id.clone()).collect();
-        let mut records: Vec<_> = discovered
-            .into_iter()
-            .filter(|s| !ids.contains(&s.id))
-            .map(|s| (s, SessionOrigin::Discovered))
-            .chain(managed.into_iter().map(|s| (s, SessionOrigin::Managed)))
-            .collect();
-        records.sort_by(|(a, _), (b, _)| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| b.id.cmp(&a.id))
-        });
-        let has_more = managed_more || limit.is_some_and(|limit| records.len() > limit);
-        if let Some(limit) = limit {
-            records.truncate(limit);
-        }
-        let mut result = Vec::with_capacity(records.len());
-        for (session, origin) in records {
-            if let Some(controller) = self.active_controller(&session.id).await {
-                let mut state = controller.state.lock().await;
-                result.push(SessionSummary {
-                    session: SessionDto::from(&state.session),
-                    runtime: state.capture_runtime().as_ref().map(RuntimeDto::from),
-                });
-            } else {
-                result.push(SessionSummary {
-                    session: SessionDto {
-                        origin,
-                        ..SessionDto::from(&session)
-                    },
-                    runtime: None,
-                });
-            }
-        }
-        Ok((result, has_more))
+        let (records, _) =
+            super::catalog::creation_page(managed, discovered, None, usize::MAX, false);
+        Ok(self.summarize(records).await)
     }
     pub async fn publish_created(&self, session: &SessionRecord) {
         // A snapshot may expose the committed row before the create request publishes it.

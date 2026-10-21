@@ -37,10 +37,13 @@ internal fun <T> Flow<T>.batchLatestPresentation(intervalMillis: Long = 75): Flo
     }
 }
 
-internal fun compareSessionsForPresentation(a: Session, b: Session): Int = when {
-    a.isActive != b.isActive -> if (a.isActive) -1 else 1
-    a.isActive -> compareTimestamps(b.createdAt, a.createdAt)
-    else -> compareTimestamps(b.updatedAt, a.updatedAt)
+internal fun compareSessionsForPresentation(a: Session, b: Session): Int {
+    val order = when {
+        a.isActive != b.isActive -> if (a.isActive) -1 else 1
+        a.isActive -> compareTimestamps(b.createdAt, a.createdAt)
+        else -> compareTimestamps(b.lastActivityAt, a.lastActivityAt)
+    }
+    return order.takeIf { it != 0 } ?: a.hostId.compareTo(b.hostId).takeIf { it != 0 } ?: a.id.compareTo(b.id)
 }
 
 internal const val AllHostsFilterLabel = "All hosts"

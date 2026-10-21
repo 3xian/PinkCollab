@@ -195,6 +195,8 @@ pub struct SessionDirectory {
     args: Vec<String>,
 }
 
+mod catalog;
+pub use catalog::SessionCatalogPage;
 mod directory;
 mod response;
 mod settings;
@@ -435,6 +437,9 @@ impl SessionController {
                     .await;
                 match response {
                     Ok(response) => {
+                        if let Err(err) = self.record_activity(&generation).await {
+                            eprintln!("Could not persist prompt activity: {err}");
+                        }
                         if let Err(err) = self.update_prompt_title(&generation, &message).await {
                             eprintln!("Could not persist latest prompt title: {err}");
                         }

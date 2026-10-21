@@ -48,7 +48,7 @@ enum class SessionStatus { Starting, Running, NeedsInput, Stopping, Idle }
 
 enum class SessionOrigin { Managed, Discovered }
 
-data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val generation: String? = null, val workTiming: WorkTiming? = null, val origin: SessionOrigin = SessionOrigin.Managed, val tokensPerSecond: Double? = null) {
+data class Session(val id: String, val hostId: String, val cwd: String, val title: String, val status: SessionStatus, val activity: String, val needsAttention: Boolean, val attention: Attention?, val createdAt: String, val updatedAt: String, val runtimeAttached: Boolean, val generation: String? = null, val workTiming: WorkTiming? = null, val origin: SessionOrigin = SessionOrigin.Managed, val tokensPerSecond: Double? = null, val lastActivityAt: String = updatedAt) {
     /** A session is active while its OMP runtime is live, including the startup hand-off. */
     val isActive: Boolean get() = status == SessionStatus.Starting || runtimeAttached
 }
@@ -200,6 +200,10 @@ data class HostState(
     val totalSessions: Int? = null,
     val catalogVersion: String? = null,
     val nextSessionsCursor: String? = null,
+    /** Only pages read under this epoch/catalog may survive an identical snapshot. */
+    val pagedSessionIds: Set<String> = emptySet(),
+    val pagesCatalogVersion: String? = null,
+    val removedSessionIds: Set<String> = emptySet(),
 ) {
     val connected: Boolean get() = connection is ConnectionState.Online
 
@@ -274,7 +278,8 @@ fun JSONObject.session(runtime: JSONObject? = null): Session {
             "managed" -> SessionOrigin.Managed
             "discovered" -> SessionOrigin.Discovered
             else -> error("Unsupported session origin")
-        }, runtime?.optDouble("tokensPerSecond")?.takeIf { it.isFinite() && it >= 0.0 })
+        }, runtime?.optDouble("tokensPerSecond")?.takeIf { it.isFinite() && it >= 0.0 },
+        optString("lastActivityAt").takeIf { it.isNotBlank() && it != "null" } ?: getString("updatedAt"))
 }
 fun JSONObject.sessionSummary(): Session = getJSONObject("session").session(optJSONObject("runtime"))
 fun JSONObject.receipt() = OperationReceipt(getString("id"), OperationStatus.fromWire(getString("state")), getString("kind"),

@@ -11,4 +11,4 @@ internal fun readTodoPlans(value: JSONObject, previous: Map<String, List<TodoPha
 }
 
 internal fun Session.wireRecord() = JSONObject().put("id", id).put("hostId", hostId).put("cwd", cwd).put("title", title)
-    .put("createdAt", createdAt).put("updatedAt", updatedAt).put("origin", if(origin == SessionOrigin.Discovered) "discovered" else "managed")
+    .put("lastActivityAt", lastActivityAt).put("createdAt", createdAt).put("updatedAt", updatedAt).put("origin", if(origin == SessionOrigin.Discovered) "discovered" else "managed")

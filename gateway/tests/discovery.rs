@@ -74,10 +74,12 @@ async fn mixed_keyset_pages_survive_adoption_between_requests() {
     let mut cursor: Option<(String, String)> = None;
     let mut seen = Vec::new();
     loop {
-        let (page, more) = directory
+        let page = directory
             .list_page(cursor.as_ref().map(|(t, id)| (t.as_str(), id.as_str())), 2)
             .await
             .unwrap();
+        let more = page.has_more;
+        let page = page.sessions;
         assert!(page.len() <= 2);
         if let Some(last) = page.last() {
             cursor = Some((

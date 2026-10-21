@@ -1,15 +1,54 @@
 //! Connection-local projection: compact list state and shared Todo payloads.
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
+/// Order-independent metadata ledger. Updating a row removes its old SHA-256
+/// contribution and adds its new one, avoiding a full sort/hash for runtime events.
+#[derive(Clone, Debug, Default)]
+pub struct Catalog {
+    entries: Arc<HashMap<String, [u8; 32]>>,
+    digest: [u8; 32],
+}
+impl Catalog {
+    fn xor(&mut self, hash: [u8; 32]) {
+        for (target, byte) in self.digest.iter_mut().zip(hash) {
+            *target ^= byte;
+        }
+    }
+    pub fn insert(&mut self, session: &Value) {
+        let id = session["id"].as_str().expect("typed session identity");
+        let hash: [u8; 32] = Sha256::digest(serde_json::to_vec(session).unwrap()).into();
+        if self.entries.get(id) == Some(&hash) {
+            return;
+        }
+        if let Some(old) = Arc::make_mut(&mut self.entries).insert(id.into(), hash) {
+            self.xor(old);
+        }
+        self.xor(hash);
+    }
+    pub fn remove(&mut self, id: &str) {
+        if let Some(old) = Arc::make_mut(&mut self.entries).remove(id) {
+            self.xor(old);
+        }
+    }
+    pub fn count(&self) -> usize {
+        self.entries.len()
+    }
+    pub fn version(&self) -> String {
+        format!("{}-{}", self.count(), hex::encode(self.digest))
+    }
+}
 
 #[derive(Default)]
 pub struct WireState {
     metadata: HashMap<String, Value>,
     todos: HashSet<String>,
     pub focus: Option<String>,
-    catalog: HashMap<String, String>,
-    catalog_version: String,
+    catalog: Catalog,
 }
 
 pub fn compact_runtime(runtime: &mut Value) {
@@ -24,29 +63,14 @@ pub fn compact_runtime(runtime: &mut Value) {
 }
 
 impl WireState {
-    pub fn catalog_version(&self) -> &str {
-        &self.catalog_version
-    }
-    fn refresh_catalog_version(&mut self) {
-        let mut records: Vec<_> = self.catalog.iter().collect();
-        records.sort_unstable_by_key(|(id, _)| *id);
-        self.catalog_version = hex::encode(Sha256::digest(serde_json::to_vec(&records).unwrap()));
+    pub fn catalog_version(&self) -> String {
+        self.catalog.version()
     }
     pub fn catalog_count(&self) -> usize {
-        self.catalog.len()
+        self.catalog.count()
     }
-    pub fn seed_catalog(&mut self, records: impl Iterator<Item = crate::protocol::SessionDto>) {
-        self.catalog = records
-            .map(|session| {
-                (
-                    session.id.clone(),
-                    hex::encode(Sha256::digest(
-                        serde_json::to_vec(&serde_json::to_value(&session).unwrap()).unwrap(),
-                    )),
-                )
-            })
-            .collect();
-        self.refresh_catalog_version();
+    pub fn seed_catalog(&mut self, catalog: Catalog) {
+        self.catalog = catalog;
     }
     pub fn project(
         &mut self,
@@ -60,55 +84,21 @@ impl WireState {
         if value["type"] == "host_snapshot" {
             self.metadata.clear();
             let sessions = value["sessions"].as_array_mut().unwrap();
-            self.catalog = sessions
-                .iter()
-                .map(|summary| {
-                    (
-                        summary["session"]["id"].as_str().unwrap().to_owned(),
-                        hex::encode(Sha256::digest(
-                            serde_json::to_vec(&summary["session"]).unwrap(),
-                        )),
-                    )
-                })
-                .collect();
-            self.refresh_catalog_version();
-            let next = (sessions.len() > 50).then(|| hex::encode(serde_json::to_vec(&json!({
-                "created_at":chrono::DateTime::parse_from_rfc3339(sessions[49]["session"]["createdAt"].as_str().unwrap()).unwrap().to_rfc3339(), "id":sessions[49]["session"]["id"]
-            })).unwrap()));
-            let mut index = 0;
-            sessions.retain(|summary| {
-                let keep = index < 50
-                    || !summary["runtime"].is_null()
-                    || summary["session"]["id"].as_str() == self.focus.as_deref();
-                index += 1;
-                keep
-            });
             for summary in sessions {
                 if let Some(id) = summary["session"]["id"].as_str() {
                     self.metadata.insert(id.into(), summary["session"].clone());
                 }
                 compact_runtime(&mut summary["runtime"]);
             }
-            value["totalSessions"] = json!(self.catalog.len());
-            value["nextSessionsCursor"] = json!(next);
+            value["totalSessions"] = json!(self.catalog.count());
         } else if value["type"] == "session_state" || value["type"] == "session_upsert" {
             if !subscribed {
                 compact_runtime(&mut value["runtime"]);
             }
             if let Some(id) = value["sessionId"].as_str().map(str::to_owned) {
                 let session = value["session"].clone();
-                let fingerprint = hex::encode(Sha256::digest(
-                    serde_json::to_vec(&serde_json::to_value(&session).unwrap()).unwrap(),
-                ));
-                if self
-                    .catalog
-                    .insert(id.clone(), fingerprint.clone())
-                    .as_ref()
-                    != Some(&fingerprint)
-                {
-                    self.refresh_catalog_version();
-                }
-                value["totalSessions"] = json!(self.catalog.len());
+                self.catalog.insert(&session);
+                value["totalSessions"] = json!(self.catalog.count());
                 if value["type"] == "session_state" && self.metadata.get(&id) == Some(&session) {
                     value.as_object_mut().unwrap().remove("session");
                     value["type"] = json!("runtime_state");
@@ -121,9 +111,8 @@ impl WireState {
             if let Some(id) = value["sessionId"].as_str() {
                 self.catalog.remove(id);
                 self.metadata.remove(id);
-                self.refresh_catalog_version();
             }
-            value["totalSessions"] = json!(self.catalog.len());
+            value["totalSessions"] = json!(self.catalog.count());
         }
         if matches!(
             value["type"].as_str(),
@@ -234,31 +223,51 @@ mod tests {
     }
 
     #[test]
-    fn large_catalog_bootstrap_keeps_focus_active_and_a_stable_next_page() {
-        let sessions: Vec<_> = (0..1000).map(|i| json!({"session":{"id":format!("s{i}"),"createdAt":"2026-01-01T00:00:00Z"},"runtime":if i==900 {json!({"pendingInputs":[{"body":"private"}],"model":{"large":"data"}})} else {Value::Null}})).collect();
-        let full = json!({"type":"host_snapshot","sessions":sessions});
-        let mut wire = WireState {
-            focus: Some("s800".into()),
-            ..Default::default()
-        };
-        let small = wire.project(full.clone(), false, "epoch", 0);
+    fn bounded_snapshot_keeps_supplied_cursor_and_complete_ledger() {
+        let sessions: Vec<_> = (0..1000).map(|i| json!({"session":{"id":format!("s{i}"),"createdAt":"2026-01-01T00:00:00Z"},"runtime":null})).collect();
+        let mut catalog = Catalog::default();
+        for summary in &sessions {
+            catalog.insert(&summary["session"]);
+        }
+        let initial_version = catalog.version();
+        let mut wire = WireState::default();
+        wire.seed_catalog(catalog.clone());
+        let selected: Vec<_> = sessions
+            .iter()
+            .take(50)
+            .cloned()
+            .chain([sessions[800].clone(), sessions[900].clone()])
+            .collect();
+        let small = wire.project(
+            json!({"type":"host_snapshot","sessions":selected,"nextSessionsCursor":"base-cursor"}),
+            false,
+            "epoch",
+            0,
+        );
         assert_eq!(small["totalSessions"], 1000);
         assert_eq!(small["sessions"].as_array().unwrap().len(), 52);
-        let active = &small["sessions"][51]["runtime"];
-        assert_eq!(active["pendingInputCount"], 1);
-        assert!(active.get("pendingInputs").is_none());
-        let cursor: Value = serde_json::from_slice(
-            &hex::decode(small["nextSessionsCursor"].as_str().unwrap()).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(cursor["id"], "s49");
-        assert!(
-            serde_json::to_vec(&small).unwrap().len() * 10
-                < serde_json::to_vec(&full).unwrap().len()
-        );
-        let runtime = wire.project(json!({"type":"session_state","sessionId":"s0","session":full["sessions"][0]["session"],"runtime":{"state":"running","pendingInputs":[]}}),false,"epoch",1);
+        assert_eq!(small["nextSessionsCursor"], "base-cursor");
+        let runtime = wire.project(json!({"type":"session_state","sessionId":"s0","session":sessions[0]["session"],"runtime":{"state":"running","pendingInputs":[]}}),false,"epoch",1);
         assert_eq!(runtime["type"], "runtime_state");
-        assert!(runtime.get("session").is_none());
+        assert_eq!(wire.catalog_version(), initial_version);
+        let changed = json!({"id":"s900","title":"changed"});
+        wire.project(
+            json!({"type":"session_state","sessionId":"s900","session":changed,"runtime":null}),
+            false,
+            "epoch",
+            2,
+        );
+        catalog.insert(&changed);
+        assert_eq!(wire.catalog_version(), catalog.version());
+        wire.project(
+            json!({"type":"session_remove","sessionId":"s900"}),
+            false,
+            "epoch",
+            3,
+        );
+        catalog.remove("s900");
+        assert_eq!(wire.catalog_version(), catalog.version());
+        assert_eq!(wire.catalog_count(), 999);
     }
     #[test]
     fn repeated_todo_payload_is_shared_once_per_connection() {

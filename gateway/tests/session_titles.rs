@@ -41,6 +41,7 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
                 metadata_revision: 1,
                 created_at: now,
                 updated_at: now,
+                last_activity_at: now,
                 archived_at: None,
                 engine_session_ref: None,
             },
@@ -99,14 +100,21 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
     )
     .await;
     let expected = "最新消息 继续修复模型选择器";
+    let activity = store
+        .v2_session("session")
+        .unwrap()
+        .unwrap()
+        .last_activity_at;
+    assert!(activity > now);
     let revision = store
         .v2_session("session")
         .unwrap()
         .unwrap()
         .metadata_revision;
     assert_eq!(directory.list().await.unwrap()[0].session.title, expected);
-    let (page, has_more) = directory.list_page(None, 10).await.unwrap();
-    assert!(!has_more);
+    let page = directory.list_page(None, 10).await.unwrap();
+    assert!(!page.has_more);
+    let page = page.sessions;
     assert_eq!(page[0].session.title, expected);
     assert_eq!(page[0].runtime.as_ref().unwrap().generation, generation);
     // An older command replay must not restore its earlier title.
@@ -133,7 +141,7 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
         std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
             let Event::Update { event, .. } = event else { return false };
             matches!(event.as_ref(), ServerEvent::SessionState { summary, .. }
-                if summary.session.title == expected && summary.runtime.as_ref().is_some_and(|runtime| runtime.generation == generation))
+                if summary.session.title == expected && summary.session.last_activity_at > now && summary.runtime.as_ref().is_some_and(|runtime| runtime.generation == generation))
         })
     );
     submit(&directory, "stop", Command::StopRuntime { generation }).await;
@@ -155,6 +163,7 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
     );
     let view = detached.view("session").await.unwrap().unwrap();
     assert_eq!(view.session.title, expected);
+    assert_eq!(view.session.last_activity_at, activity);
     assert!(view.runtime.is_none());
     assert!(view.messages.is_empty());
     assert_eq!(view.history_ref.as_deref(), Some("omp"));
@@ -168,8 +177,9 @@ async fn latest_prompt_replaces_title_and_survives_runtime_exit() {
         serde_json::to_value(detached.list().await.unwrap()).unwrap(),
         serde_json::json!([expected_summary.clone()])
     );
-    let (page, has_more) = detached.list_page(None, 10).await.unwrap();
-    assert!(!has_more);
+    let page = detached.list_page(None, 10).await.unwrap();
+    assert!(!page.has_more);
+    let page = page.sessions;
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::json!([expected_summary])

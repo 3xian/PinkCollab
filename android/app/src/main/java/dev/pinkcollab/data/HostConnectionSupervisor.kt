@@ -33,10 +33,10 @@ internal class HostConnectionSupervisor(
     private val connections = mutableMapOf<String, HostConnection>()
     private val desiredSessions = mutableMapOf<String, MutableSet<String>>()
 
-    fun connect(paired: PairedHost): Deferred<Unit> =
+    fun connect(paired: PairedHost, refreshDiscovery: Boolean = false): Deferred<Unit> =
         synchronized(lock) {
             invalidateSubscriptions(paired.host.id)
-            val connection = HostConnection(paired)
+            val connection = HostConnection(paired, refreshDiscovery)
             connections.put(paired.host.id, connection)?.stop()
             connection.start()
             connection.settled
@@ -100,7 +100,7 @@ internal class HostConnectionSupervisor(
         desiredSessions[hostId]?.forEach { onSubscriptionEnded(hostId, it) }
     }
 
-    private inner class HostConnection(private val paired: PairedHost) {
+    private inner class HostConnection(private val paired: PairedHost, private val refreshDiscovery: Boolean) {
         private val connectionGeneration = AtomicLong()
         private var job: Job? = null
         private var socket: WebSocket? = null
@@ -187,6 +187,7 @@ internal class HostConnectionSupervisor(
                 val known = cachedHost(paired.host.id)
                 val endpoint = (paired.url + "/api/v4/events").toHttpUrl().newBuilder().apply {
                     synchronized(lock) { desiredSessions[paired.host.id]?.firstOrNull() }?.let { addQueryParameter("focus", it) }
+                    if (refreshDiscovery) addQueryParameter("refresh", "1")
                     known?.catalogVersion?.let { addQueryParameter("catalog", it) }
                     if (known?.serverEpoch != null) addQueryParameter("epoch", known.serverEpoch).addQueryParameter("sequence", known.wireSequence.toString())
                 }.build()

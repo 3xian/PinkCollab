@@ -20,10 +20,16 @@ internal class SessionCatalog(private val state: MutableStateFlow<AppState>, pri
             val loaded = page.getJSONArray("sessions").objects().map { it.sessionSummary() }
             state.update { app ->
                 val current = app.hosts[hostId] ?: return@update app
-                if (current.snapshotToken != before.snapshotToken || current.nextSessionsCursor != cursor || current.serverEpoch != page.opt("epoch")) return@update app
+                if (current.paired != before.paired || current.snapshotToken != before.snapshotToken ||
+                    current.nextSessionsCursor != cursor ||
+                    current.serverEpoch != before.serverEpoch || current.serverEpoch != page.opt("epoch")) return@update app
                 val known = current.sessions.mapTo(mutableSetOf()) { it.id }
+                val pageCatalog = (page.opt("catalogVersion") as? String)?.takeIf { it.isNotBlank() }
                 app.copy(hosts = app.hosts + (hostId to current.copy(
-                    sessions = current.sessions + loaded.filter { it.id !in known },
+                    sessions = current.sessions + loaded.filter { it.id !in known && it.id !in current.removedSessionIds },
+                    pagedSessionIds = current.pagedSessionIds + loaded.filter { it.id !in current.removedSessionIds }.map { it.id },
+                    pagesCatalogVersion = if (current.pagedSessionIds.isEmpty()) pageCatalog
+                        else current.pagesCatalogVersion?.takeIf { it == pageCatalog },
                     nextSessionsCursor = page.opt("nextCursor") as? String,
                 )))
             }
@@ -37,7 +43,9 @@ internal class SessionCatalog(private val state: MutableStateFlow<AppState>, pri
         val session = detail.getJSONObject("session").session(detail.optJSONObject("runtime"))
         state.update { app ->
             val current = app.hosts[key.hostId] ?: return@update app
-            if (current.snapshotToken != before.snapshotToken || current.sessions.any { it.id == key.sessionId }) return@update app
+            if (current.paired != before.paired || current.snapshotToken != before.snapshotToken ||
+                current.serverEpoch != before.serverEpoch ||
+                key.sessionId in current.removedSessionIds || current.sessions.any { it.id == key.sessionId }) return@update app
             app.copy(hosts = app.hosts + (key.hostId to current.copy(sessions = current.sessions + session)))
         }
     }

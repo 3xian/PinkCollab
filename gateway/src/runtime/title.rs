@@ -3,6 +3,34 @@ use crate::domain::SessionRecord;
 use anyhow::Result;
 
 impl SessionController {
+    pub(super) async fn record_activity(&self, generation: &str) -> Result<()> {
+        let id = {
+            let state = self.state.lock().await;
+            if state
+                .runtime
+                .as_ref()
+                .is_none_or(|r| r.generation != generation)
+            {
+                return Ok(());
+            }
+            state.session.id.clone()
+        };
+        let generation = generation.to_owned();
+        // Persistence validates the lease; keep Stop and snapshots available while
+        // waiting for the bounded SQLite lane. Committed activity outlives a runtime.
+        if let Some(saved) = self
+            .store
+            .run(move |store| store.touch_session(&id, &generation))
+            .await?
+        {
+            let mut state = self.state.lock().await;
+            if saved.last_activity_at > state.session.last_activity_at {
+                state.session.last_activity_at = saved.last_activity_at;
+                self.publish_state(&mut state);
+            }
+        }
+        Ok(())
+    }
     pub(super) async fn update_prompt_title(&self, generation: &str, message: &str) -> Result<()> {
         let title = prompt_prefix(message);
         let id = {
@@ -34,7 +62,9 @@ impl SessionController {
         let mut state = self.state.lock().await;
         // Persistence validates the generation; a committed title outlives that runtime.
         if saved.metadata_revision > state.session.metadata_revision {
+            let activity = state.session.last_activity_at.max(saved.last_activity_at);
             state.session = saved;
+            state.session.last_activity_at = activity;
             self.publish_state(&mut state);
         }
     }
@@ -85,6 +115,7 @@ mod tests {
             metadata_revision: 1,
             created_at: now,
             updated_at: now,
+            last_activity_at: now,
             archived_at: None,
             engine_session_ref: None,
         };

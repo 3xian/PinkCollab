@@ -88,7 +88,7 @@ Website layout changes also need a browser check at desktop and mobile widths. T
 
 ## Discovery regression checks
 
-Run `cargo test --all-features --locked --test discovery` for the discovery/adoption regressions. If the debug Gateway executable is running on Windows, add `--target-dir target-discovery` instead of stopping the Gateway.
+Run `cargo test --all-features --locked --test discovery` for the discovery/adoption regressions. `cargo test --all-features --locked --test catalog` checks summary-only focus bootstrap with corrupt detail receipts and HTTP page provenance when Discovery changes and returns to an earlier catalog version. Android's `SessionCatalogTest` covers matching-version cache retention, mixed or missing page versions, unrelated activity during reads, and stale-response rejection. If the debug Gateway executable is running on Windows, add `--target-dir target-discovery` instead of stopping the Gateway.
 
 With OMP installed, run `cargo test --all-features --locked --test discovery real_omp_resumes -- --ignored` for a real resume without a provider request. Set `OMP_EXECUTABLE` when it is not on PATH.
 
@@ -127,3 +127,5 @@ Report the observed results separately from these instructions, including any di
 ## Local profiling
 
 HTTP responses include `Server-Timing: gateway;dur=...` for handler time, excluding body transfer and compression. Run `PINKCOLLAB_STARTUP_TIMING=1 cargo run -- serve` from `gateway/` to log host/session snapshot timings without credentials or transcript text.
+
+For a reproducible synthetic directory comparison, run `cargo test --locked --test catalog_cost -- --ignored --nocapture` from `gateway/`. It creates 10,000 detached managed sessions in temporary storage and compares the former full-summary/JSON/fingerprint projection with cold- and warm-ledger bounded bootstrap. Both paths use the current DTO; the test prints elapsed time, final selected-summary bytes, and checks complete count/selection. The baseline reproduces the old projection algorithm rather than running an older binary. Treat this as local handler-path evidence, not a release benchmark, heap measurement or network/phone latency result. Cold metadata cache rebuilds still read all managed rows; only the Runtime Summary selection is bounded.

@@ -522,6 +522,7 @@ async fn catalog_bootstrap_cursor_loads_every_older_session_once() {
                     metadata_revision: 1,
                     created_at: now - chrono::Duration::seconds(index),
                     updated_at: now,
+                    last_activity_at: now - chrono::Duration::seconds(index),
                     archived_at: None,
                     engine_session_ref: None,
                 },
@@ -577,6 +578,7 @@ async fn catalog_change_without_a_bus_event_invalidates_only_host_resume() {
                 metadata_revision: 1,
                 created_at: now,
                 updated_at: now,
+                last_activity_at: now,
                 archived_at: None,
                 engine_session_ref: None,
             },
@@ -600,4 +602,180 @@ async fn catalog_change_without_a_bus_event_invalidates_only_host_resume() {
     assert_eq!(fresh["type"], "host_snapshot");
     assert_eq!(fresh["totalSessions"], 1);
     assert_eq!(fresh["sessions"][0]["session"]["id"], "quiet");
+}
+
+#[tokio::test]
+async fn mixed_bootstrap_includes_old_activity_runtime_and_focus_without_moving_cursor() {
+    use pinkcollab_gateway::domain::SessionRecord;
+    let h = Harness::new(1, vec![]).await;
+    let credential = h.pair().await;
+    let now = chrono::Utc::now();
+    for index in 0..130 {
+        let created = now - chrono::Duration::seconds(index + 1000);
+        h.store
+            .create_v2(
+                "client",
+                &format!("mixed-{index}"),
+                "fp",
+                SessionRecord {
+                    id: format!("s{index}"),
+                    host_id: h.host.id.clone(),
+                    cwd: h.cwd("mixed"),
+                    title: format!("Session {index}"),
+                    metadata_revision: 1,
+                    created_at: created,
+                    updated_at: created,
+                    last_activity_at: if index == 100 { now } else { created },
+                    archived_at: None,
+                    engine_session_ref: None,
+                },
+            )
+            .unwrap();
+    }
+    let client = reqwest::Client::new();
+    let runtime_url = format!("{}/api/v4/sessions/s120", h.url);
+    post(
+        &client,
+        &runtime_url,
+        &credential,
+        json!({"commandId":"start","type":"start_runtime"}),
+    )
+    .await;
+    wait_operation(
+        &client,
+        &format!("{runtime_url}/operations/start"),
+        &credential,
+        "succeeded",
+    )
+    .await;
+    let mut request = format!(
+        "{}/api/v4/events?focus=s125",
+        h.url.replace("http://", "ws://")
+    )
+    .into_client_request()
+    .unwrap();
+    request.headers_mut().insert(
+        "Authorization",
+        format!("Bearer {credential}").parse().unwrap(),
+    );
+    let mut socket = tokio_tungstenite::connect_async(request).await.unwrap().0;
+    let first = next(&mut socket).await;
+    let summaries = first["sessions"].as_array().unwrap();
+    assert_eq!(first["totalSessions"], 130);
+    assert_eq!(summaries.len(), 53);
+    for id in ["s100", "s120", "s125"] {
+        assert!(
+            summaries.iter().any(|s| s["session"]["id"] == id),
+            "missing {id}"
+        );
+    }
+    assert!(
+        !summaries
+            .iter()
+            .find(|s| s["session"]["id"] == "s120")
+            .unwrap()["runtime"]
+            .is_null()
+    );
+    let decoded: Value = serde_json::from_slice(
+        &hex::decode(first["nextSessionsCursor"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(decoded["id"], "s49");
+    // Change activity during pagination; the creation-order suffix must still appear once.
+    h.store.reserve_runtime("s110", "test-generation").unwrap();
+    h.store.touch_session("s110", "test-generation").unwrap();
+    h.store.release_runtime("s110", "test-generation").unwrap();
+    let mut cursor = first["nextSessionsCursor"].as_str().map(str::to_owned);
+    let mut suffix = std::collections::HashSet::new();
+    let mut all: std::collections::HashSet<_> = summaries
+        .iter()
+        .map(|s| s["session"]["id"].as_str().unwrap().to_owned())
+        .collect();
+    let mut pages = 0;
+    while let Some(after) = cursor {
+        pages += 1;
+        assert!(pages <= 2, "cursor must make progress");
+        let page: Value = client
+            .get(format!("{}/api/v4/sessions", h.url))
+            .bearer_auth(&credential)
+            .query(&[("cursor", after)])
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        for summary in page["sessions"].as_array().unwrap() {
+            let id = summary["session"]["id"].as_str().unwrap().to_owned();
+            assert!(suffix.insert(id.clone()));
+            all.insert(id);
+        }
+        cursor = page["nextCursor"].as_str().map(str::to_owned);
+    }
+    assert_eq!(suffix.len(), 80);
+    assert_eq!(all.len(), 130);
+}
+
+#[tokio::test]
+async fn manual_refresh_bypasses_discovery_cache_while_ordinary_resume_replays() {
+    let files = tempfile::tempdir().unwrap();
+    let h = Harness::new(
+        1,
+        vec![
+            "--session-dir".into(),
+            files.path().to_string_lossy().into_owned(),
+        ],
+    )
+    .await;
+    let credential = h.pair().await;
+    let mut socket = connect(&h, &credential).await;
+    let initial = next(&mut socket).await;
+    assert_eq!(initial["totalSessions"], 0);
+    socket.close(None).await.unwrap();
+    let path = files.path().join("external.jsonl");
+    let body = format!(
+        "{}\n",
+        json!({"type":"session","version":3,"id":"external","cwd":h.cwd("external"),"timestamp":"2025-01-01T00:00:00Z"})
+    );
+    std::fs::write(&path, &body).unwrap();
+    let modified: chrono::DateTime<chrono::Utc> =
+        std::fs::metadata(&path).unwrap().modified().unwrap().into();
+    for force in [false, true] {
+        let url = format!(
+            "{}/api/v4/events?epoch={}&sequence={}&catalog={}{}",
+            h.url.replace("http://", "ws://"),
+            initial["epoch"].as_str().unwrap(),
+            initial["sequence"],
+            initial["catalogVersion"].as_str().unwrap(),
+            if force { "&refresh=1" } else { "" }
+        );
+        let mut request = url.into_client_request().unwrap();
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {credential}").parse().unwrap(),
+        );
+        let mut socket = tokio_tungstenite::connect_async(request).await.unwrap().0;
+        let response = next(&mut socket).await;
+        if force {
+            assert_eq!(response["type"], "host_snapshot");
+            assert_eq!(response["totalSessions"], 1);
+            let session = &response["sessions"][0]["session"];
+            assert_eq!(session["origin"], "discovered");
+            assert_eq!(
+                session["lastActivityAt"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .unwrap(),
+                modified
+            );
+            assert_ne!(response["catalogVersion"], initial["catalogVersion"]);
+        } else {
+            assert_eq!(response["type"], "host_sync");
+            assert_eq!(response["totalSessions"], 0);
+        }
+        socket.close(None).await.unwrap();
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), body);
+    assert!(h.store.v2_sessions().unwrap().is_empty());
 }

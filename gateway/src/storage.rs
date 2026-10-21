@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
+mod catalog;
 mod history_policy;
 mod references;
 use references::{claim_reference, reference_key};
@@ -16,6 +17,7 @@ pub struct Store {
     db: Mutex<Connection>,
     blocking_slots: Arc<Semaphore>,
     data_dir: PathBuf,
+    catalog_cache: Mutex<Option<(i64, crate::wire::Catalog)>>,
 }
 /// A device that completed pairing. `created_at` is a Unix timestamp, absent on rows written
 /// before the column existed.
@@ -88,7 +90,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 7,
+            schema_version <= 8,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -150,6 +152,9 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         if schema_version < 7 {
             history_policy::migrate_file_expectation(&db)?;
         }
+        if schema_version < 8 {
+            catalog::migrate(&db)?;
+        }
         db.execute_batch(
             "CREATE INDEX IF NOT EXISTS response_feedback
              ON operation_records(session_id)
@@ -159,6 +164,7 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
             db: Mutex::new(db),
             blocking_slots: Arc::new(Semaphore::new(4)),
             data_dir: dir.canonicalize()?,
+            catalog_cache: Mutex::new(None),
         })
     }
     pub fn uploads_dir(&self) -> PathBuf {
@@ -326,10 +332,10 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
             return Ok((session, true));
         }
         tx.execute(
-            "INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            "INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref,last_activity_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![session.id, session.host_id, session.cwd, session.title, session.metadata_revision,
                 session.created_at.to_rfc3339(), session.updated_at.to_rfc3339(),
-                session.archived_at.map(|v| v.to_rfc3339()), session.engine_session_ref],
+                session.archived_at.map(|v| v.to_rfc3339()), session.engine_session_ref, session.last_activity_at.to_rfc3339()],
         )?;
         if let Some(key) = key {
             claim_reference(&tx, &session.id, &key)?;
@@ -354,7 +360,7 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         if let Some(existing) = read_v2_session(&tx, &session.id)? {
             return Ok(existing);
         }
-        tx.execute("INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref,history_may_have_been_written,history_file_expected) VALUES (?1,?2,?3,?4,0,?5,?6,?7,1,1)", params![session.id, session.host_id, session.cwd, session.title, session.created_at.to_rfc3339(), session.updated_at.to_rfc3339(), reference])?;
+        tx.execute("INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref,history_may_have_been_written,history_file_expected,last_activity_at) VALUES (?1,?2,?3,?4,0,?5,?6,?7,1,1,?8)", params![session.id, session.host_id, session.cwd, session.title, session.created_at.to_rfc3339(), session.updated_at.to_rfc3339(), reference, session.last_activity_at.to_rfc3339()])?;
         claim_reference(&tx, &session.id, &references::canonical_key(&source.path))?;
         tx.execute(
             "INSERT INTO omp_adoptions (omp_id,session_id,reference) VALUES (?1,?2,?3)",
@@ -376,7 +382,7 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
     }
     pub fn v2_sessions(&self) -> Result<Vec<SessionRecord>> {
         let db = self.db.lock();
-        let mut query = db.prepare("SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref FROM session_records ORDER BY updated_at DESC,id DESC")?;
+        let mut query = db.prepare("SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref,last_activity_at FROM session_records ORDER BY updated_at DESC,id DESC")?;
         let rows = query.query_map([], session_columns)?;
         rows.map(|row| parse_session(row?)).collect()
     }
@@ -388,23 +394,7 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         after: Option<(&str, &str)>,
         limit: usize,
     ) -> Result<(Vec<SessionRecord>, bool)> {
-        let db = self.db.lock();
-        let mut query = db.prepare(
-            "SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref
-             FROM session_records
-             WHERE (?1 IS NULL OR created_at < ?1 OR (created_at = ?1 AND id < ?2))
-             ORDER BY created_at DESC,id DESC LIMIT ?3",
-        )?;
-        let (created_at, id) = after.map_or((None, None), |(created_at, id)| {
-            (Some(created_at), Some(id))
-        });
-        let rows = query.query_map(params![created_at, id, (limit + 1) as i64], session_columns)?;
-        let mut sessions = rows
-            .map(|row| parse_session(row?))
-            .collect::<Result<Vec<_>>>()?;
-        let has_more = sessions.len() > limit;
-        sessions.truncate(limit);
-        Ok((sessions, has_more))
+        read_sessions_page(&self.db.lock(), after, limit)
     }
 
     pub fn v2_session(&self, id: &str) -> Result<Option<SessionRecord>> {
@@ -738,6 +728,7 @@ type SessionColumns = (
     String,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 fn session_columns(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumns> {
     Ok((
@@ -750,6 +741,7 @@ fn session_columns(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumns> 
         row.get(6)?,
         row.get(7)?,
         row.get(8)?,
+        row.get(9)?,
     ))
 }
 fn parse_time(raw: &str) -> Result<DateTime<Utc>> {
@@ -766,6 +758,7 @@ fn parse_session(
         updated_at,
         archived_at,
         engine_session_ref,
+        last_activity_at,
     ): SessionColumns,
 ) -> Result<SessionRecord> {
     Ok(SessionRecord {
@@ -776,12 +769,35 @@ fn parse_session(
         metadata_revision,
         created_at: parse_time(&created_at)?,
         updated_at: parse_time(&updated_at)?,
+        last_activity_at: parse_time(last_activity_at.as_deref().unwrap_or(&updated_at))?,
         archived_at: archived_at.map(|v| parse_time(&v)).transpose()?,
         engine_session_ref,
     })
 }
+fn read_sessions_page(
+    db: &Connection,
+    after: Option<(&str, &str)>,
+    limit: usize,
+) -> Result<(Vec<SessionRecord>, bool)> {
+    let mut query = db.prepare(
+            "SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref,last_activity_at
+             FROM session_records
+             WHERE (?1 IS NULL OR created_at < ?1 OR (created_at = ?1 AND id < ?2))
+             ORDER BY created_at DESC,id DESC LIMIT ?3",
+        )?;
+    let (created_at, id) = after.map_or((None, None), |(created_at, id)| {
+        (Some(created_at), Some(id))
+    });
+    let rows = query.query_map(params![created_at, id, (limit + 1) as i64], session_columns)?;
+    let mut sessions = rows
+        .map(|row| parse_session(row?))
+        .collect::<Result<Vec<_>>>()?;
+    let has_more = sessions.len() > limit;
+    sessions.truncate(limit);
+    Ok((sessions, has_more))
+}
 fn read_v2_session(db: &Connection, id: &str) -> Result<Option<SessionRecord>> {
-    db.query_row("SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref FROM session_records WHERE id=?1",[id],session_columns).optional()?.map(parse_session).transpose()
+    db.query_row("SELECT id,host_id,cwd,title,metadata_revision,created_at,updated_at,archived_at,engine_session_ref,last_activity_at FROM session_records WHERE id=?1",[id],session_columns).optional()?.map(parse_session).transpose()
 }
 /// Version 2 used successful prompt receipts as a proxy for transcript safety.
 /// Existing mapped legacy rows have revision 1; an existing v2 mapping with any

@@ -26,6 +26,7 @@ pub struct SessionDto {
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub last_activity_at: DateTime<Utc>,
 }
 impl From<&SessionRecord> for SessionDto {
     fn from(s: &SessionRecord) -> Self {
@@ -37,6 +38,7 @@ impl From<&SessionRecord> for SessionDto {
             title: s.title.clone(),
             created_at: s.created_at,
             updated_at: s.updated_at,
+            last_activity_at: s.last_activity_at,
         }
     }
 }
@@ -182,6 +184,10 @@ pub enum ServerEvent {
         host: Host,
         sessions: Vec<SessionSummary>,
         workspaces: Vec<Directory>,
+        total_sessions: usize,
+        next_sessions_cursor: Option<String>,
+        #[serde(skip)]
+        catalog: crate::wire::Catalog,
     },
     SessionSnapshot {
         session_id: String,

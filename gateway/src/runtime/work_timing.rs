@@ -98,6 +98,7 @@ mod tests {
                 metadata_revision: 1,
                 created_at: now,
                 updated_at: now,
+                last_activity_at: now,
                 archived_at: None,
                 engine_session_ref: None,
             },

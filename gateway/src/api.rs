@@ -172,7 +172,7 @@ async fn api_sessions(
             })?)
         }
     };
-    let (sessions, has_more) = app
+    let page = app
         .sessions
         .list_page(
             cursor
@@ -188,8 +188,8 @@ async fn api_sessions(
                 "Session records unavailable".into(),
             )
         })?;
-    let next_cursor = if has_more {
-        sessions.last().map(|summary| {
+    let next_cursor = if page.has_more {
+        page.sessions.last().map(|summary| {
             hex::encode(
                 serde_json::to_vec(&ApiSessionsCursor {
                     created_at: summary.session.created_at.to_rfc3339(),
@@ -201,12 +201,12 @@ async fn api_sessions(
     } else {
         None
     };
-    let mut summaries = serde_json::to_value(sessions).unwrap();
+    let mut summaries = serde_json::to_value(page.sessions).unwrap();
     for summary in summaries.as_array_mut().unwrap() {
         crate::wire::compact_runtime(&mut summary["runtime"]);
     }
     Ok(Json(
-        json!({"sessions":summaries,"nextCursor":next_cursor,"epoch":app.bus.epoch}),
+        json!({"sessions":summaries,"nextCursor":next_cursor,"epoch":app.bus.epoch,"catalogVersion":page.catalog_version}),
     ))
 }
 async fn api_detail(
@@ -635,6 +635,7 @@ async fn api_create(
         metadata_revision: 1,
         created_at: now,
         updated_at: now,
+        last_activity_at: now,
         archived_at: None,
         engine_session_ref: None,
     };
@@ -770,6 +771,13 @@ async fn server_timing(request: axum::extract::Request, next: Next) -> Response 
 
 // The fence is server-local. A snapshot supersedes queued events up to this sequence.
 async fn snapshot(app: &App, session_id: Option<&str>) -> Option<(u64, ServerEvent)> {
+    capture_snapshot(app, session_id, None).await
+}
+async fn capture_snapshot(
+    app: &App,
+    session_id: Option<&str>,
+    focus: Option<&str>,
+) -> Option<(u64, ServerEvent)> {
     let started = std::time::Instant::now();
     for _ in 0..5 {
         let before = app.bus.sequence(session_id);
@@ -779,10 +787,15 @@ async fn snapshot(app: &App, session_id: Option<&str>) -> Option<(u64, ServerEve
                 snapshot: app.sessions.view(id).await.ok()??.dto(),
             }
         } else {
+            let (sessions, next_sessions_cursor, catalog) =
+                app.sessions.bootstrap(focus).await.ok()?;
             ServerEvent::HostSnapshot {
+                total_sessions: catalog.count(),
+                next_sessions_cursor,
+                catalog,
                 protocol_version: GATEWAY_PROTOCOL_VERSION,
                 host: app.host.clone(),
-                sessions: app.sessions.list().await.ok()?,
+                sessions,
                 workspaces: app.browser.roots(),
             }
         };
@@ -854,6 +867,7 @@ mod tests {
                         metadata_revision: 1,
                         created_at: now,
                         updated_at: now,
+                        last_activity_at: now,
                         archived_at: None,
                         engine_session_ref: None,
                     },
@@ -905,6 +919,47 @@ mod tests {
                 assert_eq!(payload.session_id(), scope);
                 blocker.await.unwrap();
             }
+            // A host mutation during the same blocked capture must instead advance
+            // the fence and appear in both the bounded selection and full ledger.
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
+            started_rx.await.unwrap();
+            let capture = snapshot(&app, None);
+            tokio::pin!(capture);
+            assert!(futures_util::poll!(&mut capture).is_pending());
+            let mut added = app.store.v2_session("quiet").unwrap().unwrap();
+            added.id = "added".into();
+            app.store
+                .create_v2("client", "added", "added", added.clone())
+                .unwrap();
+            bus.publish(ServerEvent::SessionUpsert {
+                session_id: added.id.clone(),
+                summary: crate::protocol::SessionSummary {
+                    session: SessionDto::from(&added),
+                    runtime: None,
+                },
+            });
+            release_tx.send(()).unwrap();
+            let (fence, payload) = capture.await.unwrap();
+            assert_eq!(fence, bus.sequence(None));
+            let ServerEvent::HostSnapshot {
+                sessions,
+                total_sessions,
+                catalog,
+                ..
+            } = payload
+            else {
+                panic!("host snapshot expected")
+            };
+            assert_eq!(total_sessions, 2);
+            assert_eq!(catalog.count(), 2);
+            assert!(sessions.iter().any(|s| s.session.id == "added"));
+            assert!(bus.replay(&bus.epoch, fence, None).unwrap().is_empty());
+            blocker.await.unwrap();
         });
     }
 }

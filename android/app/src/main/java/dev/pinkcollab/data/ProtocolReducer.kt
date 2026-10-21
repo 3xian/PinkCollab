@@ -30,17 +30,27 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
         require(frame.getInt("protocolVersion") == 4) { "Upgrade PinkCollab to connect to this Gateway" }
         val identity = frame.getJSONObject("host").host()
         require(identity.id == hostId) { "Gateway identity changed; pair again" }
+        val incoming = frame.getJSONArray("sessions").objects().map { it.sessionSummary() }
+        val incomingIds = incoming.mapTo(mutableSetOf()) { it.id }
+        val catalog = frame.opt("catalogVersion") as? String
+        val retained = host.sessions.filter { it.id in host.pagedSessionIds && it.id !in incomingIds }
+        val keepPages = host.snapshotToken != null && epoch != null && epoch == host.serverEpoch && sequence >= host.wireSequence &&
+            catalog != null && catalog == host.catalogVersion && catalog == host.pagesCatalogVersion &&
+            retained.none { it.runtimeAttached || it.id in host.removedSessionIds }
         return ProtocolReduction(app.copy(
             hosts = app.hosts + (hostId to host.copy(
                 paired = host.paired.copy(host = identity), connection = ConnectionState.Online(nowEpochMillis),
-                sessions = frame.getJSONArray("sessions").objects().map { it.sessionSummary() },
+                sessions = incoming + if (keepPages) retained else emptyList(),
+                pagedSessionIds = if (keepPages) host.pagedSessionIds else emptySet(),
+                pagesCatalogVersion = if (keepPages) catalog else null,
+                removedSessionIds = emptySet(),
                 workspaces = frame.getJSONArray("workspaces").objects().map { it.workspace() },
                 snapshotToken = UUID.randomUUID().toString(), revision = host.revision + 1,
                 lastSyncedAtEpochMillis = nowEpochMillis, initialSync = InitialSyncState.Ready,
                 serverEpoch = epoch, wireSequence = sequence, todoPlans = plans,
                 totalSessions = frame.optInt("totalSessions", frame.getJSONArray("sessions").length()),
                 catalogVersion = frame.opt("catalogVersion") as? String,
-                nextSessionsCursor = frame.opt("nextSessionsCursor") as? String,
+                nextSessionsCursor = if (keepPages) host.nextSessionsCursor else frame.opt("nextSessionsCursor") as? String,
             )), details = app.details.mapValues { (key, detail) ->
                 if (key.hostId == hostId && (epoch == null || epoch != host.serverEpoch || !host.connected)) detail.copy(snapshotToken = null) else detail
             },
@@ -67,11 +77,15 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
     }
     var detail = before
     var sessions = host.sessions
+    var removedSessionIds = host.removedSessionIds
     var loadHistory = false
     var resync = false
     when (type) {
         "session_remove" -> {
-            if (updateHost) sessions = sessions.filterNot { it.id == id }
+            if (updateHost) {
+                sessions = sessions.filterNot { it.id == id }
+                removedSessionIds = removedSessionIds + id
+            }
             if (updateDetail) detail = null
         }
         "session_snapshot", "session_sync", "session_state", "session_upsert", "runtime_state" -> {
@@ -79,7 +93,10 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
             val record = frame.optJSONObject("session") ?: host.sessions.find { it.id == id }?.wireRecord() ?: error("Missing session metadata")
             val session = record.session(runtime)
             require(session.id == id && session.hostId == hostId)
-            if (updateHost) sessions = sessions.filterNot { it.id == id } + session
+            if (updateHost) {
+                sessions = sessions.filterNot { it.id == id } + session
+                removedSessionIds = removedSessionIds - id
+            }
             if (type == "session_snapshot") {
                 val firstPage = frame.optJSONObject("history")?.let { historyPageState(it, plans) }
                 val retained = before?.savedHistory as? SavedHistory.Ready
@@ -158,7 +175,7 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
         else -> error("Unsupported protocol event: $type")
     }
     return ProtocolReduction(app.copy(
-        hosts = app.hosts + (hostId to host.copy(sessions = sessions, revision = host.revision + 1,
+        hosts = app.hosts + (hostId to host.copy(sessions = sessions, revision = host.revision + 1, removedSessionIds = removedSessionIds,
             catalogVersion = if (hostEvent && updateHost) frame.opt("catalogVersion") as? String ?: host.catalogVersion else host.catalogVersion,
             totalSessions = if (hostEvent && updateHost && frame.has("totalSessions")) frame.getInt("totalSessions") else host.totalSessions,
             wireSequence = if (hostEvent && updateHost) maxOf(host.wireSequence, sequence) else host.wireSequence, todoPlans = plans)),

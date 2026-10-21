@@ -12,6 +12,7 @@ pub struct SessionRecord {
     pub metadata_revision: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub last_activity_at: DateTime<Utc>,
     pub archived_at: Option<DateTime<Utc>>,
     pub engine_session_ref: Option<String>,
 }

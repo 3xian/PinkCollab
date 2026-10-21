@@ -131,7 +131,7 @@ internal class GatewayRepository(
 
     suspend fun refreshHost(id: String) {
         val before = state.value.hosts[id]?.snapshotToken
-        connect(paired(id))
+        connections.connect(paired(id), refreshDiscovery = true)
         awaitSnapshot(state, "Timed out waiting for the host snapshot") {
             it.hosts[id]?.snapshotToken?.let { subscription -> subscription != before } == true
         }

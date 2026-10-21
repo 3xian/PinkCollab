@@ -30,7 +30,10 @@ class HostOperationsTest {
             calls += "pair:$url:$token"
             pairFailure?.let { throw it }
         }
-        override suspend fun refreshHost(hostId: String) { calls += "refresh:$hostId" }
+        override suspend fun refreshHost(hostId: String) {
+            calls += "refresh:$hostId"
+            reconnectGates[hostId]?.await()
+        }
         override suspend fun reconnect(hostId: String) {
             calls += "reconnect:$hostId"
             reconnectGates[hostId]?.await()
@@ -62,14 +65,14 @@ class HostOperationsTest {
         val second = CompletableDeferred<Unit>()
         actions.reconnectGates.putAll(mapOf("first" to first, "second" to second))
         val operations = HostOperations(backgroundScope, actions, {}, {}, {}, {})
-        operations.refreshHosts(mapOf("first" to false, "second" to false))
+        operations.refreshHosts(setOf("first", "second"))
         runCurrent()
         val batchId = operations.refreshBatch.value!!.id
         assertEquals(0f, operations.refreshBatch.value!!.progress)
         assertEquals(setOf(OperationKey.Host("first"), OperationKey.Host("second")), operations.operations.value)
-        operations.refreshHosts(mapOf("third" to false))
+        operations.refreshHosts(setOf("third"))
         runCurrent()
-        assertFalse("reconnect:third" in actions.calls)
+        assertFalse("refresh:third" in actions.calls)
         first.complete(Unit)
         runCurrent()
         assertEquals(0.5f, operations.refreshBatch.value!!.progress)
@@ -78,11 +81,11 @@ class HostOperationsTest {
         // No presentation collector was active during either completion.
         assertTrue(operations.refreshBatch.value!!.finished)
         assertTrue(operations.operations.value.isEmpty())
-        operations.refreshHosts(mapOf("first" to false))
+        operations.refreshHosts(setOf("first"))
         runCurrent()
         assertTrue(operations.refreshBatch.value!!.id > batchId)
         assertTrue(operations.refreshBatch.value!!.finished)
-        assertEquals(2, actions.calls.count { it == "reconnect:first" })
+        assertEquals(2, actions.calls.count { it == "refresh:first" })
     }
 
     @Test fun creation_emits_identity_and_refreshes_host() = runTest {
@@ -142,7 +145,7 @@ class HostOperationsTest {
         operations.rename("host", "Office")
         runCurrent()
         assertTrue(operations.operations.value.isEmpty())
-        operations.refresh("host", isOnline = true)
+        operations.refresh("host")
         runCurrent()
         assertTrue("refresh:host" in actions.calls)
         gate.complete(Unit)

@@ -303,6 +303,7 @@ fn v2_create_is_lazy_and_idempotent() {
         metadata_revision: 1,
         created_at: now,
         updated_at: now,
+        last_activity_at: now,
         archived_at: None,
         engine_session_ref: None,
     };

@@ -43,6 +43,59 @@ class ProtocolReducerTest {
         assertEquals("new", state.details.getValue(key).session.generation)
     }
 
+    @Test fun matching_snapshot_preserves_proven_history_but_overrides_cached_runtime() {
+        val cached = record().session().copy(id = "old", title = "cached")
+        val state = app().copy(hosts = mapOf("host" to HostState(paired,
+            sessions = listOf(cached), serverEpoch = "e", wireSequence = 10, catalogVersion = "v",
+            snapshotToken = "previous", pagedSessionIds = setOf("old"), pagesCatalogVersion = "v",
+            nextSessionsCursor = "page-3")))
+        val snapshot = host().put("epoch", "e").put("sequence", 10).put("catalogVersion", "v")
+            .put("nextSessionsCursor", "base")
+        val kept = reduce(state, snapshot).state.hosts.getValue("host")
+        assertEquals(listOf(cached), kept.sessions)
+        assertEquals("page-3", kept.nextSessionsCursor)
+        assertNotEquals("previous", kept.snapshotToken)
+        val authoritative = record().put("id", "old").put("title", "fresh")
+        snapshot.put("sessions", JSONArray().put(JSONObject().put("session", authoritative)
+            .put("runtime", runtime("running", "new"))))
+        val replaced = reduce(state, snapshot).state.hosts.getValue("host").sessions.single()
+        assertEquals("fresh", replaced.title)
+        assertEquals("new", replaced.generation)
+    }
+
+    @Test fun uncertain_page_cache_is_evicted_for_epoch_catalog_or_runtime_mismatch() {
+        val cached = record().session().copy(id = "old")
+        val before = HostState(paired, sessions = listOf(cached), serverEpoch = "e", wireSequence = 10,
+            catalogVersion = "v", snapshotToken = "previous", pagedSessionIds = setOf("old"),
+            pagesCatalogVersion = "v", nextSessionsCursor = "page-3")
+        for (candidate in listOf(before.copy(serverEpoch = "old-epoch"), before.copy(catalogVersion = "changed"),
+            before.copy(pagesCatalogVersion = null), before.copy(sessions = listOf(cached.copy(runtimeAttached = true))),
+            before.copy(wireSequence = 11))) {
+            val result = reduce(app().copy(hosts = mapOf("host" to candidate)), host()
+                .put("epoch", "e").put("sequence", 10).put("catalogVersion", "v")
+                .put("nextSessionsCursor", "base")).state.hosts.getValue("host")
+            assertTrue(result.sessions.isEmpty())
+            assertTrue(result.pagedSessionIds.isEmpty())
+            assertEquals("base", result.nextSessionsCursor)
+        }
+    }
+
+    @Test fun activity_events_reorder_inactive_cards_and_runtime_only_events_keep_activity() {
+        val base = "2026-01-01T00:00:00Z"
+        var state = reduce(app(), host().put("epoch", "e").put("catalogVersion", "v")).state
+        fun event(type: String, id: String, activity: String, sequence: Int) = session(type)
+            .put("sessionId", id).put("session", record().put("id", id).put("lastActivityAt", activity))
+            .put("epoch", "e").put("sequence", sequence)
+        state = reduce(state, event("session_upsert", "a", base, 1)).state
+        state = reduce(state, event("session_upsert", "b", "2026-01-02T00:00:00Z", 2)).state
+        val comparator = Comparator<Session> { a, b -> dev.pinkcollab.ui.compareSessionsForPresentation(a, b) }
+        assertEquals(listOf("b", "a"), state.hosts.getValue("host").sessions.sortedWith(comparator).map { it.id })
+        state = reduce(state, event("session_state", "a", "2026-01-03T00:00:00Z", 3)).state
+        assertEquals(listOf("a", "b"), state.hosts.getValue("host").sessions.sortedWith(comparator).map { it.id })
+        state = reduce(state, JSONObject("""{"type":"runtime_state","sessionId":"a","runtime":null,"epoch":"e","sequence":4}""")).state
+        assertEquals("2026-01-03T00:00:00Z", state.hosts.getValue("host").sessions.find { it.id == "a" }!!.lastActivityAt)
+    }
+
     private val key = SessionKey("host", "session")
     private val paired = PairedHost(Host("host", "Desktop", "windows", "18", "1"), "https://host", "secret", "client")
     private fun app() = AppState(hosts = mapOf("host" to HostState(paired)))

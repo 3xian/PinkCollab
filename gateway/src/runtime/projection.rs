@@ -6,6 +6,11 @@ impl SessionController {
         // bypass this gate, so a stalled writer cannot delay termination.
         let _feedback = self.feedback_order.lock().await;
         let kind = omp::string(&frame, "type").to_owned();
+        if matches!(kind.as_str(), "prompt_result" | "session_settled")
+            && let Err(err) = self.record_activity(generation).await
+        {
+            eprintln!("Could not persist completed activity: {err}");
+        }
         if kind == "prompt_result" {
             let (session_id, key, status, error) = {
                 let mut state = self.state.lock().await;

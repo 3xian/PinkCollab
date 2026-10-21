@@ -31,6 +31,15 @@ class StartupLoadingTest {
         clientId = "client-1",
     )
 
+    @Test fun `activity ordering has stable ties and active order ignores activity`() {
+        val old = session("a", "2026-01-01T00:00:00Z").copy(lastActivityAt = "2026-01-03T00:00:00Z")
+        val newer = session("b", "2026-01-02T00:00:00Z").copy(lastActivityAt = "2026-01-02T00:00:00Z")
+        assertTrue(compareSessionsForPresentation(old, newer) < 0)
+        assertTrue(compareSessionsForPresentation(old.copy(runtimeAttached = true), newer.copy(runtimeAttached = true)) > 0)
+        assertTrue(compareSessionsForPresentation(old, old.copy(id = "z")) < 0)
+        assertTrue(compareSessionsForPresentation(old, old.copy(hostId = "z")) < 0)
+    }
+
     @Test
     fun `ready state releases startup immediately`() = runTest {
         var ready = false

@@ -768,7 +768,7 @@ private fun TasksPagerBar(
                         .clip(shape)
                         .then(
                             if (selected) Modifier.background(selectedCardFill, shape)
-                            else Modifier.background(lerp(Base0, Color.White, 0.055f), shape)
+                            else Modifier.background(lerp(Base0, Color.White, 0.14f), shape)
                         )
                         .semantics {
                             this.selected = selected

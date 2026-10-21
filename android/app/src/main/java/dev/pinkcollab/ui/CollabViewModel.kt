@@ -137,17 +137,15 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     }
 
     internal fun pairHost(url: String, token: String, attemptId: Long) = hostOperations.pair(url, token, attemptId)
-    internal fun refreshHost(hostId: String) = hostOperations.refresh(
-        hostId, repository.state.value.hosts[hostId]?.connection is ConnectionState.Online,
-    )
+    internal fun refreshHost(hostId: String) = hostOperations.refresh(hostId)
     internal fun refreshHosts(hostIds: List<String>) {
         val hosts = repository.state.value.hosts
         hostOperations.refreshHosts(hostIds.mapNotNull { id ->
             val connection = hosts[id]?.connection
             if (connection is ConnectionState.Online || connection is ConnectionState.Offline) {
-                id to (connection is ConnectionState.Online)
+                id
             } else null
-        }.toMap())
+        }.toSet())
     }
     internal fun forgetHost(hostId: String) = hostOperations.forget(hostId)
     internal fun renameHost(hostId: String, name: String) = hostOperations.rename(hostId, name)

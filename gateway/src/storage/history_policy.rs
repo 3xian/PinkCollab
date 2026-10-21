@@ -145,6 +145,7 @@ mod tests {
                     metadata_revision: 0,
                     created_at: now,
                     updated_at: now,
+                    last_activity_at: now,
                     archived_at: None,
                     engine_session_ref: Some("old.jsonl".into()),
                 },

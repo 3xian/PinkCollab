@@ -14,6 +14,37 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class HostConnectionResumeTest {
+    @Test fun only_explicit_refresh_adds_discovery_bypass_and_preserves_resume_parameters() = runBlocking {
+        val server = MockWebServer()
+        repeat(2) { server.enqueue(MockResponse().setResponseCode(503)) }
+        server.start()
+        val client = OkHttpClient()
+        val transport = object : GatewayTransport by GatewayApi() { override val client = client }
+        val paired = PairedHost(Host("host", "Desktop", "linux", "", ""),
+            server.url("/").toString().trimEnd('/'), "token", "client")
+        val cached = HostState(paired, serverEpoch = "e", wireSequence = 12, catalogVersion = "v")
+        val supervisor = HostConnectionSupervisor(this, transport, { _, _ -> }, { _, _ -> }, { _, _ -> },
+            cachedHost = { cached })
+        try {
+            withTimeout(5_000) { supervisor.connect(paired).await() }
+            withTimeout(5_000) { supervisor.connect(paired, refreshDiscovery = true).await() }
+            val ordinary = server.takeRequest().requestUrl!!
+            val refreshed = server.takeRequest().requestUrl!!
+            assertNull(ordinary.queryParameter("refresh"))
+            assertEquals("1", refreshed.queryParameter("refresh"))
+            for (url in listOf(ordinary, refreshed)) {
+                assertEquals("e", url.queryParameter("epoch"))
+                assertEquals("12", url.queryParameter("sequence"))
+                assertEquals("v", url.queryParameter("catalog"))
+            }
+        } finally {
+            supervisor.forget("host")
+            server.shutdown()
+            client.dispatcher.executorService.shutdown()
+            client.connectionPool.evictAll()
+        }
+    }
+
     @Test fun repeated_equal_failures_complete_each_attempt_without_state_collectors() = runBlocking {
         val server = MockWebServer()
         repeat(2) { server.enqueue(MockResponse().setResponseCode(503)) }

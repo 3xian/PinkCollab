@@ -43,6 +43,7 @@ impl OmpDiscoveredSession {
             metadata_revision: 0,
             created_at: self.created_at,
             updated_at: self.updated_at,
+            last_activity_at: self.updated_at,
             archived_at: None,
             engine_session_ref: Some(workspace::display(&self.path)),
         }
@@ -75,6 +76,13 @@ impl Discovery {
             .filter(|s| browser.validate(Path::new(&s.cwd)).is_ok() && s.path.is_file())
             .cloned()
             .collect()
+    }
+    /// Requests queued behind the same in-flight scan share its result.
+    pub fn refresh_since(&mut self, requested: Instant, browser: &Browser) {
+        if self.refreshed.is_none_or(|finished| finished < requested) {
+            self.sessions = self.scan(browser);
+            self.refreshed = Some(Instant::now());
+        }
     }
     pub fn resolve(&mut self, id: &str, browser: &Browser) -> Result<Option<OmpDiscoveredSession>> {
         let Some(old) = self.list(browser).into_iter().find(|s| s.id == id) else {
@@ -347,6 +355,25 @@ mod tests {
                 .list(&Browser::new(&[other.path().into()]).unwrap())
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn concurrent_force_requests_share_the_completed_scan() {
+        let workspace = tempfile::tempdir().unwrap();
+        let files = tempfile::tempdir().unwrap();
+        let browser = Browser::new(&[workspace.path().into()]).unwrap();
+        let mut discovery = Discovery::new(&[
+            "--session-dir".into(),
+            files.path().to_string_lossy().into_owned(),
+        ]);
+        let requested = Instant::now();
+        discovery.refresh_since(requested, &browser);
+        let header = json!({"type":"session","version":3,"id":"new","cwd":workspace.path(),"timestamp":"2026-01-01T00:00:00Z"});
+        fs::write(files.path().join("new.jsonl"), format!("{header}\n")).unwrap();
+        discovery.refresh_since(requested, &browser);
+        assert!(discovery.list(&browser).is_empty());
+        discovery.refresh_since(Instant::now(), &browser);
+        assert_eq!(discovery.list(&browser).len(), 1);
     }
 
     #[tokio::test]
