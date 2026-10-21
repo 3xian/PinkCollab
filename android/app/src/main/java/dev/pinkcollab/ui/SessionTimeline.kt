@@ -2,30 +2,16 @@ package dev.pinkcollab.ui
 
 import android.content.Context
 import android.graphics.Typeface
-import android.os.SystemClock
 import android.text.method.LinkMovementMethod
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import androidx.core.content.res.ResourcesCompat
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.HourglassEmpty
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -33,11 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -64,11 +47,7 @@ import java.time.format.DateTimeFormatter
 
 internal val TimelineBandBase = Color(0xFF0D0A10)
 
-/**
- * Timeline entries form full-width editorial bands. Their flat geometry keeps
- * the conversation continuous while the subtle tint distinguishes speakers
- * and status without competing with the floating composer.
- */
+/** Error and raw activity bands retain a restrained tint outside the message surfaces. */
 internal fun Modifier.timelineBand(
     tint: Color = Purple400,
     tintAlpha: Float = 0.025f,
@@ -90,46 +69,18 @@ internal fun Modifier.timelineBand(
         )
     }
 
-/**
- * The user's own turn. Separation comes from structure: a brand-gradient rail on the leading
- * edge, never a fill. [primaryContainer] was the only solid mid-tone surface in a
- * transcript otherwise built from faint tints over [TimelineBandBase], so it read as a banner
- * pasted over the timeline and outshouted the running-state accents. The tint stays inside the
- * band vocabulary and sits at the top of its alpha range, because a user turn is a hard
- * boundary between work phases.
- */
-private fun Modifier.userMessageBand(
-    primary: Color,
-    secondary: Color,
-): Modifier = background(TimelineBandBase)
-    .background(
-        Brush.horizontalGradient(
-            0.00f to primary.copy(alpha = 0.11f),
-            0.45f to secondary.copy(alpha = 0.05f),
-            1.00f to Color.Transparent,
-        ),
-    )
-    .drawBehind {
-        drawRect(
-            brush = Brush.verticalGradient(
-                listOf(primary.copy(alpha = 0.62f), secondary.copy(alpha = 0.40f)),
-            ),
-            size = Size(3.dp.toPx(), size.height),
-        )
-        drawLine(
-            color = Color.White.copy(alpha = 0.07f),
-            start = Offset(0f, size.height),
-            end = Offset(size.width, size.height),
-            strokeWidth = 1.dp.toPx(),
-        )
-    }
+/** Inset prompts and open replies share the same quiet conversation rhythm. */
+internal fun Modifier.messageSurface(isUser: Boolean = false): Modifier = fillMaxWidth()
+    .padding(horizontal = 12.dp, vertical = if (isUser) 8.dp else 12.dp)
+    .then(if (isUser) Modifier.background(SessionColors.userSurface, RoundedCornerShape(12.dp))
+        .padding(12.dp) else Modifier)
 
 
 @Composable
-internal fun DisplayItem(item: SessionDisplayItem, renderer: SessionMarkdownRenderer, liveActivity: Boolean = false, toolDetails: ToolDetailsController? = null) {
+internal fun DisplayItem(item: SessionDisplayItem, renderer: SessionMarkdownRenderer, liveActivity: Boolean = false, toolDetails: ToolDetailsController? = null, liveOperationIds: Set<String>? = null, onInspectActivity: () -> Unit = {}, collapseKey: String? = null) {
     when (item) {
         is SessionDisplayItem.Message -> MessageCard(item, renderer)
-        is SessionDisplayItem.ActivityGroup -> ActivityGroupCard(item, liveActivity, toolDetails)
+        is SessionDisplayItem.ActivityGroup -> ActivityTimeline(item, liveActivity, liveOperationIds, onInspectActivity, collapseKey)
         is SessionDisplayItem.Error -> ErrorCard(item)
         is SessionDisplayItem.Feedback -> FeedbackCard(item)
         is SessionDisplayItem.Raw -> RawTimelineCard(item.item, renderer, toolDetails)
@@ -139,19 +90,9 @@ internal fun DisplayItem(item: SessionDisplayItem, renderer: SessionMarkdownRend
 @Composable
 private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkdownRenderer) {
     val isUser = item.role == "user"
-    val colors = MaterialTheme.colorScheme
-    val band = if (isUser) {
-        Modifier.userMessageBand(colors.primary, colors.secondary)
-    } else {
-        Modifier.timelineBand(tint = Teal300, tintAlpha = 0.026f)
-    }
-    val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
-        Modifier
-            .fillMaxWidth()
-            .then(band)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+        Modifier.messageSurface(isUser),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         val time = messageTimeLabel(item.timestamp)
         SpeakerLine(time) {
@@ -159,9 +100,9 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
         }
         TimelineMessageBody(item.text, captureTouch = isUser) { onCopy ->
             if (isUser) {
-                Text(item.text, style = MaterialTheme.typography.bodyMedium, color = contentColor)
+                Text(item.text, style = MaterialTheme.typography.bodyMedium, color = TextHigh)
             } else {
-                MarkdownBody(item.id, item.text, color = contentColor, renderer, onCopy)
+                MarkdownBody(item.id, item.text, color = TextHigh, renderer, onCopy)
             }
         }
     }
@@ -170,12 +111,11 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
 @Composable
 private fun FeedbackCard(item: SessionDisplayItem.Feedback) {
     Column(
-        Modifier.fillMaxWidth().userMessageBand(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+        Modifier.messageSurface(isUser = true),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         SpeakerLine(messageTimeLabel(item.timestamp)) {
-            SpeakerTitle("Your response", Purple400)
+            SpeakerTitle("Your response", SessionColors.user)
         }
         if (item.question.isNotBlank()) {
             Text(item.question, style = MaterialTheme.typography.bodyMedium, color = TextMid)
@@ -184,7 +124,7 @@ private fun FeedbackCard(item: SessionDisplayItem.Feedback) {
             Text(
                 item.answer.ifEmpty { "(Empty response)" },
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = TextHigh,
             )
         }
     }
@@ -192,17 +132,16 @@ private fun FeedbackCard(item: SessionDisplayItem.Feedback) {
 
 @Composable
 private fun YouLabel() {
-    SpeakerTitle("You", Purple400)
+    SpeakerTitle("You", SessionColors.user)
 }
 
 @Composable
 private fun SpeakerTitle(text: String, color: Color, modifier: Modifier = Modifier) {
     Text(
         text,
-        modifier = modifier.padding(end = 6.dp), // Keeps the synthesized italic overhang clear of the model chip.
-        style = MaterialTheme.typography.bodyMedium,
-        fontWeight = FontWeight.Bold,
-        fontStyle = FontStyle.Italic,
+        modifier = modifier,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Medium,
         fontFamily = FontFamily.Default,
         color = color,
     )
@@ -219,25 +158,14 @@ private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
 
 @Composable
 internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        SpeakerTitle(if (replying) "Agent replying" else "Agent", BrandPink)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SpeakerTitle("Agent", SessionColors.agent,
+            if (replying) workTextShimmer().semantics { contentDescription = "Agent replying" } else Modifier)
         model?.let {
-            Spacer(Modifier.width(8.dp))
-            Surface(
-                modifier = Modifier.weight(1f, fill = false),
-                color = Purple400.copy(alpha = 0.14f),
-                shape = RoundedCornerShape(7.dp),
-            ) {
-                Text(
-                    it.name.ifBlank { it.id },
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Default,
-                    color = Purple200,
-                )
-            }
+            Text(it.name.ifBlank { it.id }, Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Default,
+                color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -351,246 +279,6 @@ private fun MarkdownBody(
     )
 }
 
-private const val ActivityEntranceDurationMillis = 280
-
-@Composable
-private fun ActivityGroupCard(group: SessionDisplayItem.ActivityGroup, liveActivity: Boolean, toolDetails: ToolDetailsController?) {
-    var expanded by rememberSaveable(group.id) { mutableStateOf(false) }
-    // The group owns batch deadlines even while its header icons are hidden by expansion.
-    val entranceDeadlines = remember(group.id) { HashMap<String, Long>() }
-    val batchStartMillis = SystemClock.uptimeMillis()
-    var entranceIndex = 0
-    for (operation in group.operations) {
-        if (operation.id !in entranceDeadlines) {
-            entranceDeadlines[operation.id] = batchStartMillis + entranceIndex++ * 70L + ActivityEntranceDurationMillis
-        }
-    }
-    val activityTint = activityColor(group.status)
-    val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(260), label = "activityArrow")
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .timelineBand(tint = activityTint, tintAlpha = 0.025f)
-            .animateContentSize()
-            .clickable(
-                role = Role.Button,
-                onClickLabel = if (expanded) "Collapse activity" else "Expand activity",
-                onClick = rememberHapticOnClick { expanded = !expanded },
-            )
-            .semantics {
-                contentDescription = if (expanded) "Collapse activity" else "Expand activity"
-                stateDescription = if (expanded) "Expanded" else "Collapsed"
-            }
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        group.action,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = TextHigh,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (!expanded || group.operationCount == 1) {
-                        ActivityOperationIcons(
-                            group, liveActivity, entranceDeadlines,
-                            Modifier.width((group.operations.size * 14 + 4).dp.coerceAtMost(112.dp)),
-                        )
-                    }
-                }
-                if (group.summary.isNotBlank() && (!expanded || group.operationCount == 1)) {
-                    Text(group.summary, style = MaterialTheme.typography.bodySmall, color = Red400, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            // 32dp target with an 8dp overhang past the content inset.
-            Box(Modifier.size(32.dp).offset(x = 8.dp), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Outlined.ExpandMore,
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp).rotate(arrow),
-                    tint = TextMid,
-                )
-            }
-        }
-        if (expanded) {
-            group.operations.forEach { operation ->
-                key(operation.id) {
-                    ActivityOperationDetails(
-                        operation,
-                        showSummary = group.operationCount > 1,
-                        liveActivity = liveActivity,
-                        toolDetails = toolDetails,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActivityOperationIcons(
-    group: SessionDisplayItem.ActivityGroup,
-    liveActivity: Boolean,
-    entranceDeadlines: Map<String, Long>,
-    modifier: Modifier,
-) {
-    val rowState = rememberLazyListState()
-    var previousCount by remember(group.id) { mutableIntStateOf(group.operations.size) }
-    LaunchedEffect(group.operations.size) {
-        val grew = group.operations.size > previousCount
-        previousCount = group.operations.size
-        if (grew) rowState.animateScrollToItem(group.operations.lastIndex)
-    }
-    LazyRow(
-        state = rowState,
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy((-4).dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(group.operations, key = { it.id }) { operation ->
-            val deadlineMillis = entranceDeadlines.getValue(operation.id)
-            val entrance = remember(operation.id) {
-                Animatable(if (SystemClock.uptimeMillis() >= deadlineMillis) 1f else 0f)
-            }
-            LaunchedEffect(entrance) {
-                val remainingMillis = (deadlineMillis - SystemClock.uptimeMillis()).coerceAtLeast(0)
-                if (remainingMillis == 0L) {
-                    entrance.snapTo(1f)
-                } else {
-                    entrance.animateTo(
-                        1f,
-                        tween(
-                            durationMillis = remainingMillis.coerceAtMost(ActivityEntranceDurationMillis.toLong()).toInt(),
-                            delayMillis = (remainingMillis - ActivityEntranceDurationMillis).coerceAtLeast(0).toInt(),
-                        ),
-                    )
-                }
-            }
-            Box(
-                Modifier.animateItem(fadeInSpec = null, placementSpec = tween(280))
-                    .graphicsLayer {
-                        alpha = entrance.value
-                    },
-            ) {
-                ActivityStatusIcon(operation.status, liveActivity, operation.action)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActivityOperationDetails(
-    operation: ActivityOperation,
-    showSummary: Boolean,
-    liveActivity: Boolean,
-    toolDetails: ToolDetailsController?,
-) {
-    var expanded by rememberSaveable(operation.id) { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.025f), RoundedCornerShape(8.dp)).padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (showSummary) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ActivityStatusIcon(operation.status, liveActivity, operation.action)
-                Text(operation.action, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = TextHigh)
-                if (operation.status != ActivityStatus.Succeeded) {
-                    Text(activityStatusLabel(operation.status, liveActivity), style = MaterialTheme.typography.labelSmall, color = activityColor(operation.status))
-                }
-            }
-        } else if (operation.status != ActivityStatus.Succeeded) {
-            Text(activityStatusLabel(operation.status, liveActivity), style = MaterialTheme.typography.labelSmall, color = activityColor(operation.status))
-        }
-        if (showSummary && operation.error.isNotBlank()) {
-            Text(operation.error, style = MaterialTheme.typography.bodySmall, color = Red400)
-        }
-        operation.detailKind?.let { kind ->
-            if (showSummary) {
-                DetailToggle(kind.action, expanded, onClick = { expanded = !expanded })
-            }
-            if (!showSummary || expanded) {
-                Text(operation.name, style = MaterialTheme.typography.labelSmall, color = TextMid)
-                if (operation.detailsAvailable && toolDetails != null) {
-                    ToolDetailPanel(operation.callId, operation.detailsVersion, toolDetails)
-                } else SelectionContainer {
-                    Text(
-                        operation.details,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp).verticalScroll(rememberScrollState()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextMid,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActivityStatusIcon(status: ActivityStatus, liveActivity: Boolean, action: String) {
-    val description = "$action, ${activityStatusLabel(status, liveActivity)}"
-    if (status == ActivityStatus.Running && liveActivity) {
-        CircularProgressIndicator(
-            modifier = Modifier.size(18.dp).semantics { contentDescription = description },
-            color = activityColor(status),
-            strokeWidth = 2.dp,
-        )
-    } else {
-        val icon = when (status) {
-            ActivityStatus.Failed -> Icons.Outlined.Close
-            ActivityStatus.Succeeded -> Icons.Outlined.Check
-            ActivityStatus.Running -> Icons.Outlined.HourglassEmpty
-        }
-        Icon(
-            icon,
-            contentDescription = description,
-            modifier = Modifier.size(18.dp),
-            tint = activityColor(status),
-        )
-    }
-}
-
-private fun activityColor(status: ActivityStatus): Color = when (status) {
-    ActivityStatus.Running -> Violet400
-    ActivityStatus.Succeeded -> Teal300
-    ActivityStatus.Failed -> Red400
-}
-
-private fun activityStatusLabel(status: ActivityStatus, liveActivity: Boolean): String =
-    if (status == ActivityStatus.Running && !liveActivity) "Last seen running" else status.label
-
-private val ActivityStatus.label: String
-    get() = when (this) {
-        ActivityStatus.Running -> "Running"
-        ActivityStatus.Succeeded -> "Completed"
-        ActivityStatus.Failed -> "Failed"
-    }
-
-private val ActivityDetailKind.action: String
-    get() = when (this) {
-        ActivityDetailKind.Diff -> "Diff"
-        ActivityDetailKind.Content -> "Content"
-        ActivityDetailKind.Changes -> "Changes"
-        ActivityDetailKind.Error -> "Error details"
-        ActivityDetailKind.Operation -> "Details"
-    }
-
 @Composable
 private fun ErrorCard(item: SessionDisplayItem.Error) {
 
@@ -620,9 +308,11 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
         FeedbackCard(SessionDisplayItem.Feedback(item.id, item.detail, item.text, item.timestamp))
         return
     }
+    if (item.kind == "user" || item.kind == "assistant") {
+        MessageCard(SessionDisplayItem.Message(item.id, item.kind, item.text, item.timestamp), renderer)
+        return
+    }
     var expanded by rememberSaveable(item.id) { mutableStateOf(false) }
-    val isUser = item.kind == "user"
-    val colors = MaterialTheme.colorScheme
     val isDetail = item.kind in listOf("tool", "subagent")
     val detail = item.tool?.let { tool ->
         buildList {
@@ -630,54 +320,26 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
             if (tool.result.isNotBlank()) add("Result\n${tool.result}")
         }.joinToString("\n\n")
     }.orEmpty().ifBlank { item.detail }
-    val band = if (isUser) {
-        Modifier.userMessageBand(colors.primary, colors.secondary)
-    } else {
-        Modifier.timelineBand(
-            tint = when (item.kind) {
-                "error" -> Red400
-                "assistant" -> Teal300
-                else -> Gray400
-            },
-        )
-    }
-    val contentColor = if (isUser) colors.onPrimaryContainer else TextHigh
     Column(
-        Modifier.fillMaxWidth().then(band).padding(12.dp),
+        Modifier.fillMaxWidth().timelineBand(tint = if (item.kind == "error") Red400 else Gray400).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        val time = messageTimeLabel(item.timestamp)
-        if (!isUser) {
-            if (item.kind == "assistant") {
-                SpeakerLine(time) { AgentHeader() }
-            } else {
-                Text(
-                    when (item.kind) {
-                        "tool" -> "Tool call"
-                        "subagent" -> "Subagent"
-                        "error" -> "Error"
-                        else -> "Activity"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold,
-                    fontStyle = FontStyle.Italic,
-                    fontFamily = FontFamily.Default,
-                    color = if (item.kind == "error") Red400 else TextMid,
-                )
-            }
-        } else {
-            SpeakerLine(time) { YouLabel() }
-        }
-        TimelineMessageBody(item.text, copyable = isUser || item.kind == "assistant", captureTouch = item.kind != "assistant") { onCopy ->
-            if (item.kind == "assistant") {
-                MarkdownBody(item.id, item.text, color = contentColor, renderer, onCopy)
-            } else {
-                Text(
-                    item.text,
-                    style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                    color = contentColor,
-                )
-            }
+        Text(
+            when (item.kind) {
+                "tool" -> "Tool call"
+                "subagent" -> "Subagent"
+                "error" -> "Error"
+                else -> "Activity"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            fontStyle = FontStyle.Italic,
+            fontFamily = FontFamily.Default,
+            color = if (item.kind == "error") Red400 else TextMid,
+        )
+        TimelineMessageBody(item.text, copyable = false, captureTouch = true) { _ ->
+            Text(item.text, style = if (isDetail) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+                color = TextHigh)
         }
         if (isDetail && (detail.isNotBlank() || item.tool?.detailsAvailable == true)) {
             DetailToggle("Details", expanded, onClick = { expanded = !expanded })

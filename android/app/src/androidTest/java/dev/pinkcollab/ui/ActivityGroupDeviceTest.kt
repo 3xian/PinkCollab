@@ -1,25 +1,18 @@
 package dev.pinkcollab.ui
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import dev.pinkcollab.data.TimelineItem
-import dev.pinkcollab.data.ToolArguments
-import dev.pinkcollab.data.ToolSummary
-import dev.pinkcollab.data.ToolTrace
+import dev.pinkcollab.data.ToolDetailPage
+import dev.pinkcollab.data.item
+import org.json.JSONObject
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,156 +21,135 @@ import org.junit.runner.RunWith
 class ActivityGroupDeviceTest {
     @get:Rule val compose = createComposeRule()
 
-    private fun operation(index: Int, status: ActivityStatus) = ActivityOperation(
-        "op-$index", "bash", "Command $index", status, "Output $index", ActivityDetailKind.Operation,
-        error = if (status == ActivityStatus.Failed) "Operation $index failed" else "",
+    private fun operation(index: Int, status: ActivityStatus = ActivityStatus.Succeeded) = ActivityOperation(
+        "op-$index", "bash", "Command $index", status,
+        error = if (status == ActivityStatus.Failed) "Access denied" else "",
+        targets = listOf("src/Command$index.kt"),
     )
 
     private fun group(operations: List<ActivityOperation>) = SessionDisplayItem.ActivityGroup(
-        "activity", ActivityStage.Execute, operations.size, ActivityStatus.Running,
-        "Run commands", operations.lastOrNull { it.error.isNotBlank() }?.error.orEmpty(), operations,
+        "activity", operations.lastOrNull { it.error.isNotBlank() }?.error.orEmpty(), operations,
     )
 
-    @Test fun mixed_outcomes_are_individual_horizontal_icons_and_details_toggle() {
-        val item = group(listOf(operation(0, ActivityStatus.Succeeded), operation(1, ActivityStatus.Failed),
-            operation(2, ActivityStatus.Running)))
+    private fun mount(state: State<SessionDisplayItem.ActivityGroup>, active: State<Boolean> = mutableStateOf(false),
+        controller: ToolDetailsController? = null) {
         compose.setContent {
             PinkCollabTheme {
                 val context = LocalContext.current
-                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
-                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer, liveActivity = false) }
-            }
-        }
-        val check = compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val error = compose.onNodeWithContentDescription("Command 1, Failed", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        val pending = compose.onNodeWithContentDescription("Command 2, Last seen running", useUnmergedTree = true).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertEquals(check.top, error.top, 1f)
-        assertEquals(check.top, pending.top, 1f)
-        assertTrue(check.left < error.left && error.left < check.right)
-        assertTrue(error.left < pending.left && pending.left < error.right)
-        val title = compose.onNodeWithText(item.action, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        assertTrue("Status icons must sit to the right of the title", check.left >= title.right)
-        assertTrue("Status icons must share the title row", check.center.y in title.top..title.bottom)
-        compose.onNodeWithContentDescription("Expand activity").performClick()
-        compose.onNodeWithText("Command 1", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText(item.summary, useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("Completed", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText("Output 1", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithContentDescription("Collapse activity").performClick()
-        compose.onNodeWithText("Command 1", useUnmergedTree = true).assertDoesNotExist()
-    }
-
-    @Test fun appended_operations_beyond_old_cap_scroll_into_view_and_remain_expandable() {
-        val item = mutableStateOf(group(listOf(operation(0, ActivityStatus.Succeeded))))
-        compose.setContent {
-            PinkCollabTheme {
-                val context = LocalContext.current
-                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
-                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item.value, renderer) }
-            }
-        }
-        compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
-        compose.runOnIdle {
-            item.value = group((0..29).map { operation(it, if (it == 29) ActivityStatus.Failed else ActivityStatus.Succeeded) })
-        }
-        compose.onNodeWithContentDescription("Command 29, Failed", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
-        compose.onNode(hasScrollAction(), useUnmergedTree = true)
-            .performScrollToNode(hasContentDescription("Command 0, Completed"))
-        compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
-    }
-
-    @Test fun expanding_a_tall_group_keeps_the_header_visible_and_tappable() {
-        val item = group((0..29).map { operation(it, ActivityStatus.Succeeded) })
-        compose.setContent {
-            PinkCollabTheme {
-                val context = LocalContext.current
-                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
+                val renderer = remember { SessionMarkdownRenderer(createSessionMarkwon(context)) }
                 LazyColumn(Modifier.fillMaxSize().statusBarsPadding()) {
-                    item { DisplayItem(item, renderer) }
+                    item { DisplayItem(state.value, renderer, liveActivity = active.value, toolDetails = controller) }
                 }
             }
         }
-        compose.onNodeWithText(item.action, useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
-        compose.onNodeWithText(item.action, useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText(item.action, useUnmergedTree = true).assertIsDisplayed().performTouchInput { click() }
-        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertDoesNotExist()
     }
 
-    @Test fun card_padding_and_summary_toggle_expansion_without_intercepting_detail_controls() {
-        val item = group(listOf(operation(0, ActivityStatus.Succeeded), operation(1, ActivityStatus.Failed)))
-        compose.setContent {
-            PinkCollabTheme {
-                val context = LocalContext.current
-                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
-                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer) }
-            }
+    @Test fun edit_summary_shows_file_and_change_without_a_detail_request() {
+        var reads = 0
+        val controller = ToolDetailsController { _, _ ->
+            reads++
+            ToolDetailPage("Full patch", "v1", null, true)
         }
-        compose.onNodeWithContentDescription("Expand activity").performTouchInput {
-            click(Offset(width - 2f, height - 2f))
-        }
-        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertIsDisplayed()
-        compose.onAllNodes(hasStateDescription("Collapsed") and hasClickAction(), useUnmergedTree = true).onFirst().performClick()
-        compose.onNodeWithText("Output 0", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
-        compose.onNodeWithText(item.action, useUnmergedTree = true).performTouchInput { click() }
-        compose.onNodeWithText("Command 0", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText("Output 0", useUnmergedTree = true).assertDoesNotExist()
-    }
-
-    @Test fun single_operation_card_directly_toggles_parameters_without_duplicate_title() {
-        val operation = ActivityOperation(
-            "read-config", "functions.read", "Reading configuration",
-            ActivityStatus.Succeeded, "Arguments\npath: /private/config\n\nOutput\nconfiguration content",
-            ActivityDetailKind.Operation,
-        )
-        val item = SessionDisplayItem.ActivityGroup(
-            "single-read", ActivityStage.Explore, 1, ActivityStatus.Succeeded,
-            operation.action, "", listOf(operation),
-        )
-        compose.setContent {
-            PinkCollabTheme {
-                val context = LocalContext.current
-                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
-                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer) }
-            }
-        }
-        compose.onAllNodesWithText(operation.action, useUnmergedTree = true).assertCountEquals(1)
-        compose.onNodeWithText(operation.name, useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText("/private/config", useUnmergedTree = true).assertDoesNotExist()
+        val wire = JSONObject("""{"id":"edit","kind":"tool","text":"","timestamp":"","tool":{"callId":"edit","name":"edit","completed":true,"summary":{"action":"Edit notes.md","target":"","files":["/tmp/demo/notes.md"],"error":"","preview":"+DONE"},"detailsAvailable":true,"detailsVersion":"v1"}}""")
+        val display = projectSessionTimeline(listOf(wire.item())).single() as SessionDisplayItem.ActivityGroup
+        mount(mutableStateOf(display), controller = controller)
         compose.onNodeWithContentDescription("Expand activity").performClick()
-        compose.onAllNodesWithText(operation.action, useUnmergedTree = true).assertCountEquals(1)
-        compose.onAllNodesWithText(operation.name, useUnmergedTree = true).assertCountEquals(1)
-        compose.onNodeWithText(operation.details, useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
+        compose.onNodeWithText("Edit notes.md").assertIsDisplayed()
+        compose.onNodeWithTag("activity-step-edit").performClick()
+        compose.onNodeWithText("/tmp/demo/notes.md").assertIsDisplayed()
+        compose.onNodeWithText("+DONE").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, reads) }
+    }
+
+    @Test fun settled_work_starts_folded_and_previews_are_independent() {
+        mount(mutableStateOf(group(listOf(operation(0), operation(1, ActivityStatus.Failed)))))
+        compose.onNodeWithText("2 commands").assertIsDisplayed()
+        compose.onNodeWithText("1 failed · Access denied").assertIsDisplayed()
+        compose.onNodeWithTag("activity-step-op-0").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Expand activity").performClick()
+        compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithContentDescription("Command 1, Failed", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("activity-step-op-0").performClick()
+        compose.onNodeWithText("src/Command0.kt").assertIsDisplayed()
+        compose.onNodeWithText("Completed").assertDoesNotExist()
+        compose.onNodeWithText("Failed").assertDoesNotExist()
+        compose.onNodeWithText("View details").assertDoesNotExist()
+        compose.onNodeWithText("Hide details").assertDoesNotExist()
         compose.onNodeWithContentDescription("Collapse activity").performClick()
-        compose.onNodeWithText(operation.details, useUnmergedTree = true).assertDoesNotExist()
     }
 
-    @Test fun operations_without_details_keep_outcomes_visible_without_empty_expanders() {
-        val traces = listOf(
-            ToolTrace("empty", "read", ToolArguments(), "", false, true,
-                summary = ToolSummary("Checking state", "", emptyList(), "")),
-            ToolTrace("failed", "read", ToolArguments(), "", true, true,
-                summary = ToolSummary("Reading configuration", "", emptyList(), "Access denied")),
-        )
-        val item = projectSessionTimeline(traces.map { trace ->
-            TimelineItem(trace.callId, "tool", "", "", "", trace)
-        }).single()
-        compose.setContent {
-            PinkCollabTheme {
-                val context = LocalContext.current
-                val renderer = remember(context) { SessionMarkdownRenderer(createSessionMarkwon(context)) }
-                Column(Modifier.fillMaxWidth().statusBarsPadding()) { DisplayItem(item, renderer) }
-            }
+    @Test fun live_steps_reveal_latest_preview_then_fold_on_settlement_without_fetching_output() {
+        val active = mutableStateOf(true)
+        var reads = 0
+        val controller = ToolDetailsController { _, _ ->
+            reads++
+            ToolDetailPage("Remote output", "v1", null, true)
         }
+        val state = mutableStateOf(group(listOf(operation(0))))
+        mount(state, active, controller)
+        compose.onNodeWithContentDescription("Collapse activity").assertIsDisplayed()
+        compose.onNodeWithTag("activity-preview-op-0").assertIsDisplayed()
+        compose.runOnIdle { state.value = group(listOf(operation(0), operation(1))) }
+        compose.onNodeWithTag("activity-preview-op-0").assertDoesNotExist()
+        compose.onNodeWithTag("activity-preview-op-1").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, reads) }
+        compose.onNodeWithText("View details").assertDoesNotExist()
+        compose.onNodeWithTag("activity-step-op-0").performClick()
+        compose.onNodeWithTag("activity-preview-op-0").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, reads) }
+        compose.onNodeWithText("Remote output").assertDoesNotExist()
+        compose.runOnIdle { active.value = false }
+        compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
+        compose.onNodeWithText("Remote output").assertDoesNotExist()
+    }
+
+    @Test fun manually_folded_live_sequence_stays_folded_when_more_tools_arrive() {
+        val state = mutableStateOf(group(listOf(operation(0, ActivityStatus.Running))))
+        mount(state, mutableStateOf(true))
+        compose.onNodeWithContentDescription("Collapse activity").performClick()
+        compose.onNodeWithText("1 running").assertIsDisplayed()
+        compose.runOnIdle { state.value = group(listOf(operation(0), operation(1))) }
+        compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed()
+        compose.onNodeWithTag("activity-step-op-1").assertDoesNotExist()
         compose.onNodeWithContentDescription("Expand activity").performClick()
-        compose.onNodeWithText("Checking state", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("Access denied", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithContentDescription("Checking state, Completed", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithContentDescription("Reading configuration, Failed", useUnmergedTree = true).assertIsDisplayed()
-        compose.onAllNodes(hasStateDescription("Collapsed") and hasClickAction(), useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithTag("activity-preview-op-1").assertIsDisplayed()
+    }
+
+    @Test fun manually_opened_earlier_preview_survives_new_steps() {
+        val state = mutableStateOf(group(listOf(operation(0), operation(1))))
+        mount(state, mutableStateOf(true))
+        compose.onNodeWithTag("activity-step-op-0").performClick()
+        compose.onNodeWithTag("activity-preview-op-0").assertIsDisplayed()
+        compose.runOnIdle { state.value = group(listOf(operation(0), operation(1), operation(2))) }
+        compose.onNodeWithTag("activity-preview-op-0").assertIsDisplayed()
+        compose.onNodeWithTag("activity-preview-op-1").assertDoesNotExist()
+    }
+
+    @Test fun long_work_sequence_keeps_every_operation_accessible() {
+        mount(mutableStateOf(group((0..40).map { operation(it) })))
+        compose.onNodeWithContentDescription("Expand activity").performClick()
+        compose.onNodeWithTag("activity-step-op-0").assertIsDisplayed()
+        compose.onNodeWithTag("activity-step-op-40").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText("src/Command40.kt").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("View details").assertDoesNotExist()
+    }
+
+    @Test fun retained_unfinished_tools_show_uncertainty_and_no_live_disclosure() {
+        mount(mutableStateOf(group(listOf(operation(0, ActivityStatus.Running)))))
+        compose.onNodeWithContentDescription("Expand activity").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("Command 0, Last seen running", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("activity-preview-op-0").assertDoesNotExist()
+        compose.onNodeWithTag("activity-step-op-0").performClick()
+        compose.onNodeWithText("Last seen running").assertDoesNotExist()
+        compose.onNodeWithText("src/Command0.kt").assertIsDisplayed()
+    }
+
+    @Test fun tools_without_payloads_have_no_empty_preview_controls() {
+        val op = operation(0).copy(targets = emptyList())
+        mount(mutableStateOf(group(listOf(op))))
+        compose.onNodeWithContentDescription("Expand activity").performClick()
+        compose.onNodeWithContentDescription("Command 0, Completed", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("activity-step-op-0").assertHasNoClickAction()
+        compose.onNodeWithText("View details").assertDoesNotExist()
     }
 }

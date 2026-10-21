@@ -47,21 +47,17 @@ class SessionWorkStatusDeviceTest {
         val statusBounds = status.fetchSemanticsNode().boundsInRoot
         val composerBounds = compose.onNodeWithTag("sessionComposer").fetchSemanticsNode().boundsInRoot
         assertTrue(statusBounds.bottom <= composerBounds.top)
-        val title = compose.onNode(hasText(action) and hasAnyAncestor(hasTestTag("sessionWorkStatus")))
+        compose.onAllNodes(hasText(action) and hasAnyAncestor(hasTestTag("sessionWorkStatus")))
+            .assertCountEquals(0)
+        compose.onAllNodes(hasText(action) and hasAnyAncestor(hasTestTag("activityTimeline")))
+            .onFirst().assertIsDisplayed()
         val elapsed = compose.onNode(hasText("23s") and hasAnyAncestor(hasTestTag("sessionWorkStatus")))
-        title.assertIsDisplayed()
         elapsed.assertIsDisplayed()
-        assertEquals(title.fetchSemanticsNode().boundsInRoot.center.y,
-            elapsed.fetchSemanticsNode().boundsInRoot.center.y, 1f)
-        val layout = mutableListOf<TextLayoutResult>()
-        title.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layout) }
-        assertEquals(1, layout.single().lineCount)
-        assertTrue(layout.single().isLineEllipsized(0))
         val speed = compose.onNodeWithTag("sessionWorkSpeed").assertTextEquals("42 tok/s").assertIsDisplayed()
         val speedBounds = speed.fetchSemanticsNode().boundsInRoot
         assertTrue(speedBounds.left >= elapsed.fetchSemanticsNode().boundsInRoot.right)
         assertTrue(speedBounds.right <= statusBounds.right)
-        assertEquals(title.fetchSemanticsNode().boundsInRoot.center.y, speedBounds.center.y, 1f)
+        assertEquals(elapsed.fetchSemanticsNode().boundsInRoot.center.y, speedBounds.center.y, 1f)
         val speedLayout = mutableListOf<TextLayoutResult>()
         speed.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(speedLayout) }
         assertEquals(1, speedLayout.single().lineCount)
@@ -92,6 +88,16 @@ class SessionWorkStatusDeviceTest {
         compose.onAllNodes(hasText(target) and hasAnyAncestor(hasTestTag("sessionWorkStatus")))
             .assertCountEquals(0)
         compose.onNodeWithContentDescription("Fast mode").assertIsEnabled()
+
+        // Before tools arrive, only the timeline shows an active-work label.
+        compose.runOnIdle { detail.value = detail.value.copy(liveItems = emptyList()) }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithTag("timelineWorking").assertIsDisplayed()
+        compose.onAllNodes(hasText("Thinking") and hasAnyAncestor(hasTestTag("sessionWorkStatus")))
+            .assertCountEquals(0)
+        compose.onNode(hasText("23s") and hasAnyAncestor(hasTestTag("sessionWorkStatus")))
+            .assertIsDisplayed()
+        compose.onNodeWithTag("sessionWorkSpeed").assertTextEquals("42 tok/s")
 
         val attention = Attention("confirm", AttentionType.Confirm, "Apply the inspected changes?", emptyList())
         compose.runOnIdle {

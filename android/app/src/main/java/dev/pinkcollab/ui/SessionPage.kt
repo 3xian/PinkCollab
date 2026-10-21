@@ -120,7 +120,19 @@ internal fun SessionPage(
     val liveItems = if (session.runtimeAttached) detail.liveItems else emptyList()
     val conversation = remember(historyItems, liveItems) { conversationTimeline(historyItems, liveItems) }
     val conversationDisplay = remember(conversation) { projectSessionTimeline(conversation) }
-    val liveOperationIds = remember(liveItems) { liveItems.filter { it.tool?.completed == false }.map { it.id }.toSet() }
+    // A reply closes every earlier disclosure, including groups opened during prior work phases.
+    // Keep the key stable through text deltas and later tool calls so reading history stays possible.
+    val activityCollapseKey = conversationDisplay.lastOrNull {
+        it is SessionDisplayItem.Message && it.role == "assistant"
+    }?.id.let { replyId -> if (detail.streaming.isNotBlank()) "streaming:$replyId" else replyId }
+    val liveOperationIds = remember(liveItems) {
+        liveItems.drop(liveItems.indexOfLast { it.kind == "user" } + 1)
+            .mapNotNull { it.tool?.callId }.toSet()
+    }
+    val working = isActive && host?.connected == true && session.status == SessionStatus.Running &&
+        session.runtimeAttached && detail.streaming.isBlank() && session.attention == null
+    val activeGroupId = (conversationDisplay.lastOrNull() as? SessionDisplayItem.ActivityGroup)
+        ?.takeIf { working && it.operations.any { operation -> operation.callId in liveOperationIds } }?.id
     val savedTodo = remember(historyItems) { projectSessionTodo(historyItems) }
     val liveTodo = remember(liveItems) { projectSessionTodo(liveItems) }
     val todo = latestSessionTodo(savedTodo, liveTodo)
@@ -199,6 +211,20 @@ internal fun SessionPage(
         val lastItemIndex = timelineState.layoutInfo.totalItemsCount - 1
         if (lastItemIndex >= 0) timelineState.scrollToItem(lastItemIndex)
     }
+    // Tool previews continue changing height after the event has been composed.
+    // Follow their measured layout through the transition, not just its first frame.
+    LaunchedEffect(isActive, followTimeline, activeGroupId) {
+        if (!isActive || !followTimeline || activeGroupId == null) return@LaunchedEffect
+        snapshotFlow {
+            val layout = timelineState.layoutInfo
+            layout.totalItemsCount to layout.visibleItemsInfo.map { it.offset to it.size }
+        }.collect {
+            if (!timelineState.isScrollInProgress && timelineState.canScrollForward) {
+                val last = timelineState.layoutInfo.totalItemsCount - 1
+                if (last >= 0) timelineState.scrollToItem(last)
+            }
+        }
+    }
     val density = LocalDensity.current
     val composerClearance = with(density) { composerHeightPx.toDp() } + 12.dp
     val imeInsets = WindowInsets.ime
@@ -267,19 +293,21 @@ internal fun SessionPage(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     items(conversationDisplay, key = { it.id }, contentType = { it::class }) { item ->
-                        val running = item is SessionDisplayItem.ActivityGroup && item.operations.any { it.callId in liveOperationIds }
-                        DisplayItem(item, renderer, liveActivity = running && host?.connected == true &&
-                            session.status == SessionStatus.Running, toolDetails = toolDetails)
+                        Box(Modifier.animateItem(fadeInSpec = tween(220), placementSpec = tween(300))) {
+                            DisplayItem(item, renderer, liveActivity = item.id == activeGroupId,
+                                toolDetails = toolDetails, liveOperationIds = liveOperationIds,
+                                onInspectActivity = { followTimeline = false }, collapseKey = activityCollapseKey)
+                        }
+                    }
+                    if (working && activeGroupId == null) item(key = "timeline-working") {
+                        TimelineWorkingIndicator()
                     }
                     if (session.runtimeAttached && detail.streaming.isNotBlank()) item(key = "streaming") {
                         Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .timelineBand(tint = Purple400, tintAlpha = 0.055f)
-                                .padding(12.dp),
+                            Modifier.messageSurface(),
                         ) {
                             AgentHeader(detail.model, replying = true)
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(6.dp))
                             TimelineMessageBody(detail.streaming) { _ ->
                                 Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
                             }

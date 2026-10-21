@@ -5,6 +5,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WirePayloadsTest {
+    @Test fun tool_preview_is_optional_and_parsed_without_fetching_details() {
+        val item = JSONObject("""{"id":"edit","kind":"tool","text":"","timestamp":"","tool":{"name":"edit","summary":{"action":"Edit notes.md","target":"","files":["/tmp/notes.md"],"error":"","preview":"+DONE"}}}""")
+        assertEquals("+DONE", item.item().tool!!.summary!!.preview)
+        item.getJSONObject("tool").getJSONObject("summary").remove("preview")
+        assertEquals("", item.item().tool!!.summary!!.preview)
+    }
+
     @Test fun references_resolve_without_rewriting_the_response() {
         val page = JSONObject("""{"items":[{"id":"call","kind":"tool","text":"Finished","timestamp":"","tool":{"todoRef":"plan"}}],"todoPlans":{"plan":[{"name":"ship","tasks":[{"content":"verify","status":"pending"}]}]},"other":{"todoRef":"unrelated"}}""")
         val original = page.toString()

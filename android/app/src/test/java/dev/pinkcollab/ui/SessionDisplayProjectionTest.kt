@@ -30,7 +30,7 @@ class SessionDisplayProjectionTest {
         tool = ToolTrace(id, name, arguments, result, error, completed),
     )
 
-    @Test fun conciseProjectionGroupsStagesAndAssistantTextEndsAGroup() {
+    @Test fun conciseProjectionKeepsMixedToolsTogetherUntilAssistantText() {
         val projected = projectSessionTimeline(
             listOf(
                 message("u", "user", "Fix login"),
@@ -44,19 +44,13 @@ class SessionDisplayProjectionTest {
             ),
         )
 
-        assertEquals(5, projected.size)
-        val explore = projected[1] as SessionDisplayItem.ActivityGroup
-        assertEquals(ActivityStage.Explore, explore.stage)
-        assertEquals(2, explore.operationCount)
-        val change = projected[2] as SessionDisplayItem.ActivityGroup
-        assertTrue(change.operations[0].details.contains("--- a/src/Login.kt"))
-        assertTrue(change.operations[0].details.contains("+b"))
-        assertEquals(ActivityDetailKind.Diff, change.operations[0].detailKind)
-        assertEquals(ActivityDetailKind.Content, change.operations[1].detailKind)
-        assertEquals("2026-09-20T00:00:00Z", (projected[3] as SessionDisplayItem.Message).timestamp)
-        val execute = projected[4] as SessionDisplayItem.ActivityGroup
-        assertEquals(ActivityStatus.Succeeded, execute.status)
-        assertTrue(execute.operations.single().details.contains("3 tests passed"))
+        assertEquals(4, projected.size)
+        val work = projected[1] as SessionDisplayItem.ActivityGroup
+        assertEquals(listOf("r", "g", "e1", "e2"), work.operations.map { it.id })
+        assertEquals("2026-09-20T00:00:00Z", (projected[2] as SessionDisplayItem.Message).timestamp)
+        val execute = projected[3] as SessionDisplayItem.ActivityGroup
+        assertEquals(ActivityStatus.Succeeded, execute.operations.single().status)
+        assertEquals("3 tests passed", execute.operations.single().preview)
     }
 
     @Test fun feedbackSeparatesToolGroupsEvenWhenTheAnswerIsEmpty() {
@@ -80,35 +74,30 @@ class SessionDisplayProjectionTest {
             ),
         )
 
-        val metadata = projected[0] as SessionDisplayItem.ActivityGroup
-        assertEquals("set_metadata", metadata.operations.single().name)
-        assertEquals(ActivityStatus.Succeeded, metadata.status)
-        assertTrue(metadata.operations.single().details.contains("saved"))
-        val failure = projected[1] as SessionDisplayItem.ActivityGroup
-        assertEquals(ActivityStatus.Failed, failure.status)
-        assertTrue(failure.operations.single().details.contains("stack line"))
-        assertEquals(ActivityDetailKind.Error, failure.operations.single().detailKind)
+        val work = projected.single() as SessionDisplayItem.ActivityGroup
+        assertEquals("set_metadata", work.operations[0].name)
+        assertEquals(ActivityStatus.Succeeded, work.operations[0].status)
+        assertEquals("saved", work.operations[0].preview)
+        assertEquals(ActivityStatus.Failed, work.operations[1].status)
+        assertEquals("Assertion failed", work.operations[1].error)
+        assertEquals("Assertion failed", work.summary)
+        assertEquals("stack line\nAssertion failed", work.operations[1].preview)
     }
 
     @Test fun debugProjectionPreservesEveryRawTimelineItem() {
-        val source = listOf(message("n", "notice", "Compacting context"), tool("x", "custom"))
-        val projected = projectSessionTimeline(source, SessionDisplayMode.Debug)
-        assertEquals(2, projected.size)
-        assertTrue(projected.all { it is SessionDisplayItem.Raw })
-    }
-
-    @Test fun writeWithoutBeforeStateIsPresentedAsContentNotDiff() {
-        val projected = projectSessionTimeline(
-            listOf(tool("write", "write", arguments("src/Login.kt", content = "new contents"))),
+        val raw = """{"path":"src/Login.kt","old":"before","new":"after","custom":{"enabled":true}}"""
+        val source = listOf(
+            message("n", "notice", "Compacting context"),
+            tool("x", "edit", ToolArguments.parse(raw), result = "full output\nstack line", error = true),
+            TimelineItem("failure", "error", "Failed", "Full error details", ""),
         )
-
-        val change = (projected.single() as SessionDisplayItem.ActivityGroup).operations.single()
-        assertEquals(ActivityDetailKind.Content, change.detailKind)
-        assertTrue(change.details.contains("new contents"))
-        assertTrue(!change.details.contains("--- a/"))
+        val projected = projectSessionTimeline(source, SessionDisplayMode.Debug)
+        assertEquals(source.size, projected.size)
+        assertTrue(projected.all { it is SessionDisplayItem.Raw })
+        assertEquals(source, projected.map { (it as SessionDisplayItem.Raw).item })
     }
 
-    @Test fun runningOperationTakesPrecedenceWithoutDiscardingEarlierFailure() {
+    @Test fun runningOperationDoesNotDiscardEarlierFailure() {
         val group = projectSessionTimeline(
             listOf(
                 tool("failed", "bash", ToolArguments(strings = mapOf("command" to "false")), error = true),
@@ -116,8 +105,6 @@ class SessionDisplayProjectionTest {
             ),
         ).single() as SessionDisplayItem.ActivityGroup
 
-        assertEquals(ActivityStatus.Running, group.status)
-        assertEquals("Reading repository state", group.action)
         assertEquals(group.operations.first().error, group.summary)
         assertTrue(group.summary.isNotBlank())
         assertEquals(listOf(ActivityStatus.Failed, ActivityStatus.Running), group.operations.map { it.status })
@@ -131,13 +118,11 @@ class SessionDisplayProjectionTest {
             ),
         ).single() as SessionDisplayItem.ActivityGroup
 
-        assertEquals(ActivityStage.Explore, group.stage)
-        assertEquals("Finding API documentation", group.action)
+        assertEquals("Finding API documentation", group.operations[1].action)
         assertTrue(group.summary.isBlank())
-        assertTrue(group.operations[1].details.contains("Compose state"))
-        assertTrue(group.operations[1].details.contains("https://developer.android.com"))
-        assertTrue(group.operations[0].details.contains("src/**/*.kt"))
-        assertTrue(group.operations[1].details.contains("documentation"))
+        assertEquals(listOf("Compose state", "https://developer.android.com"), group.operations[1].targets)
+        assertEquals(listOf("src/**/*.kt"), group.operations[0].targets)
+        assertEquals("documentation", group.operations[1].preview)
     }
 
     @Test fun successfulCommandsKeepCommandAndOutputRatherThanInferringVerification() {
@@ -145,11 +130,10 @@ class SessionDisplayProjectionTest {
             listOf(tool("shell", "bash", ToolArguments(strings = mapOf("command" to "git status")), result = "working tree clean")),
         ).single() as SessionDisplayItem.ActivityGroup
 
-        assertEquals(ActivityStage.Execute, group.stage)
-        assertEquals(ActivityStatus.Succeeded, group.status)
+        assertEquals(ActivityStatus.Succeeded, group.operations.single().status)
         assertTrue(group.summary.isBlank())
-        assertTrue(group.operations.single().details.contains("command: git status"))
-        assertTrue(group.operations.single().details.contains("working tree clean"))
+        assertEquals(listOf("git status"), group.operations.single().targets)
+        assertEquals("working tree clean", group.operations.single().preview)
     }
 
     @Test fun partialToolEventsDoNotDisappearOrGetAnInventedCompletionStatus() {
@@ -165,28 +149,24 @@ class SessionDisplayProjectionTest {
                 tool("eval", "functions.eval", ToolArguments(strings = mapOf("code" to "print(42)")), result = "42"),
             ),
         )
-        val task = projected[0] as SessionDisplayItem.ActivityGroup
-        val eval = projected[1] as SessionDisplayItem.ActivityGroup
-        assertEquals(ActivityStatus.Running, task.status)
-        assertEquals(ActivityStage.Execute, eval.stage)
-        assertTrue(eval.summary.isBlank())
-        assertTrue(eval.operations.single().details.contains("42"))
+        val work = projected.single() as SessionDisplayItem.ActivityGroup
+        assertEquals(ActivityStatus.Running, work.operations.first().status)
+        assertEquals(listOf("task", "eval"), work.operations.map { it.id })
+        assertEquals("42", work.operations[1].preview)
     }
 
-    @Test fun allToolFamiliesKeepTargetsInDetailsRatherThanDefaultSummaries() {
+    @Test fun allToolFamiliesKeepIntentTargetsAndPreviews() {
         for (name in listOf("read", "grep", "edit", "write", "bash", "eval", "task", "wait", "custom")) {
             val intent = "Inspecting the shared presentation"
-            val raw = """{"i":"$intent","path":"src/Session.kt","command":"inspect --all","content":"replacement"}"""
+            val raw = """{"i":"$intent","description":"Lower-priority description","title":"Lower-priority title","path":"src/Session.kt","command":"inspect --all","content":"replacement"}"""
             val group = projectSessionTimeline(listOf(tool(
                 name, name, ToolArguments.parse(raw), result = "Supplied result",
             ))).single() as SessionDisplayItem.ActivityGroup
             val operation = group.operations.single()
-            assertEquals(name, intent, group.action)
+            assertEquals(name, intent, operation.action)
             assertTrue(name, group.summary.isBlank())
-            for (value in listOf(intent, "src/Session.kt", "inspect --all", "replacement")) {
-                assertTrue("$name must retain $value", operation.details.contains(value))
-            }
-            assertTrue(name, operation.details.contains("Supplied result"))
+            assertEquals(name, listOf("src/Session.kt", "inspect --all"), operation.targets)
+            assertEquals(name, "Supplied result", operation.preview)
         }
     }
 
@@ -200,54 +180,51 @@ class SessionDisplayProjectionTest {
             tool("failed", trace.name).copy(tool = trace),
         )).single() as SessionDisplayItem.ActivityGroup
         val operation = group.operations.single()
-        assertEquals(ActivityStatus.Failed, group.status)
-        assertEquals(trace.summary!!.action, group.action)
+        assertEquals(ActivityStatus.Failed, operation.status)
+        assertEquals(trace.summary!!.action, operation.action)
         assertEquals(trace.summary.error, group.summary)
         assertEquals(trace.summary.error, operation.error)
-        assertTrue(operation.details.isBlank())
-        assertEquals(ActivityDetailKind.Operation, operation.detailKind)
-        assertTrue(operation.detailsAvailable)
-        assertEquals("version-2", operation.detailsVersion)
     }
 
-    @Test fun inlineChangeDetailsKeepRawInputsAndOutputWithoutDerivedCopies() {
-        val cases = listOf(
-            "write" to JSONObject()
-                .put("i", "Writing full content")
-                .put("path", "src/New.kt")
-                .put("content", "unique-written-content"),
-            "edit" to JSONObject()
-                .put("i", "Applying supplied patch")
-                .put("patch", "*** Update File: src/New.kt\n+unique-patch-line"),
-            "edit" to JSONObject()
-                .put("i", "Recording opaque changes")
-                .put("custom", JSONObject().put("enabled", true))
-                .put("items", org.json.JSONArray().put(7).put("retained")),
-        )
-        for ((name, input) in cases) {
-            val raw = input.toString()
-            val output = "unique-full-output\nsecond output line"
-            val operation = (projectSessionTimeline(listOf(
-                tool(name, name, ToolArguments.parse(raw), result = output),
-            )).single() as SessionDisplayItem.ActivityGroup).operations.single()
-
-            assertTrue(operation.details.contains(raw))
-            assertTrue(operation.details.contains(output))
-            val markers = listOf(raw, output) +
-                listOf("unique-written-content", "unique-patch-line").filter(raw::contains)
-            for (marker in markers) {
-                assertEquals(marker, operation.details.indexOf(marker), operation.details.lastIndexOf(marker))
-            }
-        }
+    @Test fun previewsUseBoundedSuppliedTargetsWithoutLoadingDetails() {
+        val trace = ToolTrace("read", "read", ToolArguments(), "", false, true,
+            summary = ToolSummary("Reading files", "src/App.kt", listOf("src/App.kt", "src/Ui.kt"), ""),
+            detailsAvailable = true, detailsVersion = "v1")
+        val operation = (projectSessionTimeline(listOf(tool("read", "read").copy(tool = trace)))
+            .single() as SessionDisplayItem.ActivityGroup).operations.single()
+        assertEquals(listOf("src/App.kt", "src/Ui.kt"), operation.targets)
+        assertTrue(operation.preview.isEmpty())
     }
 
-    @Test fun missingInlinePayloadHasNoExpandableDetailKind() {
-        val operation = (projectSessionTimeline(listOf(
-            tool("empty", "edit", result = ""),
-        )).single() as SessionDisplayItem.ActivityGroup).operations.single()
-        assertTrue(operation.details.isBlank())
-        assertEquals(null, operation.detailKind)
-        assertEquals(ActivityStatus.Succeeded, operation.status)
+    @Test fun editSummaryProvidesFilenameAndPatchWithoutLoadingFullDetails() {
+        val trace = ToolTrace("edit", "edit", ToolArguments(), "", false, true,
+            summary = ToolSummary("Edit notes.md", "", listOf("/tmp/demo/notes.md"), "", "+DONE"),
+            detailsAvailable = true, detailsVersion = "v2")
+        val operation = (projectSessionTimeline(listOf(tool("edit", "edit").copy(tool = trace)))
+            .single() as SessionDisplayItem.ActivityGroup).operations.single()
+        assertEquals("Edit notes.md", operation.action)
+        assertEquals(listOf("/tmp/demo/notes.md"), operation.targets)
+        assertEquals("+DONE", operation.preview)
+    }
+
+    @Test fun inlinePreviewIsBoundedAndFullOutputRemainsAccessible() {
+        val output = (1..100).joinToString("\n") { "Output line $it " + "x".repeat(200) }
+        val source = listOf(tool("read", "read", result = output))
+        val operation = (projectSessionTimeline(source)
+            .single() as SessionDisplayItem.ActivityGroup).operations.single()
+        assertTrue(operation.preview.length <= 360)
+        assertTrue(operation.preview.lines().size <= 3)
+        val raw = projectSessionTimeline(source, SessionDisplayMode.Debug).single() as SessionDisplayItem.Raw
+        assertEquals(output, raw.item.tool!!.result)
+    }
+
+    @Test fun summaryCountsToolsWithoutImplyingVerificationOrHidingFailures() {
+        val group = projectSessionTimeline(listOf(tool("r", "read"), tool("s", "search"),
+            tool("e", "edit"), tool("b", "bash", error = true), tool("x", "custom", completed = false)))
+            .single() as SessionDisplayItem.ActivityGroup
+        assertEquals(5, group.operations.size)
+        assertEquals("1 search · 1 read · 1 change · 1 command · 1 tool call", activityGroupSummary(group.operations))
+        assertTrue(group.summary.isNotBlank())
     }
 
     private fun arguments(

@@ -88,6 +88,8 @@ pub struct ToolSummary {
     pub target: String,
     pub files: Vec<String>,
     pub error: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub preview: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

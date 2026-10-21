@@ -95,7 +95,7 @@ data class ToolArguments(
             runCatching { from(JSONObject(raw)) }.getOrElse { ToolArguments() }
     }
 }
-data class ToolSummary(val action: String, val target: String, val files: List<String>, val error: String)
+data class ToolSummary(val action: String, val target: String, val files: List<String>, val error: String, val preview: String = "")
 data class ToolTrace(val callId: String, val name: String, val arguments: ToolArguments, val result: String, val isError: Boolean, val completed: Boolean, val todoPhases: List<TodoPhase>? = null,
     val summary: ToolSummary? = null, val detailsVersion: String = "", val detailsAvailable: Boolean = false)
 data class TimelineItem(val id: String, val kind: String, val text: String, val detail: String, val timestamp: String, val tool: ToolTrace? = null, val sourceId: String? = null, val messageKey: String? = null)
@@ -302,7 +302,7 @@ fun JSONObject.item(todoPlans: Map<String, List<TodoPhase>> = emptyMap()): Timel
                 todoPlans[ref] ?: error("Missing Todo payload: $ref")
             } ?: it.optJSONArray("todoPhases")?.let(::parseTodoPhases),
             summary = it.optJSONObject("summary")?.let { summary -> ToolSummary(
-                summary.getString("action"), summary.getString("target"), summary.getJSONArray("files").strings(), summary.getString("error")) },
+                summary.getString("action"), summary.getString("target"), summary.getJSONArray("files").strings(), summary.getString("error"), summary.optString("preview")) },
             detailsVersion = it.optString("detailsVersion"),
             detailsAvailable = it.optBoolean("detailsAvailable"),
         )

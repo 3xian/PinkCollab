@@ -11,6 +11,47 @@ fn brief(value: &str) -> String {
     value.chars().take(240).collect()
 }
 
+/// OMP's anchored edit headers carry a path followed by a content hash.
+fn anchored_edit_path(line: &str) -> Option<&str> {
+    let (path, hash) = line
+        .strip_prefix('[')?
+        .strip_suffix(']')?
+        .rsplit_once('#')?;
+    (!path.is_empty()
+        && (4..=64).contains(&hash.len())
+        && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+    .then_some(path)
+}
+
+fn patch_header(value: &str) -> Option<&str> {
+    value
+        .lines()
+        .find(|line| !line.trim().is_empty() && *line != "*** Begin Patch")
+}
+
+fn is_anchored_edit(value: &str) -> bool {
+    patch_header(value).and_then(anchored_edit_path).is_some()
+}
+
+fn preview<'a>(lines: impl Iterator<Item = &'a str>) -> String {
+    let mut result = String::new();
+    let mut remaining = 360;
+    for line in lines.filter(|line| !line.trim().is_empty()).take(3) {
+        if !result.is_empty() {
+            result.push('\n');
+            remaining -= 1;
+        }
+        for character in line.chars().take(remaining) {
+            result.push(character);
+            remaining -= 1;
+        }
+        if remaining == 0 {
+            break;
+        }
+    }
+    result
+}
+
 impl ToolTrace {
     pub fn details_version(&self) -> String {
         let bytes = serde_json::to_vec(&(
@@ -35,6 +76,12 @@ impl ToolTrace {
                 .map(brief)
                 .unwrap_or_default()
         };
+        let is_edit = self.name.rsplit(['.', '/']).next() == Some("edit");
+        let input_patch = self.arguments["input"].as_str().filter(|input| {
+            (is_edit && is_anchored_edit(input))
+                || input.lines().find(|line| !line.trim().is_empty()) == Some("*** Begin Patch")
+        });
+        let anchored_input = is_edit && input_patch.is_some_and(is_anchored_edit);
         let mut files: Vec<String> = ["path", "file", "filePath", "file_path", "filename"]
             .iter()
             .filter_map(|key| self.arguments[*key].as_str())
@@ -48,20 +95,27 @@ impl ToolTrace {
         for value in [
             self.arguments["patch"].as_str(),
             self.arguments["diff"].as_str(),
+            input_patch,
             Some(self.result.as_str()),
         ]
         .into_iter()
         .flatten()
         {
+            let anchored = is_edit && is_anchored_edit(value);
             for line in value.lines() {
-                if let Some(path) = [
-                    "*** Update File: ",
-                    "*** Add File: ",
-                    "*** Delete File: ",
-                    "+++ b/",
-                ]
-                .iter()
-                .find_map(|prefix| line.strip_prefix(prefix))
+                let path = if anchored {
+                    anchored_edit_path(line)
+                } else {
+                    [
+                        "*** Update File: ",
+                        "*** Add File: ",
+                        "*** Delete File: ",
+                        "+++ b/",
+                    ]
+                    .iter()
+                    .find_map(|prefix| line.strip_prefix(prefix))
+                };
+                if let Some(path) = path
                     && files.len() < 32
                 {
                     files.push(brief(path));
@@ -82,8 +136,29 @@ impl ToolTrace {
             "uri",
             "cwd",
         ]);
+        let action = first(&["i", "description", "title"]);
+        let action = if action.is_empty() && is_edit {
+            files
+                .first()
+                .map(|path| format!("Edit {}", path.rsplit('/').next().unwrap_or(path)))
+                .unwrap_or(action)
+        } else {
+            action
+        };
+        let patch_preview = input_patch
+            .map(|patch| {
+                preview(patch.lines().filter(|line| {
+                    if anchored_input {
+                        line.starts_with('+')
+                    } else {
+                        (line.starts_with('+') && !line.starts_with("+++"))
+                            || (line.starts_with('-') && !line.starts_with("---"))
+                    }
+                }))
+            })
+            .unwrap_or_default();
         let summary = Some(ToolSummary {
-            action: first(&["i", "description", "title"]),
+            action,
             target: brief(
                 &[subject, target]
                     .into_iter()
@@ -92,6 +167,15 @@ impl ToolTrace {
                     .join(", "),
             ),
             files,
+            preview: if self.is_error {
+                String::new()
+            } else if !patch_preview.is_empty() {
+                patch_preview
+            } else if self.completed {
+                preview(self.result.lines())
+            } else {
+                String::new()
+            },
             error: if self.is_error {
                 brief(&self.result)
             } else {

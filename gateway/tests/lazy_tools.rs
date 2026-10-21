@@ -6,6 +6,101 @@ use pinkcollab_gateway::{
 };
 use serde_json::{Value, json};
 
+#[test]
+fn anchored_edit_summary_keeps_path_and_bounded_patch_without_full_payload() {
+    let patch = "*** Begin Patch\n[/tmp/demo/notes.md#D5A0]\nPUT 3.=3:\n+DONE\n*** End Patch\n";
+    let mut item = TimelineItem::tool_started("edit", "edit", json!({"input":patch}), Utc::now());
+    let running = item.summary().tool.unwrap().summary.unwrap();
+    assert_eq!(running.action, "Edit notes.md");
+    assert_eq!(running.files, vec!["/tmp/demo/notes.md"]);
+    assert_eq!(running.preview, "+DONE");
+    item.merge_tool_update(TimelineItem::tool_completed(
+        "edit",
+        "edit",
+        "[/tmp/demo/notes.md#11E6]\n1:# Demo\n2:\n3:DONE",
+        false,
+        Utc::now(),
+    ));
+    let summary = item.summary().tool.unwrap();
+    assert!(summary.arguments.is_null());
+    assert!(summary.result.is_empty());
+    assert_eq!(summary.summary.unwrap().preview, "+DONE");
+    let original = item.tool.unwrap();
+    assert_eq!(original.arguments["input"], patch);
+    assert!(
+        detail_page(&original, None).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .contains(&serde_json::to_string_pretty(&json!({"input": patch})).unwrap())
+    );
+}
+
+#[test]
+fn anchored_edit_summary_accepts_optional_envelopes_and_line_endings() {
+    let section = "[notes.md#D5A0]\nPUT 3.=3:\n+DONE\n";
+    for patch in [
+        section.to_owned(),
+        format!("\n{section}"),
+        format!("*** Begin Patch\n{section}*** End Patch\n"),
+        section.replace('\n', "\r\n"),
+        format!(
+            "*** Begin Patch\r\n{}*** End Patch\r\n",
+            section.replace('\n', "\r\n")
+        ),
+    ] {
+        let item = TimelineItem::tool_started("edit", "edit", json!({"input": patch}), Utc::now());
+        let summary = item.summary().tool.unwrap().summary.unwrap();
+        assert_eq!(summary.action, "Edit notes.md");
+        assert_eq!(summary.files, vec!["notes.md"]);
+        assert_eq!(summary.preview, "+DONE");
+    }
+}
+
+#[test]
+fn anchored_edit_preview_preserves_plus_prefixed_payload_without_inventing_paths() {
+    let patch = "[counter.c#D5A0]\nPUT 3.=3:\n+++counter;\n+++ b/not-a-file\n";
+    let mut item = TimelineItem::tool_started("edit", "edit", json!({"input": patch}), Utc::now());
+    for completed in [false, true] {
+        let trace = item.tool.as_mut().unwrap();
+        trace.completed = completed;
+        trace.result = "Edit applied".to_owned();
+        let summary = trace.summary().summary.unwrap();
+        assert_eq!(summary.files, vec!["counter.c"]);
+        assert_eq!(summary.preview, "+++counter;\n+++ b/not-a-file");
+    }
+    let unified = "*** Begin Patch\n*** Update File: counter.c\n--- a/counter.c\n+++ b/counter.c\n-old\n+new\n*** End Patch\n";
+    let item = TimelineItem::tool_started("edit", "edit", json!({"input": unified}), Utc::now());
+    let summary = item.summary().tool.unwrap().summary.unwrap();
+    assert_eq!(summary.files, vec!["counter.c"]);
+    assert_eq!(summary.preview, "-old\n+new");
+}
+
+#[test]
+fn summary_preview_is_unicode_safe_bounded_and_does_not_publish_running_output() {
+    let output = format!("{}\nsecond\nthird\nfourth", "🙂".repeat(500));
+    let mut item =
+        TimelineItem::tool_started("read", "read", json!({"path":"notes.md"}), Utc::now());
+    let trace = item.tool.as_mut().unwrap();
+    trace.result = output.clone();
+    let version = trace.details_version();
+    assert!(trace.summary().summary.unwrap().preview.is_empty());
+    trace.result.push_str("more output");
+    assert_eq!(trace.details_version(), version);
+    item.merge_tool_update(TimelineItem::tool_completed(
+        "read",
+        "read",
+        &output,
+        false,
+        Utc::now(),
+    ));
+    let compact = item.summary().tool.unwrap().summary.unwrap();
+    assert_eq!(compact.preview.chars().count(), 360);
+    assert!(compact.preview.lines().count() <= 3);
+    let mut failed = item.tool.unwrap();
+    failed.is_error = true;
+    assert!(failed.summary().summary.unwrap().preview.is_empty());
+}
+
 #[tokio::test]
 async fn long_history_pages_reduce_item_count_without_cutting_messages() {
     let dir = tempfile::tempdir().unwrap();

@@ -58,8 +58,8 @@ android {
         minSdk = 26
         targetSdk = 36
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 3003002
-        versionName = "3.3.2"
+        versionCode = 4000000
+        versionName = "4.0.0"
     }
     testBuildType = providers.gradleProperty("testBuildType").getOrElse("debug")
     signingConfigs {

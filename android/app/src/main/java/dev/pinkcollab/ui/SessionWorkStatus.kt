@@ -185,7 +185,7 @@ private fun ToolArguments.firstString(vararg keys: String): String? {
 
 @Composable
 internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier = Modifier) {
-    val sendingTextEffect = if (status.kind == WorkStatusKind.Sending) sendingTextShimmer() else Modifier
+    val sendingTextEffect = if (status.kind == WorkStatusKind.Sending) workTextShimmer() else Modifier
     val tint = when (status.kind) {
         WorkStatusKind.Attention -> Amber300
         WorkStatusKind.Sending, WorkStatusKind.Working, WorkStatusKind.Starting, WorkStatusKind.Stopping -> Purple400
@@ -196,54 +196,54 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (status.active) {
-            ThinkingSquares(
-                color = tint,
-                modifier = Modifier.size(14.dp).clearAndSetSemantics { },
-            )
-        } else if (status.kind == WorkStatusKind.Loading) {
-            DownloadingIcon(
-                color = tint,
-                modifier = Modifier.size(16.dp).clearAndSetSemantics { },
-            )
-        } else {
-            Icon(
-                imageVector = when (status.kind) {
-                    WorkStatusKind.Attention -> Icons.Outlined.ErrorOutline
-                    WorkStatusKind.Offline -> Icons.Outlined.WifiOff
-                    WorkStatusKind.Starting, WorkStatusKind.Stopping -> Icons.Outlined.HourglassEmpty
-                    else -> Icons.Outlined.ChatBubbleOutline
-                },
-                contentDescription = null,
-                tint = tint,
-                modifier = Modifier.size(16.dp),
-            )
+        if (status.kind != WorkStatusKind.Working) {
+            if (status.kind == WorkStatusKind.Loading) {
+                DownloadingIcon(
+                    color = tint,
+                    modifier = Modifier.size(16.dp).clearAndSetSemantics { },
+                )
+            } else {
+                Icon(
+                    imageVector = when (status.kind) {
+                        WorkStatusKind.Attention -> Icons.Outlined.ErrorOutline
+                        WorkStatusKind.Offline -> Icons.Outlined.WifiOff
+                        WorkStatusKind.Starting, WorkStatusKind.Stopping -> Icons.Outlined.HourglassEmpty
+                        else -> Icons.Outlined.ChatBubbleOutline
+                    },
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // Only the stable action label announces changes, never streaming tokens or tool output.
-            AnimatedContent(
-                targetState = status.title,
-                modifier = Modifier.weight(1f, fill = false).clipToBounds()
-                    .semantics { liveRegion = LiveRegionMode.Polite },
-                transitionSpec = {
-                    (slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(180)))
-                        .togetherWith(slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180)))
-                        .using(null)
-                },
-                contentAlignment = Alignment.CenterStart,
-                label = "workStatusTitle",
-            ) { title ->
-                Text(
-                    title,
-                    modifier = sendingTextEffect.then(
-                        if (title == status.title) Modifier else Modifier.clearAndSetSemantics { },
-                    ),
-                    color = TextHigh,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            // The timeline owns live actions; the fixed footer keeps only work metrics.
+            if (status.kind != WorkStatusKind.Working) {
+                // Only the stable action label announces changes, never streaming tokens or tool output.
+                AnimatedContent(
+                    targetState = status.title,
+                    modifier = Modifier.weight(1f, fill = false).clipToBounds()
+                        .semantics { liveRegion = LiveRegionMode.Polite },
+                    transitionSpec = {
+                        (slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(180)))
+                            .togetherWith(slideOutVertically(tween(260, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(180)))
+                            .using(null)
+                    },
+                    contentAlignment = Alignment.CenterStart,
+                    label = "workStatusTitle",
+                ) { title ->
+                    Text(
+                        title,
+                        modifier = sendingTextEffect.then(
+                            if (title == status.title) Modifier else Modifier.clearAndSetSemantics { },
+                        ),
+                        color = TextHigh,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             status.timing?.let { timing ->
                 val elapsed by produceState(timing.elapsedAt(), timing) {
@@ -274,12 +274,12 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
 
 /** A neutral highlight sweeps over the glyphs; animation only invalidates drawing. */
 @Composable
-private fun sendingTextShimmer(): Modifier {
-    val phase = rememberInfiniteTransition(label = "sendingTextShimmer").animateFloat(
+internal fun workTextShimmer(baseColor: Color = TextMid): Modifier {
+    val phase = rememberInfiniteTransition(label = "workTextShimmer").animateFloat(
         initialValue = -1f,
         targetValue = 2f,
         animationSpec = infiniteRepeatable(tween(1_600, easing = LinearEasing)),
-        label = "sendingTextHighlight",
+        label = "workTextHighlight",
     )
     return Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
         .drawWithContent {
@@ -288,7 +288,7 @@ private fun sendingTextShimmer(): Modifier {
             val halfWidth = size.width * 0.35f
             drawRect(
                 brush = Brush.linearGradient(
-                    colors = listOf(TextMid, Color.White, TextMid),
+                    colors = listOf(baseColor, Color.White, baseColor),
                     start = Offset(center - halfWidth, 0f),
                     end = Offset(center + halfWidth, 0f),
                 ),
@@ -328,7 +328,7 @@ private fun DownloadingIcon(color: Color, modifier: Modifier = Modifier) {
 
 /** Four fixed tiles light up clockwise; animation state is read only during drawing. */
 @Composable
-private fun ThinkingSquares(color: Color, modifier: Modifier = Modifier) {
+internal fun ThinkingSquares(color: Color, modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "thinkingSquares")
     val phase = transition.animateFloat(
         initialValue = 0f,

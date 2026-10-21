@@ -38,7 +38,7 @@ class TodoPresentationTest {
             ToolTrace(id, "read", ToolArguments(), "contents", false, true))
         val items = listOf(read("read1"), todo("first"), read("read2"), todo("last"))
         val group = projectSessionTimeline(items).single() as SessionDisplayItem.ActivityGroup
-        assertEquals(2, group.operationCount)
+        assertEquals(listOf("read1", "read2"), group.operations.map { it.id })
         assertEquals("last", (projectSessionTodo(items) as SessionTodo.Snapshot).plan.trace.callId)
         assertTrue(projectSessionTimeline(items, SessionDisplayMode.Debug).all { it is SessionDisplayItem.Raw })
     }
