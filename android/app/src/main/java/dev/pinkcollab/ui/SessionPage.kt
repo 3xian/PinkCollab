@@ -34,12 +34,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -185,42 +189,32 @@ internal fun SessionPage(
 
     val inputEnabled = controls.inputEnabled
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
-    LaunchedEffect(timelineState) {
-        snapshotFlow {
-            (if (timelineState.isScrollInProgress) 1 else 0) or
-                (if (timelineState.lastScrolledBackward) 2 else 0) or
-                (if (timelineState.canScrollForward) 4 else 0)
-        }.collect { scrollFlags ->
-            if (scrollFlags and 3 == 3) {
-                followTimeline = false
-            } else if (scrollFlags and 4 == 0) {
-                followTimeline = true
+    val timelineScrollIntent = remember(timelineState) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && available.y > 0f && timelineState.canScrollBackward) {
+                    followTimeline = false
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                // Layout changes can temporarily fit the viewport; only scrolling
+                // forward to the end resumes following after manual inspection.
+                if (consumed.y < 0f && !timelineState.canScrollForward) followTimeline = true
+                return Offset.Zero
             }
         }
     }
-    LaunchedEffect(
-        isActive,
-        conversationDisplay,
-        detail.streaming,
-        session.attention,
-        composerHeightPx,
-        followTimeline,
-    ) {
+    // Markdown finishes rendering after its source update. Follow measured layout,
+    // including reply growth and tool transitions, rather than racing the next frame.
+    LaunchedEffect(isActive, followTimeline) {
         if (!isActive || !followTimeline) return@LaunchedEffect
-        withFrameNanos { }
-        val lastItemIndex = timelineState.layoutInfo.totalItemsCount - 1
-        if (lastItemIndex >= 0) timelineState.scrollToItem(lastItemIndex)
-    }
-    // Tool previews continue changing height after the event has been composed.
-    // Follow their measured layout through the transition, not just its first frame.
-    LaunchedEffect(isActive, followTimeline, activeGroupId) {
-        if (!isActive || !followTimeline || activeGroupId == null) return@LaunchedEffect
         snapshotFlow {
-            val layout = timelineState.layoutInfo
-            layout.totalItemsCount to layout.visibleItemsInfo.map { it.offset to it.size }
-        }.collect {
-            if (!timelineState.isScrollInProgress && timelineState.canScrollForward) {
-                val last = timelineState.layoutInfo.totalItemsCount - 1
+            if (timelineState.isScrollInProgress) null else timelineState.layoutInfo
+        }.collect { layout ->
+            if (layout != null && timelineState.canScrollForward) {
+                val last = layout.totalItemsCount - 1
                 if (last >= 0) timelineState.scrollToItem(last)
             }
         }
@@ -279,7 +273,7 @@ internal fun SessionPage(
                 onRefresh = { onLoadEarlier() },
             )) {
                 LazyColumn(
-                    Modifier.fillMaxSize().testTag("sessionTimeline").semantics {
+                    Modifier.fillMaxSize().nestedScroll(timelineScrollIntent).testTag("sessionTimeline").semantics {
                         if (canLoadEarlier) {
                             customActions = listOf(CustomAccessibilityAction("Load earlier messages", onLoadEarlier))
                         }
@@ -293,7 +287,7 @@ internal fun SessionPage(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     items(conversationDisplay, key = { it.id }, contentType = { it::class }) { item ->
-                        Box(Modifier.animateItem(fadeInSpec = tween(220), placementSpec = tween(300))) {
+                        Box(Modifier.animateItem(fadeInSpec = tween(220), placementSpec = null)) {
                             DisplayItem(item, renderer, liveActivity = item.id == activeGroupId,
                                 toolDetails = toolDetails, liveOperationIds = liveOperationIds,
                                 onInspectActivity = { followTimeline = false }, collapseKey = activityCollapseKey)
@@ -335,7 +329,7 @@ internal fun SessionPage(
                         }
                     }
                     // A separate end anchor reaches the bottom even when the final message is taller than the viewport.
-                    item(key = "timeline-end") { Spacer(Modifier.height(1.dp)) }
+                    item(key = "timeline-end") { Spacer(Modifier.fillMaxWidth().height(1.dp).testTag("timelineEnd")) }
                 }
                 if (savedHistory.nextCursor != null || activity.history) {
                     PullToRefreshDefaults.Indicator(

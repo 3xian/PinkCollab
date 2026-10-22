@@ -7,6 +7,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.Density
@@ -116,7 +117,17 @@ class ActivityTimelineSessionDeviceTest {
         compose.onNodeWithTag("activity-step-read").performScrollTo().performClick()
         compose.onNodeWithTag("activity-preview-read").assertIsDisplayed()
         compose.onNodeWithTag("sessionTimeline").performScrollToNode(hasTestTag("activity-step-search"))
-        compose.onNodeWithTag("activity-step-search").performScrollTo().performClick()
+        val searchStep = compose.onNodeWithTag("activity-step-search").performScrollTo()
+        val searchBounds = searchStep.fetchSemanticsNode().boundsInRoot
+        val composerTop = compose.onNodeWithTag("sessionWorkStatus").fetchSemanticsNode().boundsInRoot.top
+        if (searchBounds.bottom > composerTop) {
+            compose.onNodeWithTag("sessionTimeline")
+                .performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+                    scroll(0f, searchBounds.bottom - composerTop + searchBounds.height)
+                }
+        }
+        searchStep.performClick()
+        compose.onNodeWithTag("sessionTimeline").performScrollToNode(hasTestTag("activity-preview-search"))
         compose.onNodeWithTag("activity-preview-search").assertIsDisplayed()
 
         val reply = TimelineItem("final", "assistant", "The timeline is ready.", "", "")

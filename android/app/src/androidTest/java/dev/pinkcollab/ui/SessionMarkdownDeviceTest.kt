@@ -9,6 +9,7 @@ import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -16,21 +17,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.test.longClick
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.*
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.semantics.SemanticsProperties
 import dev.pinkcollab.ui.theme.SessionTypography
 import dev.pinkcollab.ui.theme.PinkCollabScheme
-import dev.pinkcollab.data.TimelineItem
+import dev.pinkcollab.ui.theme.PinkCollabTheme
+import dev.pinkcollab.data.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.noties.markwon.AbstractMarkwonPlugin
@@ -274,6 +271,73 @@ class SessionMarkdownDeviceTest {
         } finally {
             release.countDown()
         }
+    }
+
+    @Test fun session_follows_rendered_reply_growth_without_interrupting_history_reading() {
+        val host = HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client"),
+            connection = ConnectionState.Online(1L),
+        )
+        val session = Session("session", "host", "/work", "Streaming reply", SessionStatus.Running,
+            "", false, null, "", "", true, "generation")
+        val question = TimelineItem("question", "user",
+            (1..20).joinToString("\n") { "Earlier instruction $it" }, "", "")
+        fun reply(rows: Int): TimelineItem {
+            val table = "| Task | Result |\n| --- | --- |\n" +
+                (1..rows).joinToString("\n") { "| Task $it | Verified result with wrapping detail $it |" }
+            return TimelineItem("reply", "assistant", "$table\n\n**Rendered checkpoint $rows**", "streaming", "")
+        }
+        val detail = mutableStateOf(SessionDetail(
+            session, snapshotToken = "subscription",
+            savedHistory = SavedHistory.Ready("history", emptyList(), null),
+            liveItems = listOf(question, reply(4)),
+        ))
+        compose.setContent {
+            PinkCollabTheme {
+                Box(Modifier.fillMaxSize()) {
+                    SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
+                        SessionActivity(), null, null), {}, { true })
+                }
+            }
+        }
+        fun awaitRenderedReply(rows: Int) {
+            compose.waitUntil(10_000) {
+                compose.runOnIdle { markdownView()?.text?.toString()?.endsWith("Rendered checkpoint $rows") == true }
+            }
+            compose.waitForIdle()
+        }
+        fun awaitReply(rows: Int) {
+            awaitRenderedReply(rows)
+            compose.waitUntil(10_000) { compose.onNodeWithTag("timelineEnd").isDisplayed() }
+            val end = compose.onNodeWithTag("timelineEnd").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val composer = compose.onNodeWithTag("sessionWorkStatus").fetchSemanticsNode().boundsInRoot
+            assertTrue("The rendered reply must finish above the fixed composer", end.bottom <= composer.top)
+        }
+        awaitReply(4)
+        for (rows in listOf(24, 48)) {
+            compose.runOnIdle { detail.value = detail.value.copy(liveItems = listOf(question, reply(rows))) }
+            awaitReply(rows)
+        }
+
+        val timeline = compose.onNodeWithTag("sessionTimeline")
+        timeline.performTouchInput { swipeDown(durationMillis = 1_000) }
+        // Keep unchanged history and the growing native reply visible together:
+        // an off-screen lazy item cannot commit the render this check waits for.
+        timeline.performScrollToNode(hasText(question.text))
+        compose.onNode(hasText(question.text) and hasAnyAncestor(hasTestTag("sessionTimeline"))).assertIsDisplayed()
+        awaitRenderedReply(48)
+        compose.onNodeWithTag("timelineEnd").assertIsNotDisplayed()
+        fun scrollPosition() = timeline.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
+        val readingPosition = scrollPosition()
+        compose.runOnIdle { detail.value = detail.value.copy(liveItems = listOf(question, reply(60))) }
+        awaitRenderedReply(60)
+        compose.onNodeWithTag("timelineEnd").assertIsNotDisplayed()
+        assertEquals("New reply text must not pull the reader away from history", readingPosition, scrollPosition(), 0.05f)
+
+        timeline.performTouchInput { swipeUp() }
+        compose.waitUntil(10_000) { compose.onNodeWithTag("timelineEnd").isDisplayed() }
+        compose.runOnIdle { detail.value = detail.value.copy(liveItems = listOf(question, reply(72))) }
+        awaitReply(72)
     }
 
     @Test fun narrow_message_uses_full_body_width_and_copies_on_long_press() {

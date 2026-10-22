@@ -72,7 +72,8 @@ private fun ActivityTimelineContent(
     val unfinished = group.operations.count { it.status == ActivityStatus.Running }
     val running = group.operations.count { active && it.status == ActivityStatus.Running &&
         (liveOperationIds == null || it.callId in liveOperationIds) }
-    val titleEffect = if (active) workTextShimmer(SessionColors.tool) else Modifier
+    val titleColor = MaterialTheme.colorScheme.tertiary
+    val titleEffect = if (active) workTextShimmer(titleColor) else Modifier
     val rotation by animateFloatAsState(if (expanded) 90f else 0f, tween(220), label = "workDisclosure")
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("activityTimeline")) {
         Row(
@@ -104,7 +105,7 @@ private fun ActivityTimelineContent(
                     else if (active) Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                     else Modifier,
                 ), style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Default,
-                    color = if (active) SessionColors.tool else SessionColors.agent, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    color = titleColor, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (!expanded && !active) {
                 Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.clearAndSetSemantics { }) {
