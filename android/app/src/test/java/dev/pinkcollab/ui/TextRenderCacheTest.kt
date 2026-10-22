@@ -31,7 +31,7 @@ class TextRenderCacheTest {
 
     @Test fun character_limit_evicts_content_and_does_not_retain_oversized_messages() = runTest {
         val calls = mutableListOf<String>()
-        val cache = TextRenderCache(maxCharacters = 8) { text -> calls.add(text); text }
+        val cache = TextRenderCache(maxCharacters = 4) { text -> calls.add(text); text }
         cache.get("aa")
         cache.get("bbb")
         cache.get("aa")

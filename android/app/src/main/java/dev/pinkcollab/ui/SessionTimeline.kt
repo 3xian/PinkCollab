@@ -2,7 +2,6 @@ package dev.pinkcollab.ui
 
 import android.content.Context
 import android.graphics.Typeface
-import android.text.method.LinkMovementMethod
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import androidx.core.content.res.ResourcesCompat
@@ -39,6 +38,8 @@ import io.noties.markwon.Markwon
 import io.noties.markwon.MarkwonSpansFactory
 import io.noties.markwon.MarkwonVisitor
 import io.noties.markwon.core.MarkwonTheme
+import io.noties.markwon.ext.tables.TablePlugin
+import io.noties.markwon.ext.tables.TableAwareMovementMethod
 import org.commonmark.node.Code
 import org.commonmark.node.StrongEmphasis
 import java.time.Instant
@@ -202,6 +203,7 @@ private fun MessageTime(label: String, modifier: Modifier = Modifier) {
 
 internal fun createSessionMarkwon(context: Context): Markwon =
     Markwon.builder(context)
+        .usePlugin(TablePlugin.create(context))
         .usePlugin(object : AbstractMarkwonPlugin() {
             override fun configureTheme(builder: MarkwonTheme.Builder) {
                 val maple = ResourcesCompat.getFont(context, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
@@ -244,16 +246,19 @@ private fun MarkdownBody(
     onCopy: (() -> Unit)?,
 ) {
     var rendered by remember(renderer, messageId) { mutableStateOf<Spanned?>(null) }
-    LaunchedEffect(renderer, messageId, markdown) { rendered = renderer.render(markdown) }
     val textColor = color.toArgb()
     val textSizeSp = MaterialTheme.typography.bodyMedium.fontSize.value
+    LaunchedEffect(renderer, messageId, markdown, textSizeSp, textColor) {
+        rendered = renderer.render(markdown)
+    }
     AndroidView(
+        modifier = Modifier.fillMaxWidth(),
         factory = { context ->
             MessageBodyTextView(context).apply {
                 includeFontPadding = false
                 typeface = ResourcesCompat.getFont(context, dev.pinkcollab.R.font.maple_mono_cn_regular) ?: Typeface.DEFAULT
                 isLongClickable = onCopy != null
-                movementMethod = LinkMovementMethod.getInstance()
+                movementMethod = TableAwareMovementMethod.create()
                 setLineSpacing(0f, 1.18f)
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
             }

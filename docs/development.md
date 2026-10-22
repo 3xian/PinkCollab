@@ -73,6 +73,8 @@ sh ./gradlew :app:connectedReleaseTestAndroidTest -PtestBuildType=releaseTest -P
 
 `releaseTest` enables release R8/resource shrinking, uses debug signing, and installs alongside the production app. Use the focused test above rather than the debug UI suite.
 
+`SessionMarkdownDeviceTest` covers table-cell alignment and inline links, full-width layout without unnecessary wrapping, exact source copying, row additions during message updates, and replacement of a table with plain prose. It also checks independent wrapping for identical tables in different-width messages, removal of one duplicate, same-width typography reflow, and source visibility when Markdown renders no text. Its table scenario writes `markdown-table.png` to the target app's external files directory for visual inspection; pull it before uninstalling the test app.
+
 From the repository root:
 
 ```sh
