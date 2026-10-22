@@ -109,6 +109,8 @@ class ActivityTimelineSessionDeviceTest {
                 }
             }
         }
+        // A user scroll leaves follow-latest mode before locating an older disclosure.
+        compose.onNodeWithTag("sessionTimeline").performTouchInput { swipeDown() }
         compose.onNodeWithTag("sessionTimeline").performScrollToNode(hasText("1 read"))
         compose.onNodeWithContentDescription("Expand activity").performScrollTo().performClick()
         compose.onNodeWithTag("activity-step-read").performScrollTo().performClick()
