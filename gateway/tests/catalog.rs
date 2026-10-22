@@ -63,7 +63,15 @@ async fn snapshot(h: &Harness, credential: &str, query: &str) -> Value {
 
 #[tokio::test]
 async fn focused_bootstrap_and_paging_do_not_decode_detail_receipts() {
-    let h = Harness::new(1, vec![]).await;
+    let files = tempfile::tempdir().unwrap();
+    let h = Harness::new(
+        1,
+        vec![
+            "--session-dir".into(),
+            files.path().to_string_lossy().into_owned(),
+        ],
+    )
+    .await;
     seed(&h);
     let credential = h.pair().await;
     let db = rusqlite::Connection::open(h.dir.path().join("data/pinkcollab.db")).unwrap();
@@ -123,7 +131,10 @@ async fn http_page_identifies_its_discovery_generation_when_catalog_returns_to_o
     let initial = snapshot(&h, &credential, "").await;
     let path = files.path().join("temporary.jsonl");
     std::fs::write(&path, format!("{}\n", json!({"type":"session","version":3,"id":"temporary","cwd":h.cwd("catalog"),"timestamp":"2000-01-01T00:00:00Z"}))).unwrap();
-    std::fs::File::open(&path)
+    // Windows requires write access to change file timestamps.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
         .unwrap()
         .set_times(
             std::fs::FileTimes::new()

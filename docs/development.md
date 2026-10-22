@@ -94,6 +94,8 @@ Website layout changes also need a browser check at desktop and mobile widths. T
 
 Run `cargo test --all-features --locked --test discovery` for the discovery/adoption regressions. `cargo test --all-features --locked --test catalog` checks summary-only focus bootstrap with corrupt detail receipts and HTTP page provenance when Discovery changes and returns to an earlier catalog version. Android's `SessionCatalogTest` covers matching-version cache retention, mixed or missing page versions, unrelated activity during reads, and stale-response rejection. If the debug Gateway executable is running on Windows, add `--target-dir target-discovery` instead of stopping the Gateway.
 
+Catalog fixtures use explicit temporary `--session-dir` directories so developer OMP history cannot affect their results or scan time. Timestamp fixtures must open files with write access before `set_times`; a read-only handle cannot change timestamps on Windows.
+
 With OMP installed, run `cargo test --all-features --locked --test discovery real_omp_resumes -- --ignored` for a real resume without a provider request. Set `OMP_EXECUTABLE` when it is not on PATH.
 
 ## OMP RPC v2 and large model catalogs
