@@ -217,7 +217,9 @@ class SessionHistoryDeviceTest {
                 isActive = active.value)
         }
         timelineMessage("Question 40").assertIsDisplayed()
-        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Question 0"))
+        val timeline = compose.onNodeWithTag("sessionTimeline")
+        timeline.performTouchInput { swipeDown() }
+        timeline.performScrollToNode(hasText("Question 0"))
         compose.onNodeWithText("Question 0").assertIsDisplayed()
         compose.runOnIdle { active.value = false }
         compose.waitForIdle()
@@ -296,6 +298,7 @@ class SessionHistoryDeviceTest {
                 }, onApplyModelSettings = { true }, isActive = active.value)
         }
         val timeline = compose.onNodeWithTag("sessionTimeline")
+        timeline.performTouchInput { swipeDown() }
         timeline.performScrollToNode(hasText("Saved question 0"))
         val loadEarlier = timeline.fetchSemanticsNode().config[SemanticsActions.CustomActions]
             .single { it.label == "Load earlier messages" }

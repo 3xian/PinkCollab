@@ -334,7 +334,12 @@ class SessionMarkdownDeviceTest {
         compose.onNodeWithTag("timelineEnd").assertIsNotDisplayed()
         assertEquals("New reply text must not pull the reader away from history", readingPosition, scrollPosition(), 0.05f)
 
-        timeline.performTouchInput { swipeUp() }
+        // The rendered table spans several viewports; one swipe cannot reach its end.
+        for (attempt in 0 until 20) {
+            if (compose.onNodeWithTag("timelineEnd").isDisplayed()) break
+            timeline.performTouchInput { swipeUp() }
+            compose.waitForIdle()
+        }
         compose.waitUntil(10_000) { compose.onNodeWithTag("timelineEnd").isDisplayed() }
         compose.runOnIdle { detail.value = detail.value.copy(liveItems = listOf(question, reply(72))) }
         awaitReply(72)
