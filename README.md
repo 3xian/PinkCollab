@@ -15,7 +15,9 @@
 - Start sessions in your projects and switch between them.
 - Keep OMP and its model-provider configuration on your computer.
 
-<p align="center"><img src="docs/assets/pinkcollab-readme.webp" width="720" alt="PinkCollab promotional illustration with the robot mascot and a phone showing AI sessions, task progress, and agent replies" /></p>
+<p align="center"><a href="https://3xian.github.io/PinkCollab/#demo"><img src="docs/assets/pinkcollab-demo.webp" width="720" alt="Watch the 30-second PinkCollab app demo: follow a session from prompt through tool activity to the final response" /></a></p>
+
+<p align="center"><a href="https://3xian.github.io/PinkCollab/#demo">Watch the 30-second app demo</a> · <a href="https://3xian.github.io/PinkCollab/media/pinkcollab-demo.mp4">Open MP4</a></p>
 
 ## Quick start
 

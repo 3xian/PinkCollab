@@ -100,7 +100,7 @@ for (const page of PAGES) {
     check(duplicates === 1, `${page}: duplicate id "${attribute[1]}"`);
   }
 
-  for (const match of source.matchAll(/\s(?:href|src)="([^"]+)"/g)) {
+  for (const match of source.matchAll(/\s(?:href|src|poster)="([^"]+)"/g)) {
     const url = match[1];
     if (/^(https?:|mailto:|data:|tel:)/.test(url)) continue;
     if (url.startsWith('#')) {
@@ -159,6 +159,30 @@ check((html['index.html'].match(/src="assets\/pinkcollab-session-review\.webp"/g
   'index.html: the hero artwork should not be repeated below the fold');
 for (const match of html['index.html'].matchAll(/<button\b[^>]*data-copy="([^"]+)"[^>]*>/g)) {
   check(ids['index.html'].has(match[1]), `index.html: copy target "${match[1]}" is missing`);
+}
+
+// Video is fetched only on demand; its poster belongs to the page-image budget.
+const demoVideo = /<video\b[^>]*>([\s\S]*?)<\/video>/.exec(html['index.html']);
+check(Boolean(demoVideo), 'index.html: missing the app demo video');
+if (demoVideo) {
+  const tag = demoVideo[0].slice(0, demoVideo[0].indexOf('>') + 1);
+  check(/\bcontrols(?:\s|>)/.test(tag), 'app demo: native playback controls are required');
+  check(/\bplaysinline(?:\s|>)/.test(tag), 'app demo: allow inline playback on phones');
+  check(/\bpreload="none"/.test(tag), 'app demo: preload must be none');
+  check(!/\bautoplay\b/.test(tag), 'app demo: do not autoplay');
+  check(/\bposter="assets\/pinkcollab-demo-poster\.webp"/.test(tag), 'app demo: missing lightweight poster');
+  check(/src="media\/pinkcollab-demo\.mp4" type="video\/mp4"/.test(demoVideo[1]),
+    'app demo: missing the shared MP4 source');
+}
+const demoFile = siteFile('media/pinkcollab-demo.mp4');
+check(existsSync(demoFile), 'app demo: MP4 file does not exist');
+if (existsSync(demoFile)) {
+  const bytes = readFileSync(demoFile);
+  check(bytes.length <= 3_000_000, 'app demo: MP4 exceeds the 3 MB playback budget');
+  check(bytes.toString('ascii', 4, 8) === 'ftyp', 'app demo: invalid MP4 header');
+  const moov = bytes.indexOf(Buffer.from('moov'));
+  const mdat = bytes.indexOf(Buffer.from('mdat'));
+  check(moov >= 0 && mdat > moov, 'app demo: metadata must precede video data for fast start');
 }
 
 // --- Social card and icons ------------------------------------------------
@@ -302,6 +326,10 @@ function checkMarkdownFile(file) {
 }
 
 const readme = read('README.md');
+check(existsSync(join(ROOT, 'docs/assets/pinkcollab-demo.webp')), 'README: missing demo cover');
+check(readme.includes('src="docs/assets/pinkcollab-demo.webp"'), 'README: missing the real demo cover');
+check(readme.includes(`${ORIGIN}${BASE}/#demo`), 'README: missing the website player link');
+check(readme.includes(`${ORIGIN}${BASE}/media/pinkcollab-demo.mp4`), 'README: must share the website MP4');
 checkMarkdownFile('README.md');
 for (const name of readdirSync(join(ROOT, 'docs'))) {
   if (name.endsWith('.md')) checkMarkdownFile(join('docs', name));

@@ -78,3 +78,27 @@ python3 scripts/update-logo.py --promotional-only
 It requires Pillow and does not need a browser installation. Website layout
 changes still require desktop/mobile browser review and an updated stylesheet
 content hash in both HTML pages; see [development checks](../docs/development.md).
+
+## App demo video
+
+`prepare-demo.py` prepares the supplied 30-second Android screen recording for
+the README and website. Keep the original recording outside the repository and
+always encode from that original:
+
+```powershell
+python scripts/prepare-demo.py "D:/视频/PinkCollab/10月23日.mp4"
+```
+
+FFmpeg must be on PATH. The script uses Arial Bold on Windows, DejaVu Sans Bold
+on Linux, or Arial Bold on macOS; pass `--font /path/to/bold.ttf` if needed.
+It preserves the recording's dimensions, frame rate, duration and audio, using
+H.264 at CRF 27 and AAC at 96 kbps. The original 14.4 MB recording becomes a
+roughly 1.1 MB MP4 in `website/media/`, with its metadata at the front
+(`+faststart`) so playback can start before the full download finishes.
+
+The frame at 28 seconds produces a WebP poster in `website/assets/` and a
+1200 × 675 README cover in `docs/assets/`, with the 30° gray/white background
+and a real app frame. Pass `--poster-time` to choose another moment. The website
+uses native playback controls, `playsinline` and `preload="none"`, without
+autoplay. The README cover links to the website player and includes a direct
+MP4 link; both surfaces share one video file.
