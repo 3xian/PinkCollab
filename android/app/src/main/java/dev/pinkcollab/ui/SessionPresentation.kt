@@ -13,6 +13,13 @@ import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.TimelineItem
 
+/** Terminal icon fonts use private-use code points that Android cannot render. */
+internal fun sessionDisplayTitle(title: String): String = buildString {
+    title.codePoints().forEach { codePoint ->
+        if (Character.getType(codePoint) != Character.PRIVATE_USE.toInt()) appendCodePoint(codePoint)
+    }
+}.trim().ifEmpty { "Untitled session" }
+
 internal data class SessionPageState(
     val detail: LoadState<SessionDetail>,
     val host: HostState?,

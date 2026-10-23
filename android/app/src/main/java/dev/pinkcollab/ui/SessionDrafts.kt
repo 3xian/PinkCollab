@@ -63,6 +63,8 @@ internal class SessionDraftStore(
         if (next != mutable.value) mutable.value = next
     }
 
+    fun removeSession(key: SessionKey) { mutable.value = mutable.value - key }
+
     private fun change(key: SessionKey, transform: (SessionDraft) -> SessionDraft) {
         val current = mutable.value[key] ?: SessionDraft()
         val next = transform(current)

@@ -59,6 +59,7 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
     val id = frame.optString("sessionId").ifBlank { frame.getJSONObject("session").getString("id") }
     val key = SessionKey(hostId, id)
     val before = app.details[key]
+    if (id in host.removedSessionIds && type != "session_remove") return ProtocolReduction(app)
     if (type == "session_resume") {
         if (before == null || before.serverEpoch != epoch) return ProtocolReduction(app, listOf(GatewayEffect.ResyncSession(key)))
         return ProtocolReduction(app.copy(details = app.details + (key to before.copy(snapshotToken = UUID.randomUUID().toString()))))
@@ -86,7 +87,7 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
                 sessions = sessions.filterNot { it.id == id }
                 removedSessionIds = removedSessionIds + id
             }
-            if (updateDetail) detail = null
+            if (updateHost || updateDetail) detail = null
         }
         "session_snapshot", "session_sync", "session_state", "session_upsert", "runtime_state" -> {
             val runtime = frame.optJSONObject("runtime")

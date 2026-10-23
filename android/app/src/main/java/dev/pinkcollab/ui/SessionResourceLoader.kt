@@ -155,6 +155,23 @@ internal class SessionResourceLoader(
         }
     }
 
+    fun removeSession(key: SessionKey) {
+        val detailJob = synchronized(detailLoadLock) {
+            detailVersions.remove(key)
+            mutableDetailLoads.value -= key
+            detailJobs.remove(key)
+        }
+        val modelJob = synchronized(modelLoadLock) {
+            modelVersions.remove(key)
+            modelGenerations.remove(key)
+            thinkingLoads.remove(key)
+            publishModelLoads()
+            modelJobs.remove(key)
+        }
+        detailJob?.cancel()
+        modelJob?.cancel()
+    }
+
     fun removeHost(hostId: String) {
         val detailToCancel = synchronized(detailLoadLock) {
             detailVersions.keys.removeAll { it.hostId == hostId }

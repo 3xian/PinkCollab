@@ -1,26 +1,28 @@
+mod sessions;
 mod stream;
 use crate::{
-    domain::SessionRecord,
     events::Bus,
     model::Host,
     protocol::{GATEWAY_PROTOCOL_VERSION, OperationDto, ServerEvent, SessionDto, SessionSnapshot},
-    runtime::{Command as ApiCommand, SessionDirectory, SubmitError},
+    runtime::SessionDirectory,
     storage::Store,
     uploads,
     workspace::Browser,
 };
 use axum::{
     Json, Router,
-    body::Bytes,
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{any, get, post, put},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use sessions::{
+    api_command, api_create, api_delete, api_detail, api_models, api_operation, api_sessions,
+    api_upload,
+};
 use std::{path::Path as FsPath, sync::Arc};
 use stream::api_stream;
 use tower_http::compression::CompressionLayer;
@@ -45,7 +47,7 @@ pub fn router(app: App) -> Router {
         .route("/api/v4/workspaces", get(workspaces))
         .route("/api/v4/fs/list", get(list))
         .route("/api/v4/sessions", get(api_sessions).post(api_create))
-        .route("/api/v4/sessions/{id}", get(api_detail))
+        .route("/api/v4/sessions/{id}", get(api_detail).delete(api_delete))
         .route("/api/v4/sessions/{id}/commands", post(api_command))
         .route(
             "/api/v4/sessions/{id}/files/{file_id}",
@@ -133,272 +135,6 @@ async fn api_host(State(app): State<App>) -> Json<Value> {
     Json(
         json!({"host":app.host,"protocolVersion":GATEWAY_PROTOCOL_VERSION,"capabilities":{"ompRpcTransport":1,"modelSelection":true,"thinkingLevels":true,"historyPaging":true,"resume":true,"fileUploads":true}}),
     )
-}
-#[derive(Deserialize)]
-struct ApiSessionsQuery {
-    cursor: Option<String>,
-    limit: Option<usize>,
-}
-#[derive(Serialize, Deserialize)]
-struct ApiSessionsCursor {
-    created_at: String,
-    id: String,
-}
-async fn api_sessions(
-    State(app): State<App>,
-    Query(query): Query<ApiSessionsQuery>,
-) -> Result<Json<Value>, ApiError> {
-    let limit = query.limit.unwrap_or(50);
-    if !(1..=100).contains(&limit) {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "invalid_page_limit",
-            "Limit must be 1..100".into(),
-        ));
-    }
-    let cursor = match query.cursor.as_deref() {
-        None => None,
-        Some(raw) => {
-            let decoded = (raw.len() <= 1024)
-                .then(|| hex::decode(raw).ok())
-                .flatten()
-                .and_then(|bytes| serde_json::from_slice::<ApiSessionsCursor>(&bytes).ok());
-            Some(decoded.ok_or_else(|| {
-                ApiError(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_cursor",
-                    "Invalid sessions cursor".into(),
-                )
-            })?)
-        }
-    };
-    let page = app
-        .sessions
-        .list_page(
-            cursor
-                .as_ref()
-                .map(|cursor| (cursor.created_at.as_str(), cursor.id.as_str())),
-            limit,
-        )
-        .await
-        .map_err(|_| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "persistence_unavailable",
-                "Session records unavailable".into(),
-            )
-        })?;
-    let next_cursor = if page.has_more {
-        page.sessions.last().map(|summary| {
-            hex::encode(
-                serde_json::to_vec(&ApiSessionsCursor {
-                    created_at: summary.session.created_at.to_rfc3339(),
-                    id: summary.session.id.clone(),
-                })
-                .expect("serializable cursor"),
-            )
-        })
-    } else {
-        None
-    };
-    let mut summaries = serde_json::to_value(page.sessions).unwrap();
-    for summary in summaries.as_array_mut().unwrap() {
-        crate::wire::compact_runtime(&mut summary["runtime"]);
-    }
-    Ok(Json(
-        json!({"sessions":summaries,"nextCursor":next_cursor,"epoch":app.bus.epoch,"catalogVersion":page.catalog_version}),
-    ))
-}
-async fn api_detail(
-    State(app): State<App>,
-    Path(id): Path<String>,
-) -> Result<Json<SessionSnapshot>, ApiError> {
-    let view = app
-        .sessions
-        .view(&id)
-        .await
-        .map_err(|_| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "persistence_unavailable",
-                "Session record unavailable".into(),
-            )
-        })?
-        .ok_or_else(|| {
-            ApiError(
-                StatusCode::NOT_FOUND,
-                "session_not_found",
-                "Session not found".into(),
-            )
-        })?;
-    Ok(Json(view.dto()))
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ApiCommandBody {
-    command_id: String,
-    #[serde(flatten)]
-    command: ApiCommand,
-}
-async fn api_command(
-    State(app): State<App>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Json(body): Json<ApiCommandBody>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let client_id = api_client(&app, &headers).await?;
-    let submitted = app
-        .sessions
-        .submit(client_id, id, body.command_id, body.command)
-        .await
-        .map_err(|err| match err {
-            SubmitError::HistoryUnavailable => ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "history_unavailable",
-                "OMP history cannot be continued; refresh and retry".into(),
-            ),
-            SubmitError::ExternalBusy => ApiError(
-                StatusCode::CONFLICT,
-                "external_session_busy",
-                "Close the external OMP session and retry".into(),
-            ),
-            SubmitError::NotFound => ApiError(
-                StatusCode::NOT_FOUND,
-                "session_not_found",
-                "Session not found".into(),
-            ),
-            SubmitError::Invalid(message) => {
-                ApiError(StatusCode::BAD_REQUEST, "invalid_request", message)
-            }
-            SubmitError::Conflict => ApiError(
-                StatusCode::CONFLICT,
-                "idempotency_conflict",
-                "Command ID was already used for a different request".into(),
-            ),
-            SubmitError::Persistence => ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "persistence_unavailable",
-                "Could not store command receipt".into(),
-            ),
-        })?;
-    Ok((
-        if submitted.replayed {
-            StatusCode::OK
-        } else {
-            StatusCode::ACCEPTED
-        },
-        Json(
-            json!({"operation":OperationDto::from(&submitted.receipt),"receiptStored":submitted.receipt_stored}),
-        ),
-    ))
-}
-#[derive(Deserialize)]
-struct UploadQuery {
-    name: String,
-}
-async fn api_upload(
-    State(app): State<App>,
-    Path((id, file_id)): Path<(String, String)>,
-    Query(query): Query<UploadQuery>,
-    bytes: Bytes,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let read_id = id.clone();
-    let exists = app.sessions.view(&read_id).await.map_err(|_| {
-        ApiError(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "persistence_unavailable",
-            "Session record unavailable".into(),
-        )
-    })?;
-    if exists.is_none() {
-        return Err(ApiError(
-            StatusCode::NOT_FOUND,
-            "session_not_found",
-            "Session not found".into(),
-        ));
-    }
-    let size = bytes.len();
-    let name = query.name;
-    let store = app.store.clone();
-    let saved_file_id = file_id.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        uploads::save(&store, &id, &saved_file_id, &name, &bytes)
-    })
-    .await
-    .map_err(|_| {
-        ApiError(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "upload_failed",
-            "Upload worker stopped".into(),
-        )
-    })?;
-    let path = result.map_err(|err| {
-        if err.downcast_ref::<std::io::Error>().is_some() {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "upload_failed",
-                "Could not store uploaded file".into(),
-            )
-        } else {
-            ApiError(
-                StatusCode::BAD_REQUEST,
-                "invalid_file",
-                "Invalid upload request".into(),
-            )
-        }
-    })?;
-    Ok((
-        StatusCode::CREATED,
-        Json(
-            json!({"fileId":file_id,"name":path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),"size":size}),
-        ),
-    ))
-}
-async fn api_operation(
-    State(app): State<App>,
-    headers: HeaderMap,
-    Path((id, command_id)): Path<(String, String)>,
-) -> Result<Json<Value>, ApiError> {
-    let client_id = api_client(&app, &headers).await?;
-    let operation = app
-        .sessions
-        .operation(&client_id, &id, &command_id)
-        .await
-        .map_err(|_| {
-            ApiError(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "persistence_unavailable",
-                "Command receipt unavailable".into(),
-            )
-        })?
-        .ok_or_else(|| {
-            ApiError(
-                StatusCode::NOT_FOUND,
-                "operation_not_found",
-                "Command receipt not found".into(),
-            )
-        })?;
-    Ok(Json(json!(OperationDto::from(&operation))))
-}
-async fn api_models(
-    State(app): State<App>,
-    Path(id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
-    let (models, thinking_levels) = app.sessions.models(&id).await.map_err(|err| {
-        let code = if err.to_string().contains("runtime") {
-            "runtime_required"
-        } else {
-            "unsupported_capability"
-        };
-        ApiError(
-            StatusCode::CONFLICT,
-            code,
-            "Model catalog unavailable".into(),
-        )
-    })?;
-    Ok(Json(
-        json!({"models":models,"thinkingLevels":thinking_levels}),
-    ))
 }
 #[derive(Deserialize)]
 struct ApiHistoryQuery {
@@ -582,95 +318,6 @@ async fn read_history(app: &App, id: &str, query: &ApiHistoryQuery) -> Result<Va
     Ok(page)
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ApiCreate {
-    command_id: String,
-    host_id: String,
-    cwd: String,
-    #[serde(default)]
-    title: String,
-}
-async fn api_create(
-    State(app): State<App>,
-    headers: HeaderMap,
-    Json(body): Json<ApiCreate>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let client_id = api_client(&app, &headers).await?;
-    if body.host_id != app.host.id
-        || body.command_id.is_empty()
-        || body.command_id.len() > 128
-        || !body
-            .command_id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-    {
-        return Err(ApiError(
-            StatusCode::BAD_REQUEST,
-            "invalid_request",
-            "Valid hostId and commandId required".into(),
-        ));
-    }
-    let cwd = app.browser.validate(FsPath::new(&body.cwd)).map_err(|_| {
-        ApiError(
-            StatusCode::FORBIDDEN,
-            "workspace_forbidden",
-            "Workspace is outside the allowed roots".into(),
-        )
-    })?;
-    let cwd = crate::workspace::display(&cwd);
-    let title = if body.title.trim().is_empty() {
-        "New session".to_owned()
-    } else {
-        body.title.trim().chars().take(80).collect::<String>()
-    };
-    let semantics = json!({"type":"create_session","hostId":body.host_id,"cwd":cwd,"title":title});
-    let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&semantics).unwrap()));
-    let now = chrono::Utc::now();
-    let record = SessionRecord {
-        id: crate::storage::id("sess_"),
-        host_id: app.host.id.clone(),
-        cwd,
-        title,
-        metadata_revision: 1,
-        created_at: now,
-        updated_at: now,
-        last_activity_at: now,
-        archived_at: None,
-        engine_session_ref: None,
-    };
-    let command_id = body.command_id.clone();
-    let (record, replayed) = app
-        .store
-        .run(move |store| store.create_v2(&client_id, &command_id, &fingerprint, record))
-        .await
-        .map_err(|err| {
-            if err.to_string().contains("idempotency_conflict") {
-                ApiError(
-                    StatusCode::CONFLICT,
-                    "idempotency_conflict",
-                    "Command ID was already used for a different session request".into(),
-                )
-            } else {
-                ApiError(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "persistence_unavailable",
-                    "Could not save session".into(),
-                )
-            }
-        })?;
-    if !replayed {
-        app.sessions.publish_created(&record).await;
-    }
-    Ok((
-        if replayed {
-            StatusCode::OK
-        } else {
-            StatusCode::CREATED
-        },
-        Json(json!(SessionDto::from(&record))),
-    ))
-}
 fn credential(headers: &HeaderMap) -> Option<&str> {
     headers
         .get("authorization")?
@@ -832,6 +479,7 @@ async fn api_usage(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::SessionRecord;
 
     #[test]
     fn unrelated_timeline_during_database_read_does_not_invalidate_snapshots() {

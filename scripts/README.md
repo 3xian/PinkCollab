@@ -89,16 +89,28 @@ always encode from that original:
 python scripts/prepare-demo.py "D:/视频/PinkCollab/10月23日.mp4"
 ```
 
-FFmpeg must be on PATH. The script uses Arial Bold on Windows, DejaVu Sans Bold
+FFmpeg must be on PATH and Pillow must be installed. The script uses Arial Bold on Windows, DejaVu Sans Bold
 on Linux, or Arial Bold on macOS; pass `--font /path/to/bold.ttf` if needed.
 It preserves the recording's dimensions, frame rate, duration and audio, using
 H.264 at CRF 27 and AAC at 96 kbps. The original 14.4 MB recording becomes a
 roughly 1.1 MB MP4 in `website/media/`, with its metadata at the front
 (`+faststart`) so playback can start before the full download finishes.
 
-The frame at 28 seconds produces a WebP poster in `website/assets/` and a
-1200 × 675 README cover in `docs/assets/`, with the 30° gray/white background
-and a real app frame. Pass `--poster-time` to choose another moment. The website
-uses native playback controls, `playsinline` and `preload="none"`, without
-autoplay. The README cover links to the website player and includes a direct
-MP4 link; both surfaces share one video file.
+The frame at 28 seconds produces a WebP poster in `website/assets/`. The README
+cover in `docs/assets/` is a 1600 × 1120 promotional poster: the mascot and a
+large “Your OMP. Anywhere.” headline sit on the gray/white diagonal, beside a
+framed real app screen. The screenshot keeps its native 720-pixel width, with
+Android's system bars removed and the device extending past the bottom edge.
+The final response stays visible. The crop expects the supplied 720 × 1558
+recording. The cover uses lossless WebP to preserve text, displays at up to
+960 pixels wide, and links to the full-resolution image. Pass `--poster-time`
+to choose another moment in the same recording.
+To rebuild this cover without re-encoding the published video or poster:
+
+```powershell
+python scripts/prepare-demo.py "D:/视频/PinkCollab/10月23日.mp4" --cover-only
+```
+
+The website uses native playback controls, `playsinline` and `preload="none"`, without
+autoplay. Links below the README cover open the website player or the MP4;
+both surfaces share one video file.

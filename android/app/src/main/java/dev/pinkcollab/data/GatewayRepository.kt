@@ -156,6 +156,7 @@ internal class GatewayRepository(
     fun prefetchListings(hostId: String, paths: List<String>) = directories.prefetch(hostId, paths)
 
     suspend fun create(hostId: String, cwd: String) = sessions.create(hostId, cwd)
+    suspend fun deleteSession(hostId: String, id: String) = sessions.delete(hostId, id)
     suspend fun detail(hostId: String, id: String) = sessions.detail(hostId, id)
     suspend fun loadEarlierHistory(hostId: String, id: String) = sessions.loadEarlierHistory(hostId, id)
     suspend fun usage(hostId: String) = sessions.usage(hostId)

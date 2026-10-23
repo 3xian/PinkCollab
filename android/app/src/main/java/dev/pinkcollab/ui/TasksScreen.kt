@@ -92,6 +92,7 @@ internal data class TasksScreenActions(
     val loadToolDetails: suspend (Session, String, String?) -> ToolDetailPage = { _, _, _ -> error("Tool details unavailable") },
     val createSession: (String, String) -> Unit = { _, _ -> },
     val refreshHosts: (List<String>) -> Unit = {},
+    val clearSelection: () -> Unit = {},
 )
 
 @Composable
@@ -137,6 +138,8 @@ internal fun TasksScreen(
             host = hosts[infoSession.hostId],
             creating = OperationKey.CreateTask(infoSession.hostId, infoSession.cwd) in state.hostOperations,
             create = { actions.createSession(infoSession.hostId, infoSession.cwd) },
+            busy = sessionOperations.activity(SessionKey(infoSession.hostId, infoSession.id)).inputBusy,
+            delete = { actions.session(infoSession, SessionAction.Command(SessionUserCommand.Delete)) },
             dismiss = { infoTarget = null },
         )
     }
@@ -161,6 +164,10 @@ internal fun TasksScreen(
     }
     val selectedHostConnected = selectedSession?.let { hosts[it.hostId]?.connected } == true
     LaunchedEffect(pagerState, selectedSession, sessionKeys, hostFilter, selectedHostConnected) {
+        if (selectedSession != null && selectedSession.sessionId in hosts[selectedSession.hostId]?.removedSessionIds.orEmpty()) {
+            sessionKeys.firstOrNull()?.let(onSessionSelected) ?: actions.clearSelection()
+            return@LaunchedEffect
+        }
         val selectionChanged = appliedSelection != selectedSession
         if (selectionChanged && hiddenByFilter) {
             requestedHostId = null
@@ -234,8 +241,11 @@ internal fun TasksScreen(
                     val displayed = sessionDetailForDisplay(detail, displayCache[key])
                     val host = hosts[session.hostId]
                     if (sessionNeedsHostRecovery(displayed != null, host) && host != null) {
-                        Box(Modifier.fillMaxSize().padding(top = cardStripHeight)) {
-                            SessionRecoveryScreen(listOf(host), actions)
+                        Box(Modifier.fillMaxSize()) {
+                            Box(Modifier.fillMaxSize().padding(top = cardStripHeight)) {
+                                SessionRecoveryScreen(listOf(host), actions)
+                            }
+                            TasksPagerBackground(cardStripHeight)
                         }
                     } else {
                         val detailState = displayed?.let { LoadState.Ready(it.detail) }
@@ -265,6 +275,7 @@ internal fun TasksScreen(
                             onAction = { action -> actions.session(session, action) },
                             onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
                             loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
+                            topScrim = { TasksPagerBackground(cardStripHeight) },
                         )
                     }
                 }
@@ -692,6 +703,24 @@ private fun TopBarAction(icon: ImageVector, label: String, onClick: () -> Unit) 
 }
 
 @Composable
+private fun TasksPagerBackground(height: Dp) {
+    val backgroundHeight = height + 8.dp
+    val solidStop = (height / 2 + 8.dp) / backgroundHeight
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(backgroundHeight)
+            .background(
+                Brush.verticalGradient(
+                    0f to Base0,
+                    solidStop to Base0,
+                    1f to Color.Transparent,
+                ),
+            ),
+    )
+}
+
+@Composable
 private fun TasksPagerBar(
     hosts: Map<String, HostState>,
     sessions: List<Session>,
@@ -713,27 +742,12 @@ private fun TasksPagerBar(
     }
     val cardWidth = 168.dp
     val startPadding = 12.dp
-    val backgroundHeight = height + 8.dp
-    val solidStop = (height / 2) / backgroundHeight
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
             .height(height)
             .zIndex(1f),
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .wrapContentHeight(align = Alignment.Top, unbounded = true)
-                .height(backgroundHeight)
-                .background(
-                    Brush.verticalGradient(
-                        0f to Base0,
-                        solidStop to Base0,
-                        1f to Color.Transparent,
-                    ),
-                ),
-        )
         val centerOffset = ((maxWidth - cardWidth) / 2).coerceAtLeast(0.dp)
         val scrollOffsetPx = with(LocalDensity.current) { (startPadding - centerOffset).roundToPx() }
         LaunchedEffect(currentPage, sessionKeys, scrollOffsetPx) {
@@ -748,6 +762,7 @@ private fun TasksPagerBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             itemsIndexed(sessions, key = { _, session -> SessionKey(session.hostId, session.id).pagerKey() }) { index, session ->
+                val title = remember(session.title) { sessionDisplayTitle(session.title) }
                 val cardStatus = sessionCardStatus(session, hosts[session.hostId]?.connection)
                 val selected = SessionKey(session.hostId, session.id) ==
                     (selectedSession ?: sessionKeys.getOrNull(currentPage))
@@ -789,7 +804,7 @@ private fun TasksPagerBar(
                 ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         Text(
-                            session.title,
+                            title,
                             Modifier.weight(1f),
                             style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
@@ -845,8 +860,33 @@ private fun SessionInfoDialog(
     host: HostState?,
     creating: Boolean,
     create: () -> Unit,
+    busy: Boolean,
+    delete: () -> Unit,
     dismiss: () -> Unit,
 ) {
+    var confirmingDelete by rememberSaveable(session.id) { mutableStateOf(false) }
+    val title = remember(session.title) { sessionDisplayTitle(session.title) }
+    val canDelete = host?.connected == true && !session.isActive && !busy && !creating
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) confirmingDelete = false },
+            modifier = Modifier.testTag("deleteSessionConfirmation"),
+            title = { Text("Delete session?", style = DialogHeadlineStyle) },
+            text = { Text("Permanently delete “$title”, its OMP conversation history, session artifacts, and uploaded attachments. Project files stay unchanged. Close any OMP terminal using this session first. This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = rememberHapticOnClick(delete),
+                    enabled = canDelete,
+                    modifier = Modifier.testTag("confirmDeleteSession"),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text(if (busy) "Deleting…" else "Delete permanently") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }, enabled = !busy) { Text("Cancel") }
+            },
+        )
+        return
+    }
     val created = remember(session.createdAt) { sessionInfoTime(session.createdAt) }
     val updated = remember(session.updatedAt) { sessionInfoTime(session.updatedAt) }
     AlertDialog(
@@ -859,7 +899,7 @@ private fun SessionInfoDialog(
                     Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    SessionInfoField("Title", session.title)
+                    SessionInfoField("Title", title)
                     Column(
                         Modifier.testTag("sessionInfoHost"),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -881,6 +921,7 @@ private fun SessionInfoDialog(
                     }
                     SessionInfoField("Working directory", session.cwd)
                     SessionInfoField("Status", sessionCardStatus(session, host?.connection).label)
+                    if (session.isActive) Text("Exit the session runtime before deleting.", style = MaterialTheme.typography.bodySmall, color = TextMid)
                     SessionInfoField("Created (local time)", created)
                     SessionInfoField("Updated (local time)", updated)
                     SessionInfoField("Session ID", session.id)
@@ -888,7 +929,12 @@ private fun SessionInfoDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = rememberHapticOnClick(dismiss)) { Text("Close") }
+            TextButton(
+                onClick = rememberHapticOnClick { confirmingDelete = true },
+                enabled = canDelete,
+                modifier = Modifier.testTag("deleteSessionFromInfo"),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text("Delete") }
         },
         confirmButton = {
             TextButton(

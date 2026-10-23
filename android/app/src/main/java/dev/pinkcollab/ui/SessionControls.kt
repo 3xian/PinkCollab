@@ -11,14 +11,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Autorenew
+import androidx.compose.material.icons.automirrored.outlined.TextSnippet
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -33,8 +36,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.layout.layout
-import kotlin.math.roundToInt
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.ui.theme.*
 
@@ -163,54 +164,82 @@ internal fun composerThinkingLabel(model: ModelInfo?): String? =
     model?.thinkingLevel?.takeIf { it.isNotBlank() }
 
 @Composable
-internal fun ComposerFastSwitch(
+internal fun ComposerSettingsBar(
+    model: ModelInfo?,
+    canChooseModel: Boolean,
+    onChooseModel: () -> Unit,
+    onFastChange: (Boolean) -> Unit,
+    onQuickInputs: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            ComposerModelButton(
+                label = composerModelLabel(model),
+                thinkingLevel = composerThinkingLabel(model),
+                onClick = onChooseModel,
+                enabled = canChooseModel,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            ComposerFastButton(
+                checked = model?.fastModeEnabled == true,
+                active = model?.fastModeActive == true,
+                enabled = canChooseModel,
+                onCheckedChange = onFastChange,
+            )
+        }
+        IconButton(onClick = rememberHapticOnClick(onQuickInputs), modifier = Modifier.size(48.dp)) {
+            Icon(Icons.AutoMirrored.Outlined.TextSnippet, contentDescription = "Quick inputs", tint = TextMid,
+                modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+internal fun ComposerFastButton(
     checked: Boolean,
     enabled: Boolean,
     active: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val toggle = rememberHapticOnClick { onCheckedChange(!checked) }
-    val color = when {
-        !enabled -> Gray400.copy(alpha = 0.34f)
-        checked -> Purple200
-        else -> TextMid
-    }
-    val switchScale = 0.8f
-    Row(
+    val color = (if (checked) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant)
+        .copy(alpha = if (enabled) 1f else 0.34f)
+    Box(
         Modifier
             .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-            .padding(end = ComposerContentInset)
             .toggleable(value = checked, interactionSource = remember { MutableInteractionSource() },
-                indication = null, enabled = enabled, role = Role.Switch,
+                indication = null, enabled = enabled, role = Role.Button,
                 onValueChange = { toggle() })
             .semantics {
                 contentDescription = if (checked && !active) "Fast mode, currently inactive" else "Fast mode"
             },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Text("Fast", color = color, style = MaterialTheme.typography.labelMedium)
-        Switch(
-            checked = checked,
-            onCheckedChange = null,
-            enabled = enabled,
-            modifier = Modifier.layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                val width = (placeable.width * switchScale).roundToInt()
-                layout(width, placeable.height) {
-                    placeable.place((width - placeable.width) / 2, 0)
+        Text(
+            "Fast",
+            modifier = Modifier
+                .drawWithCache {
+                    val width = 1.dp.toPx()
+                    val stroke = Stroke(
+                        width = width,
+                        pathEffect = if (checked) null else PathEffect.dashPathEffect(
+                            floatArrayOf(3.dp.toPx(), 2.dp.toPx()),
+                        ),
+                    )
+                    onDrawBehind {
+                        drawRoundRect(
+                            color = color,
+                            topLeft = Offset(width / 2, width / 2),
+                            size = Size(size.width - width, size.height - width),
+                            cornerRadius = CornerRadius(size.height / 2),
+                            style = stroke,
+                        )
+                    }
                 }
-            }.scale(switchScale),
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Purple400,
-                checkedBorderColor = Color.Transparent,
-                uncheckedThumbColor = TextMid,
-                uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                uncheckedBorderColor = Color.Transparent,
-                disabledCheckedBorderColor = Color.Transparent,
-                disabledUncheckedBorderColor = Color.Transparent,
-            ),
+                .padding(horizontal = 10.dp, vertical = 3.dp),
+            color = color,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
         )
     }
 }
@@ -227,7 +256,6 @@ internal fun ComposerModelButton(
     val color = if (enabled) Purple200 else Gray400.copy(alpha = 0.34f)
     Row(
         modifier
-            .fillMaxWidth()
             .heightIn(min = 48.dp)
             .clickable(enabled = enabled, role = Role.Button, onClick = rememberHapticOnClick(onClick))
             .padding(horizontal = ComposerContentInset)

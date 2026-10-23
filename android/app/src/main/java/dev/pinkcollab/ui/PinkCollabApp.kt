@@ -138,6 +138,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
                             hostOperations = operations,
                             actions = TasksScreenActions(
                                 selectSession = { selectedSession = it },
+                                clearSelection = { selectedSession = null },
                                 openResources = { route = AppRoute.Resources },
                                 connectHost = { pairHost = PairHostSheetState(visible = true) },
                                 checkForUpdates = { vm.checkForUpdates(manual = true) },

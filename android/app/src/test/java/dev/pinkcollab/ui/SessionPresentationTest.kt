@@ -18,6 +18,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionPresentationTest {
+    @Test fun titles_omit_terminal_icons_from_all_private_use_planes() {
+        assertEquals("WEB: Replace logo", sessionDisplayTitle("\uDB80\uDFD8 WEB: Replace logo"))
+        assertEquals("Task", sessionDisplayTitle("\uE000\uF8FF\uDB80\uDC00\uDBBF\uDFFD Task\uDBC0\uDC00\uDBFF\uDFFD"))
+    }
+
+    @Test fun titles_preserve_standard_symbols_emoji_and_supplementary_text() {
+        val title = "修复 ✨ 🚀 👩‍💻 ❤️ \uD840\uDC00"
+        assertEquals(title, sessionDisplayTitle(title))
+    }
+
+    @Test fun titles_with_only_terminal_icons_remain_identifiable() {
+        assertEquals("Untitled session", sessionDisplayTitle(" \uDB80\uDFD8 \uE0B0 "))
+    }
+
     private val paired = PairedHost(Host("host", "Desktop", "windows", "", ""), "https://host", "secret", "client")
     private val online = HostState(paired, connection = ConnectionState.Online(1L))
     private val session = Session("session", "host", "/work", "Work", SessionStatus.Running, "Working",

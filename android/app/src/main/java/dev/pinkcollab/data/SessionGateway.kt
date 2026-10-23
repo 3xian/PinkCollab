@@ -24,12 +24,40 @@ internal class SessionGateway(
     private val state = mutable.asStateFlow()
     private val pendingCreateIds = ConcurrentHashMap<String, String>()
 
+    suspend fun delete(hostId: String, id: String) {
+        val p = paired(hostId)
+        api.request(p.url, p.credential, "/api/v4/sessions/$id", "DELETE")
+        mutable.update { app ->
+            val host = app.hosts[hostId] ?: return@update app
+            if (host.paired != p) return@update app
+            val alreadyRemoved = id in host.removedSessionIds || host.sessions.none { it.id == id }
+            app.copy(
+                hosts = app.hosts + (hostId to host.copy(
+                    sessions = host.sessions.filterNot { it.id == id },
+                    pagedSessionIds = host.pagedSessionIds - id,
+                    removedSessionIds = host.removedSessionIds + id,
+                    revision = host.revision + 1,
+                    catalogVersion = null, pagesCatalogVersion = null,
+                    totalSessions = host.totalSessions?.let { if (alreadyRemoved) it else (it - 1).coerceAtLeast(0) },
+                )),
+                details = app.details - SessionKey(hostId, id),
+            )
+        }
+    }
+
     suspend fun create(hostId: String, cwd: String): Session {
         val p = paired(hostId)
         val key = "$hostId:$cwd"
         val commandId = pendingCreateIds.computeIfAbsent(key) { UUID.randomUUID().toString() }
         val body = JSONObject().put("commandId", commandId).put("hostId", hostId).put("cwd", cwd)
-        val session = JSONObject(api.request(p.url, p.credential, "/api/v4/sessions", "POST", body)).session()
+        val session = try {
+            JSONObject(api.request(p.url, p.credential, "/api/v4/sessions", "POST", body)).session()
+        } catch (failure: GatewayHttpException) {
+            if (failure.statusCode == 410 && failure.errorCode == "session_deleted") {
+                pendingCreateIds.remove(key, commandId)
+            }
+            throw failure
+        }
         pendingCreateIds.remove(key, commandId)
         return session
     }

@@ -69,6 +69,7 @@ internal fun SessionPage(
     isActive: Boolean = true,
     contentTopInset: Dp = 0.dp,
     loadToolDetails: suspend (String, String?) -> ToolDetailPage = { _, _ -> error("Tool details unavailable") },
+    topScrim: @Composable () -> Unit = {},
 ) {
     val load = state.detail
     val host = state.host.takeIf { load is LoadState.Ready && load.value.snapshotToken != null }
@@ -116,6 +117,7 @@ internal fun SessionPage(
         }
     }
     var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
+    var showQuickInputs by rememberSaveable(session.hostId, session.id) { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
     val attached = controls.attached
@@ -246,7 +248,6 @@ internal fun SessionPage(
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val stackComposerControls = maxWidth < 360.dp * density.fontScale
         val todoHeaderHeight = todoPanelHeaderHeight()
         val todoClearance = if (todo != null) todoHeaderHeight + 12.dp else 0.dp
         val keyboardHeight = with(density) {
@@ -294,8 +295,10 @@ internal fun SessionPage(
                         Column(
                             Modifier.messageSurface(),
                         ) {
-                            AgentHeader(detail.model, replying = true)
-                            Spacer(Modifier.height(6.dp))
+                            detail.model?.let { model ->
+                                ReplyModelLabel(model)
+                                Spacer(Modifier.height(6.dp))
+                            }
                             TimelineMessageBody(detail.streaming) { _ ->
                                 Text(detail.streaming, style = MaterialTheme.typography.bodySmall, color = TextHigh)
                             }
@@ -343,6 +346,8 @@ internal fun SessionPage(
             TimelineLoadingState(Modifier.padding(top = contentTopInset, bottom = composerClearance)
                 .testTag(if (load == LoadState.Loading) "sessionLoading" else "historyLoading"))
         }
+        // Keep the card-strip scrim above scrolling content but below the composer and TODO panel.
+        topScrim()
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -462,48 +467,13 @@ internal fun SessionPage(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
-                    Box(Modifier.fillMaxWidth()) {
-                        // Use the page width: a subcomposed layout cannot participate in the rail's intrinsic-height pass.
-                        if (stackComposerControls) {
-                            Column(
-                                Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                horizontalAlignment = Alignment.End,
-                            ) {
-                                ComposerModelButton(
-                                    label = composerModelLabel(detail.model),
-                                    thinkingLevel = composerThinkingLabel(detail.model),
-                                    onClick = { showModels = true },
-                                    enabled = controls.canChooseModel,
-                                )
-                                ComposerFastSwitch(
-                                    checked = detail.model?.fastModeEnabled == true,
-                                    active = detail.model?.fastModeActive == true,
-                                    enabled = controls.canChooseModel,
-                                    onCheckedChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
-                                )
-                            }
-                        } else {
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                ComposerModelButton(
-                                    label = composerModelLabel(detail.model),
-                                    thinkingLevel = composerThinkingLabel(detail.model),
-                                    onClick = { showModels = true },
-                                    enabled = controls.canChooseModel,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                ComposerFastSwitch(
-                                    checked = detail.model?.fastModeEnabled == true,
-                                    active = detail.model?.fastModeActive == true,
-                                    enabled = controls.canChooseModel,
-                                    onCheckedChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
-                                )
-                            }
-                        }
-                    }
+                    ComposerSettingsBar(
+                        model = detail.model,
+                        canChooseModel = controls.canChooseModel,
+                        onChooseModel = { showModels = true },
+                        onFastChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
+                        onQuickInputs = { showQuickInputs = true },
+                    )
                 }
                 ComposerRail(
                     controls = controls,
@@ -553,6 +523,18 @@ internal fun SessionPage(
             apply = { changes ->
                 if (onApplyModelSettings(changes)) showModels = false
             },
+        )
+    }
+    if (showQuickInputs && isActive) {
+        QuickInputsSheet(
+            store = remember(context) { QuickInputStore(context) },
+            currentDraft = prompt,
+            canInsert = inputEnabled,
+            onInsert = { text ->
+                onDraftTextChange(if (prompt.isBlank()) text else "$prompt\n$text")
+                showQuickInputs = false
+            },
+            dismiss = { showQuickInputs = false },
         )
     }
     if (showExitConfirmation) {

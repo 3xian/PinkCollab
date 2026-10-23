@@ -20,6 +20,7 @@ impl SessionDirectory {
     ) -> Arc<Self> {
         Arc::new(Self {
             adoption: Mutex::new(()),
+            lifecycle: Mutex::new(HashMap::new()),
             discovery: Arc::new(Mutex::new(crate::discovery::Discovery::new(&args))),
             controllers: Mutex::new(HashMap::new()),
             store,
@@ -129,7 +130,10 @@ impl SessionDirectory {
             history_ref: Some("omp".into()),
         }))
     }
-    async fn discovered(&self, id: &str) -> Result<Option<crate::discovery::OmpDiscoveredSession>> {
+    pub(super) async fn discovered(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::discovery::OmpDiscoveredSession>> {
         let mut discovery = self.discovery.clone().lock_owned().await;
         let browser = self.browser.clone();
         let id = id.to_owned();
@@ -398,6 +402,24 @@ impl SessionDirectory {
         } else {
             None
         };
+        // Deletion shares this gate through receipt admission. A controller obtained
+        // before deletion must never dispatch work against a removed session.
+        let lifecycle = self.lock_session_lifecycle(&session_id).await;
+        let lookup = session_id.clone();
+        // Stop must remain available through a cached controller during a storage
+        // outage. Live runtimes already prevent deletion independently of this read.
+        let emergency_stop = matches!(command, Command::StopRuntime { .. })
+            && controller.state.lock().await.runtime.is_some();
+        if !emergency_stop
+            && self
+                .store
+                .run(move |store| store.v2_session(&lookup))
+                .await
+                .map_err(|_| SubmitError::Persistence)?
+                .is_none()
+        {
+            return Err(SubmitError::NotFound);
+        }
         let fingerprint = hex::encode(Sha256::digest(
             serde_json::to_vec(&command)
                 .map_err(|_| SubmitError::Invalid("Invalid command".into()))?,
@@ -421,6 +443,7 @@ impl SessionDirectory {
             .store
             .run(move |store| store.insert_operation(&stored_receipt))
             .await;
+        drop(lifecycle);
         match inserted {
             Ok(false) => {
                 let previous = self

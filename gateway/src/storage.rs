@@ -9,9 +9,11 @@ use std::path::{Path, PathBuf};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 mod catalog;
+mod deletion;
 mod history_policy;
 mod references;
-use references::{claim_reference, reference_key};
+use references::claim_reference;
+use references::reference_key;
 
 pub struct Store {
     db: Mutex<Connection>,
@@ -90,7 +92,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 8,
+            schema_version <= 9,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -154,6 +156,9 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         }
         if schema_version < 8 {
             catalog::migrate(&db)?;
+        }
+        if schema_version < 9 {
+            references::migrate_shared_references(&db)?;
         }
         db.execute_batch(
             "CREATE INDEX IF NOT EXISTS response_feedback
@@ -327,8 +332,7 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         ).optional()?;
         if let Some((old_fingerprint, session_id)) = existing {
             ensure!(old_fingerprint == fingerprint, "idempotency_conflict");
-            let session =
-                read_v2_session(&tx, &session_id)?.context("create receipt has no session")?;
+            let session = read_v2_session(&tx, &session_id)?.context("session_deleted")?;
             return Ok((session, true));
         }
         tx.execute(

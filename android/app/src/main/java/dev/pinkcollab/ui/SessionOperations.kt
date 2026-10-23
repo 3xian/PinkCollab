@@ -42,8 +42,10 @@ internal class RepositorySessionActions(
     override suspend fun prompt(session: Session, message: String, fileIds: List<String>, intentId: String) =
         repository.prompt(session.hostId, session.id, message, fileIds, intentId)
 
-    override suspend fun command(session: Session, command: SessionUserCommand) =
-        repository.command(session.hostId, session.id, command.wire)
+    override suspend fun command(session: Session, command: SessionUserCommand) {
+        if (command == SessionUserCommand.Delete) repository.deleteSession(session.hostId, session.id)
+        else repository.command(session.hostId, session.id, command.wire)
+    }
 
     override suspend fun respond(session: Session, response: AttentionResponse) =
         repository.respond(session.hostId, session.id, response)
@@ -66,6 +68,7 @@ internal enum class SessionUserCommand(val wire: String, val lane: SessionLane) 
     Start("start", SessionLane.Action),
     Interrupt("interrupt", SessionLane.Control),
     Stop("stop", SessionLane.Control),
+    Delete("delete", SessionLane.Action),
 }
 
 internal sealed interface SendProgress {
@@ -172,7 +175,7 @@ internal class SessionOperations(
         }
     }
 
-    fun command(session: Session, command: SessionUserCommand) {
+    fun command(session: Session, command: SessionUserCommand, onDeleted: (SessionKey) -> Unit = {}) {
         val key = SessionKey(session.hostId, session.id)
         if (command.lane == SessionLane.Control) cancelSend(key)
         launch(key, command.lane) {
@@ -186,6 +189,7 @@ internal class SessionOperations(
             // Waiting for the local Send job could strand Stop behind a blocked content provider.
             try {
                 actions.command(session, command)
+                if (command == SessionUserCommand.Delete) onDeleted(key)
             } catch (failure: Exception) {
                 if (command == SessionUserCommand.Start) synchronized(lock) {
                     mutableRuntimeStarts.update { attempts ->
@@ -197,6 +201,11 @@ internal class SessionOperations(
                 throw failure
             }
         }
+    }
+
+    fun removeSession(key: SessionKey) {
+        cancelSend(key)
+        mutableRuntimeStarts.update { it - key }
     }
 
     fun respond(session: Session, response: AttentionResponse) = launch(session.key(), SessionLane.Action) {

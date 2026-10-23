@@ -20,6 +20,27 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SessionOperationsTest {
+    @Test fun delete_is_deduplicated_and_leaves_draft_cleanup_to_state_owner() = runTest {
+        val drafts = SessionDraftStore()
+        drafts.setText(key, "keep until confirmed")
+        val finish = CompletableDeferred<Unit>()
+        val actions = FakeActions(onCommand = { finish.await() })
+        val coordinator = SessionOperations(backgroundScope, actions, drafts, drafts::clearIfVersion, {})
+        val removed = mutableListOf<SessionKey>()
+        coordinator.command(session, SessionUserCommand.Delete, removed::add)
+        coordinator.command(session, SessionUserCommand.Delete, removed::add)
+        runCurrent()
+        assertEquals(listOf("delete"), actions.commands)
+        assertEquals("keep until confirmed", drafts.state.value[key]?.text)
+        assertTrue(removed.isEmpty())
+        assertTrue(coordinator.operations.value.activity(key).action)
+        finish.complete(Unit)
+        runCurrent()
+        assertEquals("keep until confirmed", drafts.state.value[key]?.text)
+        assertEquals(listOf(key), removed)
+        assertTrue(!coordinator.operations.value.activity(key).action)
+    }
+
     private val session = Session("session", "host", "/tmp", "Work", SessionStatus.Running, "Working", false, null,
         "2026-01-01", "2026-01-01", true, "generation")
     private val key = SessionKey("host", "session")

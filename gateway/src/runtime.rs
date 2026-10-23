@@ -185,6 +185,7 @@ pub struct SessionController {
 }
 pub struct SessionDirectory {
     adoption: Mutex<()>,
+    lifecycle: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
     discovery: Arc<Mutex<crate::discovery::Discovery>>,
     controllers: Mutex<HashMap<String, std::sync::Weak<SessionController>>>,
     store: Arc<Store>,
@@ -197,7 +198,11 @@ pub struct SessionDirectory {
 
 mod catalog;
 pub use catalog::SessionCatalogPage;
+mod deletion;
 mod directory;
+pub use deletion::DeleteError;
+mod lifecycle;
+pub use lifecycle::{CreateError, UploadError};
 mod response;
 mod settings;
 mod startup;

@@ -31,20 +31,16 @@ pub(crate) fn canonical_key(path: &Path) -> String {
 }
 
 pub(super) fn claim_reference(db: &Connection, session_id: &str, key: &str) -> Result<()> {
-    db.execute(
-        "INSERT INTO engine_references(reference_key,session_id) VALUES (?1,?2)
-         ON CONFLICT(reference_key) DO NOTHING",
+    let shared: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM engine_references WHERE reference_key=?1 AND session_id<>?2)",
         params![key, session_id],
-    )?;
-    let owner: String = db.query_row(
-        "SELECT session_id FROM engine_references WHERE reference_key=?1",
-        [key],
         |r| r.get(0),
     )?;
-    ensure!(
-        owner == session_id,
-        "OMP history is already managed; refresh sessions"
-    );
+    ensure!(!shared, "OMP history is already managed; refresh sessions");
+    db.execute(
+        "INSERT OR IGNORE INTO engine_references(reference_key,session_id) VALUES (?1,?2)",
+        params![key, session_id],
+    )?;
     Ok(())
 }
 
@@ -80,6 +76,17 @@ pub(super) fn migrate_references(db: &Connection) -> Result<()> {
 }
 
 impl Store {
+    /// Legacy aliases are indexed at migration time, so deletion never scans or
+    /// resolves unrelated sessions' filesystem paths.
+    pub(crate) fn shared_reference(&self, session_id: &str, reference: &Path) -> Result<bool> {
+        let key = reference_key(reference);
+        Ok(self.db.lock().query_row(
+            "SELECT EXISTS(SELECT 1 FROM engine_references WHERE reference_key=?1 AND session_id<>?2)",
+            params![key, session_id],
+            |r| r.get(0),
+        )?)
+    }
+
     /// Candidates are already canonicalized by discovery's blocking reader. No
     /// managed paths are opened when serving a list or resolving its next page.
     pub fn unmanaged_sources(
@@ -88,6 +95,36 @@ impl Store {
     ) -> Result<Vec<crate::discovery::OmpDiscoveredSession>> {
         unmanaged_sources(&self.db.lock(), sources)
     }
+}
+
+pub(super) fn migrate_shared_references(db: &Connection) -> Result<()> {
+    let tx = rusqlite::Transaction::new_unchecked(db, rusqlite::TransactionBehavior::Immediate)?;
+    if tx.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? >= 9 {
+        return Ok(());
+    }
+    let mappings = {
+        let mut query = tx.prepare("SELECT id,engine_session_ref FROM session_records WHERE engine_session_ref IS NOT NULL")?;
+        query
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    tx.execute_batch(
+        "DROP TABLE engine_references;
+        CREATE TABLE engine_references (
+            reference_key TEXT NOT NULL,
+            session_id TEXT NOT NULL REFERENCES session_records(id),
+            PRIMARY KEY(reference_key,session_id));
+        CREATE INDEX engine_references_session ON engine_references(session_id);",
+    )?;
+    for (id, reference) in mappings {
+        tx.execute(
+            "INSERT INTO engine_references VALUES (?1,?2)",
+            params![reference_key(Path::new(&reference)), id],
+        )?;
+    }
+    tx.execute_batch("PRAGMA user_version=9;")?;
+    tx.commit()?;
+    Ok(())
 }
 
 pub(super) fn unmanaged_sources(
@@ -199,7 +236,17 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM engine_references", [], |r| r
                     .get::<_, i64>(0))
                 .unwrap(),
-            1
+            2
+        );
+        assert!(
+            store
+                .shared_reference("one", Path::new(&reference))
+                .unwrap()
+        );
+        assert!(
+            store
+                .shared_reference("two", Path::new(&reference))
+                .unwrap()
         );
         assert!(store.set_engine_ref("three", 1, &reference).is_err());
         drop(store);

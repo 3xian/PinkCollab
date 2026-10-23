@@ -124,7 +124,14 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         }
         connectivity.registerDefaultNetworkCallback(networkCallback)
         viewModelScope.launch { repository.errors.collect(::showError) }
-        viewModelScope.launch { repository.state.collect { sessionCoordinator.updateDetails(it.details) } }
+        viewModelScope.launch { repository.state.collect { app ->
+            sessionCoordinator.updateDetails(app.details)
+            app.hosts.forEach { (hostId, host) ->
+                host.removedSessionIds.forEach { id ->
+                    removeSession(SessionKey(hostId, id))
+                }
+            }
+        } }
     }
 
     internal suspend fun followTaskFocus(selections: Flow<SessionKey?>) {
@@ -182,7 +189,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun sendPrompt(session: Session) = sessionCoordinator.send(session)
     internal fun sessionCommand(session: Session, command: SessionUserCommand) {
         sessionCoordinator.updateDetails(repository.state.value.details)
-        sessionCoordinator.command(session, command)
+        sessionCoordinator.command(session, command, ::removeSession)
     }
     internal fun respond(session: Session, response: AttentionResponse) = sessionCoordinator.respond(session, response)
     internal fun applyModelSettings(session: Session, changes: ModelSettingsChanges) =
@@ -211,7 +218,8 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         viewModelScope.launch {
             try {
                 val file = selectedFile(getApplication<Application>(), uri)
-                if (key.hostId in repository.state.value.hosts) addDraftFile(key, file)
+                val host = repository.state.value.hosts[key.hostId]
+                if (key in mutableFileSelections.value && host != null && key.sessionId !in host.removedSessionIds) addDraftFile(key, file)
                 else releaseUnusedUris(setOf(file.uri))
             } catch (error: CancellationException) {
                 throw error
@@ -246,6 +254,15 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     internal fun removeHostDrafts(hostId: String) {
         val before = trackedUris()
         draftStore.removeHost(hostId)
+        releaseUnusedUris(before)
+    }
+
+    private fun removeSession(key: SessionKey) {
+        val before = trackedUris()
+        sessionCoordinator.removeSession(key)
+        draftStore.removeSession(key)
+        resourceLoader.removeSession(key)
+        mutableFileSelections.update { it - key }
         releaseUnusedUris(before)
     }
 

@@ -16,6 +16,69 @@ import org.junit.Test
 import java.io.IOException
 
 class SessionGatewayTest {
+    @Test fun deleted_creation_receipt_rotates_retry_id_but_transport_failures_keep_it() = runTest {
+        val ids = mutableListOf<String>()
+        val transport = object : GatewayTransport {
+            override val client = OkHttpClient()
+            override fun validateURL(value: String) = value
+            override suspend fun request(url: String, credential: String?, path: String, method: String,
+                body: JSONObject?, query: Pair<String, String>?): String {
+                ids += body!!.getString("commandId")
+                when (ids.size) {
+                    1 -> throw IOException("Lost creation response")
+                    2 -> throw GatewayHttpException(410, "session_deleted", "Deleted")
+                    3 -> throw GatewayHttpException(503, "persistence_unavailable", "Retry")
+                    else -> throw IOException("Lost response")
+                }
+            }
+            override suspend fun upload(url: String, credential: String, path: String, name: String,
+                bytes: ByteArray): String = error("unexpected upload")
+        }
+        val gateway = gatewayWith(MutableStateFlow(AppState()), transport)
+        repeat(4) {
+            try {
+                gateway.create("host", "/work")
+                error("Expected failure")
+            } catch (_: IOException) { }
+        }
+        assertEquals(ids[0], ids[1])
+        assertTrue(ids[1] != ids[2])
+        assertEquals(ids[2], ids[3])
+    }
+
+    @Test fun deletion_clears_only_target_and_does_not_double_count_socket_removal() = runTest {
+        val detail = loadingDetail()
+        val key = SessionKey("host", "session")
+        val p = PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client")
+        val sibling = detail.session.copy(id = "sibling")
+        val state = MutableStateFlow(AppState(hosts = mapOf("host" to HostState(p,
+            sessions = listOf(detail.session, sibling), totalSessions = 2)), details = mapOf(key to detail)))
+        val gateway = gatewayWith(state, HistoryTransport { "" })
+        gateway.delete("host", "session")
+        assertEquals(listOf(sibling), state.value.hosts.getValue("host").sessions)
+        assertEquals(1, state.value.hosts.getValue("host").totalSessions)
+        assertNull(state.value.details[key])
+        assertTrue("session" in state.value.hosts.getValue("host").removedSessionIds)
+        gateway.delete("host", "session")
+        assertEquals(1, state.value.hosts.getValue("host").totalSessions)
+        // A fresh authoritative snapshot may clear the tombstone before HTTP completes.
+        state.update { it.copy(hosts = mapOf("host" to it.hosts.getValue("host").copy(removedSessionIds = emptySet()))) }
+        gateway.delete("host", "session")
+        assertEquals(1, state.value.hosts.getValue("host").totalSessions)
+    }
+
+    @Test fun failed_deletion_preserves_task_and_history() = runTest {
+        val key = SessionKey("host", "session")
+        val before = AppState(details = mapOf(key to loadingDetail()))
+        val state = MutableStateFlow(before)
+        try {
+            gatewayWith(state, HistoryTransport { throw GatewayHttpException(409, "session_busy", "Exit first") })
+                .delete("host", "session")
+            error("Expected deletion conflict")
+        } catch (_: GatewayHttpException) { }
+        assertEquals(before, state.value)
+    }
+
     private class NoNetworkTransport : GatewayTransport {
         override val client = OkHttpClient()
         override fun validateURL(value: String) = value

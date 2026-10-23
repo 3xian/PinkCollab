@@ -42,6 +42,7 @@ google-services.json
 target/
 target-*/
 /dist/
+/output/
 pairing*.png
 .pinkcollab/
 

@@ -20,7 +20,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
@@ -71,7 +70,6 @@ internal fun FloatingTodoPanel(
         else -> Purple400
     }, tween(420), label = "todoAccent")
     val quiet = settled && !completionFlash
-    val emphasis by animateFloatAsState(if (quiet) 0.10f else 0.26f, tween(500), label = "todoEmphasis")
     val progress by animateFloatAsState(if (tasks.isEmpty()) 0f else closed.toFloat() / tasks.size,
         tween(650, easing = FastOutSlowInEasing), label = "todoProgress")
     val arrow by animateFloatAsState(if (expanded) 180f else 0f, tween(260), label = "todoArrow")
@@ -79,7 +77,6 @@ internal fun FloatingTodoPanel(
     val shape = RoundedCornerShape(13.dp)
     Column(modifier.fillMaxWidth().heightIn(max = maxHeight).shadow(10.dp, shape).clip(shape)
         .background(Base1)
-        .background(Brush.horizontalGradient(listOf(accent.copy(alpha = emphasis), Color.Transparent)))
         .testTag("floatingTodoPanel")) {
         Box(Modifier.fillMaxWidth().height(headerHeight).testTag("todoHeader")
             .semantics {

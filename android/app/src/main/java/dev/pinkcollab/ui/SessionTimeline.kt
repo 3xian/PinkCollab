@@ -21,8 +21,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
@@ -96,8 +94,10 @@ private fun MessageCard(item: SessionDisplayItem.Message, renderer: SessionMarkd
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         val time = messageTimeLabel(item.timestamp)
-        SpeakerLine(time) {
-            if (isUser) YouLabel() else AgentHeader()
+        if (isUser || time.isNotEmpty()) {
+            SpeakerLine(time) {
+                if (isUser) YouLabel()
+            }
         }
         TimelineMessageBody(item.text, captureTouch = isUser) { onCopy ->
             if (isUser) {
@@ -158,17 +158,10 @@ private fun SpeakerLine(time: String, title: @Composable () -> Unit) {
 }
 
 @Composable
-internal fun AgentHeader(model: ModelInfo? = null, replying: Boolean = false, modifier: Modifier = Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        SpeakerTitle("Agent", SessionColors.agent,
-            if (replying) workTextShimmer().semantics { contentDescription = "Agent replying" } else Modifier)
-        model?.let {
-            Text(it.name.ifBlank { it.id }, Modifier.weight(1f, fill = false),
-                style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Default,
-                color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
+internal fun ReplyModelLabel(model: ModelInfo, modifier: Modifier = Modifier) {
+    Text(model.name.ifBlank { model.id }, modifier,
+        style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Default,
+        color = Gray400, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** Local clock time; a short date is added only when the message is not from today. */

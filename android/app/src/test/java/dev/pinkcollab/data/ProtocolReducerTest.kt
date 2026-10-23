@@ -6,6 +6,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtocolReducerTest {
+    @Test fun deletion_evicts_unsubscribed_details_and_ignores_delayed_snapshots() {
+        var state = reduce(app(), host().put("epoch", "e").put("sequence", 1)).state
+        state = reduce(state, session().put("epoch", "e").put("sequence", 2)).state
+        state = state.copy(details = state.details.mapValues { (_, detail) -> detail.copy(snapshotToken = null) })
+        state = reduce(state, JSONObject().put("type", "session_remove").put("sessionId", key.sessionId)
+            .put("epoch", "e").put("sequence", 3)).state
+        assertNull(state.details[key])
+        assertTrue(state.hosts.getValue("host").sessions.none { it.id == key.sessionId })
+        val after = reduce(state, session().put("epoch", "e").put("sequence", 2)).state
+        assertEquals(state, after)
+    }
+
     @Test fun skipped_replay_retains_todo_dictionary_for_later_frames() {
         var state = reduce(app(), host().put("epoch", "e").put("sequence", 70)).state
         state = reduce(state, session().put("epoch", "e").put("sequence", 100)).state

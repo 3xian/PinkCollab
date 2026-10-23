@@ -1,9 +1,12 @@
-"""Prepare the supplied screen recording for the website and README (requires FFmpeg)."""
+"""Prepare the screen recording and README poster (requires FFmpeg and Pillow)."""
 
 import argparse
+from io import BytesIO
 from pathlib import Path
 import shutil
 import subprocess
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -12,10 +15,63 @@ def run(*args):
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args], check=True)
 
 
+def build_cover(recording: Path, timestamp: str, font: Path, output: Path):
+    frame = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", timestamp,
+         "-i", str(recording), "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"],
+        check=True, capture_output=True,
+    )
+    with Image.open(BytesIO(frame.stdout)) as image:
+        screen = image.convert("RGB")
+    # This recording is 720 x 1558. Remove Android's system bars, then let
+    # the device extend beyond the poster's bottom edge without shrinking text.
+    if screen.size != (720, 1558):
+        raise ValueError("The poster crop requires a 720 x 1558 screen recording")
+    screen = screen.crop((0, 82, 720, 1474))
+
+    canvas = Image.new("RGB", (1600, 1120), "#FAFAF8")
+    draw = ImageDraw.Draw(canvas)
+    draw.polygon([(0, 0), (1600, 0), (1600, 80), (0, 1004)], fill="#EDEDEB")
+
+    def text(position, value, size, color="#242424", spacing=8):
+        draw.multiline_text(position, value, font=ImageFont.truetype(str(font), size),
+                            fill=color, spacing=spacing)
+
+    with Image.open(ROOT / "docs/assets/branding/mascot-source.png") as image:
+        mascot = image.convert("RGBA")
+    mascot.thumbnail((112, 112), Image.Resampling.LANCZOS)
+    canvas.paste(mascot, (64, 60), mascot)
+    text((188, 94), "PinkCollab", 38)
+    text((72, 258), "OMP, WHEREVER YOU ARE.", 20, "#60605D")
+    text((64, 324), "Your OMP.\nAnywhere.", 112, spacing=0)
+    draw.rectangle((72, 628, 136, 633), fill="#A33750")
+    text((72, 676), "Pick up the conversation.\nKeep the work moving.", 30, "#60605D", spacing=16)
+
+    for left, right, label in ((72, 263, "ANDROID APP"), (279, 472, "SELF-HOSTED")):
+        draw.rounded_rectangle((left, 916, right, 962), radius=23, outline="#B9B9B4", width=1)
+        text((left + 22, 930), label, 18)
+    text((72, 1020), "Powered by Oh My Pi", 22, "#60605D")
+
+    # A restrained device frame and shadow give the real screenshot presence.
+    # Its upper corners are rounded; the lower portion continues off-canvas.
+    shadow = Image.new("RGBA", canvas.size)
+    ImageDraw.Draw(shadow).rounded_rectangle((806, 114, 1562, 1542), radius=48,
+                                            fill=(36, 36, 36, 52))
+    canvas = Image.alpha_composite(canvas.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(20)))
+    phone = Image.new("RGBA", (744, 1416))
+    ImageDraw.Draw(phone).rounded_rectangle((0, 0, 743, 1415), radius=42, fill="#343433")
+    mask = Image.new("L", screen.size)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, 719, 1391), radius=30, fill=255)
+    phone.paste(screen, (12, 12), mask)
+    canvas.alpha_composite(phone, (808, 92))
+    canvas.convert("RGB").save(output, lossless=True, method=6)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="Original screen recording; never re-encode the web copy")
     parser.add_argument("--poster-time", default="28", help="Poster frame timestamp in seconds")
+    parser.add_argument("--cover-only", action="store_true", help="Rebuild only the README cover")
     parser.add_argument("--font", type=Path, help="Bold TrueType font for the README cover")
     args = parser.parse_args()
     if not args.input.is_file():
@@ -37,39 +93,17 @@ def main():
     video = media / "pinkcollab-demo.mp4"
     if args.input.resolve() == video.resolve():
         parser.error("Use the original recording, not the published web copy")
-    run("-i", str(args.input), "-map", "0:v:0", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "slow", "-crf", "27", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", "-map_metadata", "-1", str(video))
     poster = assets / "pinkcollab-demo-poster.webp"
-    run("-ss", args.poster_time, "-i", str(args.input), "-frames:v", "1",
-        "-c:v", "libwebp", "-quality", "82", "-compression_level", "6", "-update", "1", str(poster))
+    if not args.cover_only:
+        run("-i", str(args.input), "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", "slow", "-crf", "27", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", "-map_metadata", "-1", str(video))
+        run("-ss", args.poster_time, "-i", str(args.input), "-frames:v", "1",
+            "-c:v", "libwebp", "-quality", "82", "-compression_level", "6", "-update", "1", str(poster))
 
-    # A real frame on the same 30-degree paper-gray/white split as the site.
-    # FFmpeg filter paths need their own escaping, independently of shell quoting.
-    font_path = font.resolve().as_posix().replace(":", "\\:").replace("'", "'\\''")
-
-    def text(value, size, y, color="0x242423", x=72):
-        return f"drawtext=fontfile='{font_path}':text='{value}':fontsize={size}:fontcolor={color}:x={x}:y={y}"
-
-    filters = (
-        "color=c=0xEDEDEB:s=1200x675,format=gbrp,"
-        "geq=r='if(lt(X+Y*0.57735,1000),237,250)':"
-        "g='if(lt(X+Y*0.57735,1000),237,250)':"
-        "b='if(lt(X+Y*0.57735,1000),235,248)'[paper];"
-        "[0:v]scale=280:-2[screen];[1:v]scale=64:64[logo];"
-        "[paper]drawbox=x=854:y=40:w=282:h=608:color=0xD4D4D0:t=fill[background];"
-        "[background][screen]overlay=848:(H-h)/2[shot];"
-        "[shot][logo]overlay=72:128,"
-        + text("PinkCollab in action.", 44, 235) + ","
-        + text("A session, from prompt to result.", 20, 306, "0x60605D") + ","
-        "drawbox=x=72:y=446:w=360:h=48:color=0x242424:t=fill,"
-        + text("WATCH THE 30-SECOND DEMO  >", 16, 462, "0xFAFAF8", x=92)
-    )
     cover = ROOT / "docs/assets/pinkcollab-demo.webp"
-    run("-ss", args.poster_time, "-i", str(args.input), "-i", str(assets / "logo-96.png"), "-filter_complex", filters,
-        "-frames:v", "1", "-c:v", "libwebp", "-quality", "82", "-compression_level", "6",
-        "-update", "1", str(cover))
-    for path in (video, poster, cover):
+    build_cover(args.input, args.poster_time, font, cover)
+    for path in ((cover,) if args.cover_only else (video, poster, cover)):
         print(f"{path.relative_to(ROOT)}: {path.stat().st_size:,} bytes")
 
 

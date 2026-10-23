@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
@@ -48,6 +49,60 @@ import kotlin.math.abs
 @RunWith(AndroidJUnit4::class)
 class TasksPagerBarDeviceTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun delete_requires_confirmation_handles_failure_and_clears_last_selection() {
+        val target = sessions.first()
+        var selected by mutableStateOf<SessionKey?>(SessionKey("host", target.id))
+        var host by mutableStateOf(HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            connection = ConnectionState.Online(1L), sessions = listOf(target)))
+        var operations by mutableStateOf(emptySet<SessionOperationKey>())
+        var deletes = 0
+        compose.setContent {
+            TasksScreen(TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
+                emptyMap(), emptyMap(), emptyMap(), operations, emptyMap(), emptyMap(), emptyMap(), selected),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, action ->
+                    if (action == SessionAction.Command(SessionUserCommand.Delete)) {
+                        deletes++
+                        operations = setOf(SessionOperationKey(SessionKey("host", target.id), SessionLane.Action))
+                    }
+                }, { _, _ -> true }, clearSelection = { selected = null }))
+        }
+        compose.onNodeWithTag("sessionCard:s0").performClick()
+        compose.onNodeWithTag("deleteSessionFromInfo").performClick()
+        compose.onNodeWithTag("deleteSessionConfirmation").assertIsDisplayed()
+        assertEquals(0, deletes)
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithTag("sessionInfo").assertIsDisplayed()
+        compose.onNodeWithTag("deleteSessionFromInfo").performClick()
+        compose.onNodeWithTag("confirmDeleteSession").performClick()
+        compose.onNodeWithTag("confirmDeleteSession").assertIsNotEnabled()
+        assertEquals(1, deletes)
+        // A failed request leaves the confirmation and task available for retry.
+        compose.runOnIdle { operations = emptySet() }
+        compose.onNodeWithTag("confirmDeleteSession").performClick()
+        assertEquals(2, deletes)
+        compose.runOnIdle { host = host.copy(sessions = emptyList(), removedSessionIds = setOf(target.id)) }
+        compose.onNodeWithTag("deleteSessionConfirmation").assertDoesNotExist()
+        compose.waitForIdle()
+        assertEquals(null, selected)
+    }
+
+    @Test fun active_and_offline_sessions_cannot_be_deleted() {
+        var host by mutableStateOf(HostState(
+            PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
+            connection = ConnectionState.Online(1L), sessions = listOf(sessions.first().copy(runtimeAttached = true))))
+        compose.setContent {
+            TasksScreen(TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
+                emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("host", "s0")),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
+        }
+        compose.onNodeWithTag("sessionCard:s0").performClick()
+        compose.onNodeWithTag("deleteSessionFromInfo").assertIsNotEnabled()
+        compose.runOnIdle { host = host.copy(connection = ConnectionState.Offline("offline"),
+            sessions = listOf(sessions.first())) }
+        compose.onNodeWithTag("deleteSessionFromInfo").assertIsNotEnabled()
+    }
 
     /** The composer placeholder repeats the latest user text, so timeline checks must not use it. */
     private fun timelineMessage(text: String) = compose.onNode(
@@ -116,7 +171,9 @@ class TasksPagerBarDeviceTest {
         compose.onNode(hasText("Renamed desktop") and hasAnyAncestor(hasTestTag("sessionInfo")))
             .performScrollTo().assertIsDisplayed()
         assertEquals(SessionKey("host", "s1"), selected)
-        compose.onNodeWithText("Close").performClick()
+        compose.onNodeWithText("Close").assertDoesNotExist()
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+            .sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         compose.onNodeWithTag("sessionInfo").assertDoesNotExist()
         compose.onNodeWithTag("sessionCard:s1").performClick()
         compose.onNodeWithTag("sessionInfo").assertIsDisplayed()

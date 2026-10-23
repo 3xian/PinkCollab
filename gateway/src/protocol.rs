@@ -199,6 +199,9 @@ pub enum ServerEvent {
         #[serde(flatten)]
         summary: SessionSummary,
     },
+    SessionRemove {
+        session_id: String,
+    },
     SessionState {
         session_id: String,
         #[serde(flatten)]
@@ -231,6 +234,7 @@ impl ServerEvent {
             Self::HostSnapshot { .. } => None,
             Self::SessionSnapshot { session_id, .. }
             | Self::SessionUpsert { session_id, .. }
+            | Self::SessionRemove { session_id }
             | Self::SessionState { session_id, .. }
             | Self::Timeline { session_id, .. }
             | Self::MessagePatch { session_id, .. }
@@ -238,7 +242,10 @@ impl ServerEvent {
         }
     }
     pub fn updates_host(&self) -> bool {
-        matches!(self, Self::SessionUpsert { .. } | Self::SessionState { .. })
+        matches!(
+            self,
+            Self::SessionUpsert { .. } | Self::SessionState { .. } | Self::SessionRemove { .. }
+        )
     }
 }
 

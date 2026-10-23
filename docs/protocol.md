@@ -42,6 +42,7 @@ A subscribe may include `historyLimit` (1–100). Gateway then attempts to inclu
 | Event | Fields besides `type` | Apply |
 | --- | --- | --- |
 | `session_upsert` | `sessionId`, `session`, `runtime` | Insert/replace a host-list entry |
+| `session_remove` | `sessionId` | Remove the host-list entry and cached detail; ignore delayed frames for that ID until an authoritative host snapshot |
 | `session_state` | `sessionId`, `session`, `runtime`, `hasHistory` | Replace metadata and runtime in host list and any open detail |
 | `runtime_state` | `sessionId`, `runtime`, `hasHistory` | Update runtime using cached session metadata |
 | `message_patch` | `sessionId`, `id`, `baseHash`, `hash`, `append`, optional `metadata` | Append verified text; update metadata |
@@ -71,6 +72,10 @@ Tool summaries omit null arguments, empty results, and absent summaries. Identic
 ## Commands and generation safety
 
 `POST /sessions` accepts `{commandId,hostId,cwd,title?}` and returns a Session. It checks the workspace and creates no process. Creation is idempotent within `(clientId,commandId)`.
+
+`DELETE /sessions/:id` permanently deletes the task, its mapped OMP JSONL and sibling artifact directory, and its Gateway uploads. Project files are unaffected. It returns HTTP 204 after cleanup, including when the task is already absent. An attached runtime, runtime lease, or pending command returns HTTP 409 `session_busy`; a detected external OMP writer returns HTTP 409 `external_session_busy`. Close external OMP before deleting, including when it appears idle. Linked artifact directories and shared history mappings are refused. HTTP 503 `delete_failed` retains the task mapping so cleanup can be retried, including after a Gateway restart. Discovered tasks are durably adopted before file cleanup without starting a runtime.
+
+Deletion is serialized with command admission and uploads for that session, and cleanup continues if the requesting client disconnects. Success publishes `session_remove`; clients discard its details, drafts, attachments and paged catalog entry, releasing persisted attachment URI permissions once no other draft uses them. Creation receipts remain as tombstones: replaying the original creation request after deletion returns HTTP 410 `session_deleted` instead of recreating the task. This terminal response clears Android's pending creation ID; a later creation uses a new ID, while transport and temporary server failures keep the original ID for retry.
 
 `POST /sessions/:id/commands` returns `{operation,receiptStored}`: HTTP 202 for a new command, 200 for an identical replay.
 
@@ -112,7 +117,7 @@ Saved feedback participates in the same ordered pages and sync batches as OMP me
 
 Before a prompt or attention response reaches OMP, Gateway durably protects its mapped transcript reference. Prompts, uncertain response delivery/persistence outcomes, and observation of an existing transcript make a missing file an explicit `history_unavailable` error; corrupt history also fails. A successfully delivered response before file creation can produce feedback-only history with an empty root `branchLeaf` and `byteLength:0`, without creating JSONL. Resume may replace that explicitly missing-allowed mapping and atomically carry its root feedback forward; it cannot replace missing expected history, even after an aborted/failed/unknown prompt. A session with no mapping, or an allowed absent transcript without feedback, still returns empty history with `source:null`. Resume always gets a new generation.
 
-`PUT /sessions/:id/files/:fileId?name=...` uploads raw `application/octet-stream` bytes. IDs are `file_` plus 32 hex digits; each file is 1 byte–10 MiB, with up to five files per prompt. Identical retries are idempotent. References are scoped to the session. Idle prompts use quoted host file mentions; steering uses host paths and embeds recognized images up to 512 KiB. Frames exceeding the 1 MiB OMP limit fail. Uploaded files remain in the Gateway data directory until removed there.
+`PUT /sessions/:id/files/:fileId?name=...` uploads raw `application/octet-stream` bytes. IDs are `file_` plus 32 hex digits; each file is 1 byte–10 MiB, with up to five files per prompt. Identical retries are idempotent. References are scoped to the session. Idle prompts use quoted host file mentions; steering uses host paths and embeds recognized images up to 512 KiB. Frames exceeding the 1 MiB OMP limit fail. Uploaded files remain in the Gateway data directory until the session is deleted or the files are removed there.
 
 Other core reads: `GET /fs/list?path=...` returns `{path,parent,directories}` within allowed roots; `GET /sessions/:id/models` returns `{models,thinkingLevels}` from the attached runtime.
 
