@@ -201,7 +201,11 @@ pre code { font-size: inherit; }
 .copy-status:empty { margin-top: 0; }
 .install-next>a { display: inline-flex; align-items: center; gap: 12px; margin-top: 22px; color: var(--accent); font-size: 11px; }
 .closing { display: flex; flex-direction: column; align-items: center; padding: 56px 16px 64px; text-align: center; background: linear-gradient(150deg, #D4D4D0 0 36%, #FAFAF8 36% 100%); border-radius: 20px; margin-bottom: 32px; }
-.closing img { width: 56px; height: 56px; border-radius: 14px; margin-bottom: 24px; }
+.closing img { width: 56px; height: 56px; border-radius: 14px; margin-bottom: 24px; box-shadow: 0 5px 12px #24242418, 0 14px 28px #24242414; transform-origin: 50% 75%; animation: closing-logo-sway 4.2s ease-in-out infinite; }
+@keyframes closing-logo-sway {
+  0%, 100% { transform: translateY(0) rotate(-5deg); }
+  50% { transform: translateY(-3px) rotate(5deg); }
+}
 .closing p { font-size: clamp(32px,4vw,52px); line-height: 1.12; letter-spacing: -.06em; font-weight: 600; }
 .closing strong { color: var(--accent); font-weight: 600; }
 .closing>.button { margin-top: 32px; }
