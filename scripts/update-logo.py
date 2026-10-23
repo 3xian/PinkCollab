@@ -1,4 +1,4 @@
-"""Resize/mask the approved logo; requires Pillow and NumPy.
+"""Build the approved neutral brand assets; requires Pillow.
 
 Run from the repository root: python scripts/update-logo.py
 All inputs are resolved relative to this script, including promotional artwork.
@@ -6,9 +6,9 @@ Repeated runs rebuild outputs from those inputs, never from prior outputs.
 """
 
 import argparse
+import math
 from pathlib import Path
 
-import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +16,8 @@ SOURCE = ROOT / "docs/assets/pinkcollab-logo-source.png"
 RES = ROOT / "android/app/src/main/res"
 TEMPLATES = ROOT / "docs/assets/branding"
 LANCZOS = Image.Resampling.LANCZOS
+PAPER = "#FAFAF8"
+MIST = "#D4D4D0"
 
 
 def masked_tile(source: Image.Image, size: int, radius: float) -> Image.Image:
@@ -49,6 +51,25 @@ def promotional_images() -> None:
     (ROOT / "website/assets/pinkcollab-session-review.webp").write_bytes(
         (ROOT / "docs/assets/pinkcollab-readme.webp").read_bytes()
     )
+    for name in ("model-picker", "provider-usage"):
+        with Image.open(TEMPLATES / f"{name}-source.png") as artwork:
+            photo = artwork.convert("RGB")
+        photo.thumbnail((1200, 1200), LANCZOS)
+        photo.save(ROOT / f"website/assets/pinkcollab-{name}.jpg",
+                   quality=86, subsampling=0, optimize=True, progressive=True)
+
+
+def launcher_background(size: int) -> Image.Image:
+    # Render the 30-degree split directly. Interpolating corner colors would
+    # turn the approved crisp two-tone backdrop into a gradient.
+    edge = size * 4
+    background = Image.new("RGB", (edge, edge), PAPER)
+    rise = math.tan(math.radians(30)) * edge / 2
+    ImageDraw.Draw(background).polygon(
+        [(0, 0), (edge, 0), (edge, edge / 2 - rise), (0, edge / 2 + rise)],
+        fill=MIST,
+    )
+    return background.resize((size, size), LANCZOS)
 
 
 def main() -> None:
@@ -68,13 +89,10 @@ def main() -> None:
         save(masked_tile(source, size, 0.22), RES / f"mipmap-{density}/ic_launcher.png")
         save(masked_tile(source, size, 0.5), RES / f"mipmap-{density}/ic_launcher_round.png")
 
-    # Only the purple backdrop has R > G and B > R. Keep the black, white,
-    # and cyan artwork, with a soft one-pixel transition at its antialiased edge.
-    pixels = np.asarray(source, dtype=np.float32)
-    purple = np.minimum(pixels[:, :, 0] - pixels[:, :, 1], pixels[:, :, 2] - pixels[:, :, 0])
-    alpha = np.clip(1 - purple / 18, 0, 1)
-    character = source.convert("RGBA")
-    character.putalpha(Image.fromarray(np.uint8(alpha * 255)))
+    # Keep a separate lossless transparent master. Background-color keying
+    # cannot separate the mascot's white face from the new paper backdrop.
+    with Image.open(TEMPLATES / "mascot-source.png") as artwork:
+        character = artwork.convert("RGBA")
     save(character.resize((512, 512), LANCZOS), RES / "drawable-nodpi/pinkcollab_logo.png")
 
     # Adaptive icons use a 108dp canvas. Keep the complete artwork in the
@@ -82,15 +100,23 @@ def main() -> None:
     foreground = Image.new("RGBA", (432, 432))
     foreground.alpha_composite(character.resize((288, 288), LANCZOS), (72, 72))
     save(foreground, RES / "drawable-nodpi/ic_launcher_foreground.png")
-    corners = np.asarray(source)[np.ix_([0, source.height - 1], [0, source.width - 1])]
-    background = Image.fromarray(corners).resize((432, 432), Image.Resampling.BILINEAR)
-    save(background, RES / "drawable-nodpi/ic_launcher_background.png")
+    save(launcher_background(432), RES / "drawable-nodpi/ic_launcher_background.png")
+    for master, resource, size in (
+        ("empty-state", "moon_robot", (500, 500)),
+        ("disconnected", "disconnected_robot", (800, 614)),
+    ):
+        with Image.open(TEMPLATES / f"{master}-source.png") as artwork:
+            illustration = ImageOps.contain(artwork.convert("RGBA"), size, LANCZOS)
+        canvas = Image.new("RGBA", size)
+        canvas.alpha_composite(illustration, ((size[0] - illustration.width) // 2,
+                                              (size[1] - illustration.height) // 2))
+        save(canvas, RES / f"drawable-nodpi/{resource}.png")
     promotional_images()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--promotional-only", action="store_true", help="Rebuild README, hero, and social images only")
+    parser.add_argument("--promotional-only", action="store_true", help="Rebuild README and website promotional images only")
     args = parser.parse_args()
     if args.promotional_only:
         promotional_images()

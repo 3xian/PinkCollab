@@ -114,7 +114,7 @@ internal fun ComposerRail(
             onClick = onSend,
             enabled = controls.canSend,
             contentColor = MaterialTheme.colorScheme.onPrimary,
-            fill = if (controls.canSend) BrandGradient else SolidColor(Purple400.copy(alpha = 0.12f)),
+            fill = SolidColor(if (controls.canSend) BrandPurple else Purple400.copy(alpha = 0.12f)),
         )
     }
 }

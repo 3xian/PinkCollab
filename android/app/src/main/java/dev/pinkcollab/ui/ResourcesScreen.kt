@@ -47,7 +47,7 @@ internal fun ResourcesScreen(
 
     if (app.hosts.isEmpty()) {
         Column(
-            Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 32.dp).padding(top = 48.dp, bottom = 32.dp),
+            Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 24.dp).padding(top = 32.dp, bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
@@ -72,8 +72,8 @@ internal fun ResourcesScreen(
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(app.hosts.values.toList(), key = { it.host.id }) { host ->
             val hostId = host.host.id
@@ -89,11 +89,15 @@ internal fun ResourcesScreen(
                 ConnectionState.UpgradeRequired -> "App update required" to Red400
             }
             Card(
-                Modifier.fillMaxWidth().glassPanel(CardShape, borderAlpha = 0f).clip(CardShape).workspaceBackdrop(host.host.os),
+                Modifier.fillMaxWidth()
+                    .softCardShadow(CardShape)
+                    .paperPanel(CardShape, borderColor = Color.Transparent)
+                    .clip(CardShape)
+                    .workspaceBackdrop(host.host.os),
                 shape = CardShape,
                 colors = CardDefaults.cardColors(containerColor = Color.Transparent, contentColor = TextHigh),
             ) {
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.padding(12.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Dns, null, Modifier.size(18.dp), tint = workspaceIconColor(host.host.os))
                         Spacer(Modifier.width(8.dp))
@@ -165,7 +169,7 @@ internal fun ResourcesScreen(
                             )
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(8.dp))
                     if (!host.connected || host.workspaces.isEmpty()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(
@@ -184,7 +188,7 @@ internal fun ResourcesScreen(
                     }
                     if (host.workspaces.isNotEmpty()) {
                         if (!host.connected) Spacer(Modifier.height(8.dp))
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             host.workspaces.forEach { workspace ->
                                 WorkspaceRow(workspace, host.connected) { browse(hostId, workspace.path) }
                             }
@@ -317,9 +321,9 @@ private fun WorkspaceRow(workspace: Workspace, enabled: Boolean, onClick: () -> 
         Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Color.White.copy(alpha = if (enabled) 0.055f else 0.025f), shape)
+            .background(TextHigh.copy(alpha = if (enabled) 0.045f else 0.02f), shape)
             .clickable(enabled = enabled, onClick = rememberHapticOnClick(onClick))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(workspace.path, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,

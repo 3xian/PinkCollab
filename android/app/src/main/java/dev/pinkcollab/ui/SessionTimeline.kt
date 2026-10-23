@@ -46,7 +46,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-internal val TimelineBandBase = Color(0xFF0D0A10)
+internal val TimelineBandBase = Base0
 
 /** Error and raw activity bands retain a restrained tint outside the message surfaces. */
 internal fun Modifier.timelineBand(
@@ -63,7 +63,7 @@ internal fun Modifier.timelineBand(
     )
     .drawBehind {
         drawLine(
-            color = Color.White.copy(alpha = 0.055f),
+            color = TextHigh.copy(alpha = 0.07f),
             start = Offset(0f, size.height),
             end = Offset(size.width, size.height),
             strokeWidth = 1.dp.toPx(),
@@ -72,7 +72,7 @@ internal fun Modifier.timelineBand(
 
 /** Inset prompts and open replies share the same quiet conversation rhythm. */
 internal fun Modifier.messageSurface(isUser: Boolean = false): Modifier = fillMaxWidth()
-    .padding(horizontal = 12.dp, vertical = if (isUser) 8.dp else 12.dp)
+    .padding(horizontal = 12.dp, vertical = if (isUser) 6.dp else 10.dp)
     .then(if (isUser) Modifier.background(SessionColors.userSurface, RoundedCornerShape(12.dp))
         .padding(12.dp) else Modifier)
 

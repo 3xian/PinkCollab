@@ -26,51 +26,20 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
-val BrandGradient: Brush = Brush.linearGradient(listOf(BrandPurple, BrandPink))
-
-/** Paint icon/vector content with the same purple-to-pink brand gradient used by text. */
-fun Modifier.brandGradientMask(): Modifier =
-    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-        .drawWithCache {
-            onDrawWithContent {
-                drawContent()
-                drawRect(brush = BrandGradient, blendMode = BlendMode.SrcIn)
-            }
-        }
-
-/** Brand-gradient hairline: white edges read as grey against the near-black base. */
-private fun edgeBrush(alpha: Float): Brush =
-    Brush.linearGradient(listOf(BrandPurple.copy(alpha = alpha), BrandPink.copy(alpha = alpha)))
-
-/**
- * Frosted-glass panel: translucent gradient fill plus a purple→violet hairline border.
- * Drawn over the dark app background it reads as glass without paying per-node blur cost,
- * which keeps long scrolling lists smooth.
- *
- * The outline is derived from [shape], so pills and cards each get a matching corner
- * radius; a fixed radius makes the stroke drift off the corner and show a stray edge.
- */
-fun Modifier.glassPanel(
+/** Shared paper surface with explicit fill and outline colors. */
+fun Modifier.paperPanel(
     shape: Shape,
-    fillAlpha: Float = 0.07f,
-    borderAlpha: Float = 0.14f,
-    borderBrush: Brush? = null,
-): Modifier = background(
-    Brush.linearGradient(listOf(BrandPurple.copy(alpha = fillAlpha), BrandPink.copy(alpha = fillAlpha * 0.72f))),
-    shape,
-).border(1.2.dp, borderBrush ?: edgeBrush(borderAlpha), shape)
+    fillColor: Color = Base1,
+    borderColor: Color = TextHigh.copy(alpha = 0.14f),
+): Modifier = background(fillColor, shape).border(0.5.dp, borderColor, shape)
 
 @Composable
 private fun rememberPulseAlpha(): Float {
@@ -84,13 +53,13 @@ private fun rememberPulseAlpha(): Float {
     return alpha
 }
 
-/** Card border that breathes: a purple→violet gradient outline with pulsing alpha. */
+/** A restrained rose outline marks cards that need attention. */
 @Composable
 fun Modifier.pulsingGlowBorder(shape: Shape, width: Dp = 1.5.dp): Modifier {
     val alpha = rememberPulseAlpha()
     return border(
         width,
-        Brush.linearGradient(listOf(BrandPurple.copy(alpha = alpha), BrandPink.copy(alpha = alpha * 0.82f))),
+        Brush.linearGradient(listOf(AccentRose.copy(alpha = alpha), AccentRose.copy(alpha = alpha * 0.82f))),
         shape,
     )
 }
@@ -115,7 +84,7 @@ fun StatusChip(status: dev.pinkcollab.data.SessionStatus, modifier: Modifier = M
     val color = statusColor(status)
     Row(
         modifier
-            .glassPanel(RoundedCornerShape(999.dp), fillAlpha = 0.06f, borderAlpha = 0.10f)
+            .paperPanel(RoundedCornerShape(999.dp), borderColor = TextHigh.copy(alpha = 0.10f))
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -126,38 +95,36 @@ fun StatusChip(status: dev.pinkcollab.data.SessionStatus, modifier: Modifier = M
 }
 
 /** Shared card treatment; controls use Material 3's own shape scale. */
-val CardCornerRadius = 20.dp
+val CardCornerRadius = 16.dp
 val CardShape = RoundedCornerShape(CardCornerRadius)
 
-/** High-emphasis action using Material 3 sizing and the app's brand gradient. */
+/** Broad, faint shadow gives paper cards depth without a dark rim. */
+fun Modifier.softCardShadow(shape: Shape): Modifier = shadow(
+    elevation = 12.dp,
+    shape = shape,
+    clip = false,
+    ambientColor = Color.Black.copy(alpha = 0.18f),
+    spotColor = Color.Black.copy(alpha = 0.24f),
+)
+
+/** High-emphasis charcoal action. */
 @Composable
 fun PrimaryButton(
     onClick: () -> Unit,
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
-    contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     content: @Composable RowScope.() -> Unit,
 ) {
-
-    val shape = ButtonDefaults.shape
-    val fill = if (enabled) {
-        BrandGradient
-    } else {
-        Brush.linearGradient(
-            listOf(
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-            ),
-        )
-    }
     Button(
         onClick = rememberHapticOnClick(onClick),
         enabled = enabled,
-        modifier = modifier.clip(shape).background(fill, shape),
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
         contentPadding = contentPadding,
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color.Transparent,
-            disabledContainerColor = Color.Transparent,
+            containerColor = BrandPurple,
+            disabledContainerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
         ),
         content = content,
     )

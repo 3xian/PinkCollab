@@ -1,8 +1,10 @@
 package dev.pinkcollab.ui.theme
 
-import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -10,62 +12,68 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import dev.pinkcollab.R
 import dev.pinkcollab.data.SessionStatus
-// ── Palette: neutral graphite surfaces with restrained violet accents ────────
-val Base0 = Color(0xFF07070A)
-val Base1 = Color(0xFF101014)
-val BrandPurple = Color(0xFF8360DD)
-val BrandPink = Color(0xFFC069C9)
+// Paper surfaces, charcoal controls, and a restrained rose accent.
+val Base0 = Color(0xFFEDEDEB)
+val Base1 = Color(0xFFFAFAF8)
+val HeaderBackground = Color(0xFF343433)
+val HeaderInk = Color(0xFFF5F5F2)
+val AccentRose = Color(0xFFA33750)
+// Shared legacy token names also style markdown and runtime controls.
+val BrandPurple = Color(0xFF242424)
+val BrandPink = Color(0xFF51514F)
 val Purple400 = BrandPurple
-val Purple200 = Color(0xFFCFC3F7)
-val Purple700 = Color(0xFF372A57)
-val Violet400 = Color(0xFF9B87F5)
-val Teal300 = Color(0xFF4DE0BE)
-val Amber300 = Color(0xFFF2B84B)
-val Red400 = Color(0xFFFF5470)
-val Gray400 = Color(0xFF85858F)
-val TextHigh = Color(0xFFF4F4F5)
-val TextMid = Color(0xFFB3B3BD)
+val Purple200 = Color(0xFF464644)
+val Purple700 = Color(0xFFE0E0DD)
+val Violet400 = Color(0xFF585856)
+val Teal300 = Color(0xFF42685A)
+val Amber300 = Color(0xFF8A5D28)
+val Red400 = AccentRose
+val Gray400 = Color(0xFF747471)
+val TextHigh = Color(0xFF242423)
+val TextMid = Color(0xFF60605D)
 
-val PinkCollabScheme = darkColorScheme(
+val PinkCollabScheme = lightColorScheme(
     primary = Purple400,
-    onPrimary = Color(0xFF160B24),
+    onPrimary = Color.White,
     primaryContainer = Purple700,
     onPrimaryContainer = Purple200,
     secondary = Violet400,
-    onSecondary = Color(0xFF171126),
-    secondaryContainer = Color(0xFF2D2540),
-    onSecondaryContainer = Color(0xFFE9E3F5),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE4E4E1),
+    onSecondaryContainer = TextHigh,
     tertiary = Teal300,
-    onTertiary = Color(0xFF03211A),
+    onTertiary = Color.White,
     background = Base0,
     onBackground = TextHigh,
     surface = Base1,
     onSurface = TextHigh,
-    surfaceVariant = Color(0xFF1A1A20),
+    surfaceVariant = Color(0xFFE3E3E0),
     onSurfaceVariant = TextMid,
-    surfaceContainerLowest = Base0,
-    surfaceContainerLow = Color(0xFF0D0D11),
-    surfaceContainer = Color(0xFF141418),
-    surfaceContainerHigh = Color(0xFF1B1B21),
-    surfaceContainerHighest = Color(0xFF23232A),
-    inverseSurface = Color(0xFF23232A),
-    inverseOnSurface = TextHigh,
-    inversePrimary = Purple200,
-    outline = Color(0xFF45434C),
-    outlineVariant = Color(0xFF302F36),
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF6F6F3),
+    surfaceContainer = Color(0xFFF1F1EE),
+    surfaceContainerHigh = Color(0xFFE9E9E6),
+    surfaceContainerHighest = Color(0xFFDEDEDA),
+    surfaceTint = Color.Transparent,
+    inverseSurface = HeaderBackground,
+    inverseOnSurface = HeaderInk,
+    inversePrimary = Color(0xFFDADAD6),
+    outline = Color(0xFF858580),
+    outlineVariant = Color(0xFFD4D4CF),
     error = Red400,
-    onError = Color(0xFF2B040C),
-    errorContainer = Color(0xFF43101E),
-    onErrorContainer = Color(0xFFFFC9D3),
+    onError = Color.White,
+    errorContainer = Color(0xFFF3E3E6),
+    onErrorContainer = Color(0xFF75253A),
 )
 
 private val MapleMono = FontFamily(
     Font(R.font.maple_mono_cn_regular, FontWeight.Normal),
 )
 
-private fun TextStyle.sessionFont(sizeSp: Float = fontSize.value - 1f) = copy(fontFamily = MapleMono, fontSize = sizeSp.sp)
+private fun TextStyle.sessionFont(sizeSp: Float = fontSize.value) = copy(fontFamily = MapleMono, fontSize = sizeSp.sp)
 
 private fun Typography.sessionFont() = copy(
     displayLarge = displayLarge.sessionFont(),
@@ -85,18 +93,27 @@ private fun Typography.sessionFont() = copy(
     labelSmall = labelSmall.sessionFont(),
 )
 
-private val DefaultTypography = Typography()
-
-/** Preserve Material 3's label rhythm with a slightly stronger optical size on dark surfaces. */
+/** Compact type scale; Android's user font scale remains authoritative. */
 val PinkCollabTypography = Typography(
-    labelLarge = DefaultTypography.labelLarge.copy(
-        fontSize = 15.sp,
-        fontWeight = FontWeight.SemiBold,
-    ),
+    displayLarge = TextStyle(fontSize = 44.sp, lineHeight = 48.sp, fontWeight = FontWeight.Light),
+    displayMedium = TextStyle(fontSize = 36.sp, lineHeight = 40.sp, fontWeight = FontWeight.Light),
+    displaySmall = TextStyle(fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Light),
+    headlineLarge = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Light),
+    headlineMedium = TextStyle(fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.Normal),
+    headlineSmall = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.Normal),
+    titleLarge = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium),
+    titleMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    titleSmall = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = TextStyle(fontSize = 13.sp, lineHeight = 19.sp),
+    bodyMedium = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
+    bodySmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp),
+    labelLarge = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
+    labelMedium = TextStyle(fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
+    labelSmall = TextStyle(fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Normal),
 )
 
-internal val DialogHeadlineStyle = PinkCollabTypography.headlineSmall.copy(fontSize = 22.sp)
-internal val SheetTitleStyle = PinkCollabTypography.titleLarge.copy(fontSize = 20.sp)
+internal val DialogHeadlineStyle = PinkCollabTypography.headlineSmall
+internal val SheetTitleStyle = PinkCollabTypography.titleLarge
 
 /** Message list only. Heavier weights are synthesized from the bundled regular face. */
 internal val SessionTypography = PinkCollabTypography.sessionFont()
@@ -106,6 +123,13 @@ fun PinkCollabTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = PinkCollabScheme,
         typography = PinkCollabTypography,
+        shapes = Shapes(
+            extraSmall = RoundedCornerShape(6.dp),
+            small = RoundedCornerShape(10.dp),
+            medium = RoundedCornerShape(14.dp),
+            large = RoundedCornerShape(18.dp),
+            extraLarge = RoundedCornerShape(24.dp),
+        ),
         content = content,
     )
 }

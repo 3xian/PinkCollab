@@ -13,6 +13,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import dev.pinkcollab.ui.theme.BrandPurple
+import dev.pinkcollab.ui.theme.BrandPink
 import kotlin.math.PI
 import kotlin.math.cos
 
@@ -52,7 +53,7 @@ internal fun ThinkingGlowThumb(enabled: Boolean, modifier: Modifier = Modifier) 
         }
         drawCircle(
             brush = Brush.radialGradient(
-                colors = if (enabled) listOf(Color(0xFFB6A0F0), BrandPurple, Color(0xFF6345B5))
+                colors = if (enabled) listOf(BrandPink, BrandPurple, BrandPink)
                     else listOf(muted, muted),
                 center = center - Offset(radius * 0.35f, radius * 0.4f),
                 radius = radius * 1.6f,

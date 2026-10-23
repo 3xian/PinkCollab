@@ -1,5 +1,5 @@
 // Rebuild the README, website hero, and 1200x630 social card from one approved
-// source through the canonical branding generator. Requires Pillow and NumPy.
+// source through the canonical branding generator. Requires Pillow.
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

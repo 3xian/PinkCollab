@@ -24,7 +24,7 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        border = BorderStroke(0.5.dp, TextHigh.copy(alpha = 0.12f)),
     ) {
         Column(
             Modifier.padding(16.dp),
@@ -51,7 +51,7 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
                             enabled = enabled,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                             shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = if (enabled) 0.14f else 0.06f)),
+                            border = BorderStroke(0.5.dp, TextHigh.copy(alpha = if (enabled) 0.18f else 0.08f)),
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = TextHigh),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                         ) {
@@ -88,7 +88,7 @@ internal fun AttentionCard(attention: Attention, enabled: Boolean, respond: (Att
                         enabled = enabled,
                         shape = RoundedCornerShape(10.dp),
                         colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Purple400,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.14f), cursorColor = Purple400),
+                            unfocusedBorderColor = TextHigh.copy(alpha = 0.18f), cursorColor = Purple400),
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         PrimaryButton(onClick = { respond(AttentionResponse.Value(attention.id, answer)) }, enabled = enabled) {

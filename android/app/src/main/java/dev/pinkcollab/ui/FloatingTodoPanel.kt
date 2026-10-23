@@ -78,7 +78,7 @@ internal fun FloatingTodoPanel(
     val headerHeight = todoPanelHeaderHeight()
     val shape = RoundedCornerShape(13.dp)
     Column(modifier.fillMaxWidth().heightIn(max = maxHeight).shadow(10.dp, shape).clip(shape)
-        .background(Color(0xFF211D2B))
+        .background(Base1)
         .background(Brush.horizontalGradient(listOf(accent.copy(alpha = emphasis), Color.Transparent)))
         .testTag("floatingTodoPanel")) {
         Box(Modifier.fillMaxWidth().height(headerHeight).testTag("todoHeader")

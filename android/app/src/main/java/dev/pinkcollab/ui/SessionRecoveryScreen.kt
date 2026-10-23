@@ -125,7 +125,7 @@ internal fun SessionRecoveryScreen(hosts: List<HostState>, actions: TasksScreenA
             Spacer(Modifier.height(24.dp))
             Column(Modifier.widthIn(max = 440.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 hosts.forEach { host ->
-                    Column(Modifier.fillMaxWidth().glassPanel(CardShape).padding(16.dp)) {
+                    Column(Modifier.fillMaxWidth().paperPanel(CardShape).padding(16.dp)) {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
                                 host.paired.displayName,

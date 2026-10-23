@@ -1,10 +1,11 @@
 <resources>
-    <style name="Theme.PinkCollab" parent="android:style/Theme.Material.NoActionBar">
+    <style name="Base.Theme.PinkCollab" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:windowLightStatusBar">false</item>
-        <item name="android:statusBarColor">#050408</item>
-        <item name="android:navigationBarColor">#050408</item>
-        <item name="android:colorAccent">#8360DD</item>
-        <item name="android:windowBackground">#050408</item>
+        <item name="android:statusBarColor">#343433</item>
+        <item name="android:navigationBarColor">#EDEDEB</item>
+        <item name="android:colorAccent">#242424</item>
+        <item name="android:windowBackground">#EDEDEB</item>
         <item name="android:windowDisablePreview">true</item>
     </style>
+    <style name="Theme.PinkCollab" parent="Base.Theme.PinkCollab" />
 </resources>

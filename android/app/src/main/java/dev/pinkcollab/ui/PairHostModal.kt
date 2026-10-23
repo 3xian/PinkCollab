@@ -34,17 +34,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
-import dev.pinkcollab.ui.theme.Base0
+import dev.pinkcollab.ui.theme.Base1
 import dev.pinkcollab.ui.theme.DialogHeadlineStyle
 import dev.pinkcollab.ui.theme.PrimaryButton
-import dev.pinkcollab.ui.theme.Purple700
+import dev.pinkcollab.ui.theme.TextHigh
 import dev.pinkcollab.ui.theme.TextMid
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import org.json.JSONObject
@@ -89,12 +88,12 @@ internal fun PairHostModal(
     ModalBottomSheet(
         onDismissRequest = { if (!busy) onStateChange(PairHostSheetState()) },
         sheetState = sheetState,
-        containerColor = Color.Transparent,
+        containerColor = Base1,
         tonalElevation = 0.dp,
-        scrimColor = Color.Black.copy(alpha = 0.64f),
+        scrimColor = Color.Black.copy(alpha = 0.32f),
         dragHandle = {
             Box(
-                Modifier.fillMaxWidth().background(Purple700),
+                Modifier.fillMaxWidth().background(Base1),
                 contentAlignment = Alignment.Center,
             ) {
                 BottomSheetDefaults.DragHandle()
@@ -102,14 +101,7 @@ internal fun PairHostModal(
         },
     ) {
         PairHostSheet(
-            modifier = Modifier.background(
-                Brush.verticalGradient(
-                    0f to Purple700,
-                    0.22f to Color(0xFF1B1123),
-                    0.42f to Base0,
-                    1f to Base0,
-                ),
-            ),
+            modifier = Modifier.background(Base1),
             url = state.url,
             token = state.token,
             busy = busy,
@@ -146,18 +138,18 @@ private fun PairHostSheet(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 520.dp, max = 720.dp)
+            .heightIn(max = 720.dp)
             .verticalScroll(rememberScrollState())
             .imePadding()
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column {
             Text(
                 "Connect OMP host",
                 style = DialogHeadlineStyle,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                color = TextHigh,
             )
             Spacer(Modifier.height(8.dp))
             Text(

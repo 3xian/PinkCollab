@@ -23,7 +23,7 @@ internal fun EmptyState(
     onAction: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), contentAlignment = Alignment.Center) {
         Column(
             modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -31,9 +31,9 @@ internal fun EmptyState(
             Image(
                 painter = painterResource(R.drawable.moon_robot),
                 contentDescription = null,
-                modifier = Modifier.size(120.dp),
+                modifier = Modifier.size(88.dp),
             )
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(16.dp))
             Text(
                 title,
                 modifier = Modifier.fillMaxWidth(),
@@ -50,7 +50,7 @@ internal fun EmptyState(
                 textAlign = TextAlign.Center,
             )
             action?.let {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
                 PrimaryButton(onClick = onAction) { Text(it) }
             }
         }

@@ -11,10 +11,10 @@ import dev.pinkcollab.ui.PinkCollabApp
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // The UI is dark-only (black + purple), so system bars always get light icons.
+        // The status bar continues the charcoal header; navigation sits on paper.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(Color.rgb(237, 237, 235), Color.rgb(237, 237, 235)),
         )
         setContent { PinkCollabApp() }
     }

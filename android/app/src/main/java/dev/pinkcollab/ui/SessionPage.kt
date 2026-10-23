@@ -231,22 +231,16 @@ internal fun SessionPage(
         IntOffset(0, -overlap)
     }
     val composerShape = RoundedCornerShape(14.dp)
-    val composerFill = Brush.verticalGradient(
-        listOf(
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            MaterialTheme.colorScheme.surfaceContainer,
-        ),
-    )
     fun Modifier.composerCard() = this
         .shadow(
-            elevation = 18.dp,
+            elevation = 6.dp,
             shape = composerShape,
             clip = false,
-            ambientColor = Color.Black.copy(alpha = 0.62f),
-            spotColor = Purple400.copy(alpha = 0.18f),
+            ambientColor = Color.Black.copy(alpha = 0.10f),
+            spotColor = Color.Black.copy(alpha = 0.08f),
         )
         .clip(composerShape)
-        .background(composerFill)
+        .background(Base1)
     val placeholder = remember(conversation) {
         conversation.lastOrNull { it.kind == "user" }?.text ?: "What should OMP do?"
     }
@@ -357,10 +351,10 @@ internal fun SessionPage(
                 .height(composerClearance + 32.dp)
                 .background(
                     Brush.verticalGradient(
-                        0.00f to Color.Transparent,
-                        // Reach the work-status strip already dimmed, then fade to black below it.
-                        (32.dp / (composerClearance + 32.dp)) to Color.Black.copy(alpha = 0.60f),
-                        1.00f to Color.Black,
+                        0.00f to Base0.copy(alpha = 0f),
+                        // Keep scrolled messages clear of the controls on a paper backdrop.
+                        (32.dp / (composerClearance + 32.dp)) to Base0.copy(alpha = 0.94f),
+                        1.00f to Base0,
                     ),
                 ),
         )
@@ -386,8 +380,8 @@ internal fun SessionPage(
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     val composerTextStyle = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 15.sp,
-                        lineHeight = 20.sp,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
                         platformStyle = PlatformTextStyle(includeFontPadding = false),
                     )
                     Row(
@@ -401,8 +395,8 @@ internal fun SessionPage(
                                 .testTag("sessionInput")
                                 .weight(1f)
                                 .heightIn(min = 48.dp, max = 180.dp)
-                                // Center the first 20sp line beside the 48dp attachment target.
-                                .padding(top = 14.dp)
+                                // Center the first 18sp line beside the attachment target.
+                                .padding(top = 15.dp)
                                 .onFocusChanged {
                                     if (it.isFocused) todoExpanded = false
                                 },

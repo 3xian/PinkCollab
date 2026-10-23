@@ -6,15 +6,18 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -22,6 +25,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.pinkcollab.BuildConfig
 import dev.pinkcollab.ui.theme.Base0
+import dev.pinkcollab.ui.theme.HeaderBackground
+import dev.pinkcollab.ui.theme.HeaderInk
 import dev.pinkcollab.ui.theme.PinkCollabTheme
 import dev.pinkcollab.ui.theme.rememberHapticOnClick
 
@@ -119,6 +124,7 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
             if (!ready) {
                 StartupLoadingScreen(app)
             } else Box(Modifier.fillMaxSize().background(Base0)) {
+            Box(Modifier.fillMaxWidth().windowInsetsTopHeight(WindowInsets.statusBars).background(HeaderBackground))
             AppScaffold(
                 title = secondaryTitle,
                 hasParentDirectory = browserBackTarget != null,
@@ -287,7 +293,7 @@ internal fun AppScaffold(
         topBar = {
             title?.let {
                 TopAppBar(
-                    title = { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = { Text(it, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     navigationIcon = {
                         IconButton(onClick = rememberHapticOnClick(onBack)) {
                             Icon(
@@ -297,10 +303,10 @@ internal fun AppScaffold(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.92f),
-                        scrolledContainerColor = MaterialTheme.colorScheme.background,
-                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        containerColor = HeaderBackground,
+                        scrolledContainerColor = HeaderBackground,
+                        navigationIconContentColor = HeaderInk,
+                        titleContentColor = HeaderInk,
                     ),
                 )
             }
@@ -310,7 +316,10 @@ internal fun AppScaffold(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .consumeWindowInsets(padding),
+                .consumeWindowInsets(padding)
+                .background(HeaderBackground)
+                .then(if (title != null) Modifier.clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                    .background(Base0) else Modifier),
             content = content,
         )
     }

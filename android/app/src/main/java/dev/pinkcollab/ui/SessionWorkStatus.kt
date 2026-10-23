@@ -288,7 +288,7 @@ internal fun workTextShimmer(baseColor: Color = TextMid): Modifier {
             val halfWidth = size.width * 0.35f
             drawRect(
                 brush = Brush.linearGradient(
-                    colors = listOf(baseColor, Color.White, baseColor),
+                    colors = listOf(baseColor, TextHigh, baseColor),
                     start = Offset(center - halfWidth, 0f),
                     end = Offset(center + halfWidth, 0f),
                 ),

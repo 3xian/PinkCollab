@@ -50,7 +50,7 @@ internal fun QuestTaskRow(task: TodoTask, live: Boolean) {
     val target = when (task.status) {
         TodoStatus.Active -> Purple400
         TodoStatus.Completed -> Teal300
-        TodoStatus.Blocked -> Color(0xFFE8B96C)
+        TodoStatus.Blocked -> Amber300
         else -> TextMid
     }
     val color by animateColorAsState(target, tween(350), label = "taskColor")

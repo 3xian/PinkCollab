@@ -172,7 +172,7 @@ private fun BreadcrumbTag(label: String, current: Boolean, onClick: (() -> Unit)
     val navigable = onClick != null
     val fill = when {
         current -> BrandPurple.copy(alpha = 0.22f)
-        navigable -> Color.White.copy(alpha = 0.07f)
+        navigable -> TextHigh.copy(alpha = 0.04f)
         else -> Color.Transparent
     }
     val color = when {
@@ -392,6 +392,6 @@ private fun DirectoryPlaceholder(width: Float, height: Dp, pulse: Float) {
             .fillMaxWidth(width)
             .height(height)
             .alpha(pulse)
-            .background(Color.White.copy(alpha = 0.11f), RoundedCornerShape(999.dp)),
+            .background(TextHigh.copy(alpha = 0.08f), RoundedCornerShape(999.dp)),
     )
 }

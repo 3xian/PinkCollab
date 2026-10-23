@@ -35,10 +35,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
@@ -179,7 +179,7 @@ internal fun TasksScreen(
     }
 
     val cardStripHeight = 16.dp + 48.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(HeaderBackground)) {
         TasksTopBar(
             hosts = hosts,
             selectedHostId = hostFilter,
@@ -195,8 +195,11 @@ internal fun TasksScreen(
             checkForUpdates = actions.checkForUpdates,
             showVersion = actions.showVersion,
         )
+        val contentPanel = Modifier.weight(1f)
+            .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .background(Base0)
         if (sessions.isEmpty()) {
-            Box(Modifier.weight(1f)) {
+            Box(contentPanel) {
                 when (visibleState.emptyState) {
                     TaskListEmptyState.Loading -> TaskListLoadingState(
                         hostFilter?.let { id -> hostFilterOptions(hosts).firstOrNull { it.hostId == id }?.label },
@@ -217,7 +220,7 @@ internal fun TasksScreen(
                 }
             }
         } else {
-            Box(Modifier.weight(1f)) {
+            Box(contentPanel) {
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize().testTag("sessionTimelinePager"),
@@ -339,7 +342,7 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
     }
     androidx.compose.foundation.lazy.LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 28.dp),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -350,7 +353,7 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
             ) {
                 Text(
                     "Bring OMP to your phone",
-                    modifier = Modifier.brandGradientMask(),
+                    color = BrandPurple,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
@@ -366,15 +369,15 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .glassPanel(CardShape, fillAlpha = 0.075f, borderAlpha = 0.18f)
-                        .padding(horizontal = 18.dp, vertical = 6.dp),
+                        .paperPanel(CardShape, borderColor = TextHigh.copy(alpha = 0.18f))
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
                 ) {
                     steps.forEachIndexed { index, step ->
                         PairingStepRow(index + 1, step)
                         if (index < steps.lastIndex) {
                             HorizontalDivider(
                                 Modifier.padding(start = 50.dp),
-                                color = Color.White.copy(alpha = 0.07f),
+                                color = MaterialTheme.colorScheme.outlineVariant,
                             )
                         }
                     }
@@ -382,9 +385,10 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
                 Spacer(Modifier.height(20.dp))
                 Button(
                     onClick = rememberHapticOnClick(connectHost),
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF6846B2),
+                        containerColor = BrandPurple,
                         contentColor = Color.White,
                     ),
                 ) {
@@ -407,7 +411,7 @@ private fun BringOmpEmptyState(modifier: Modifier = Modifier, connectHost: () ->
 @Composable
 private fun PairingStepRow(number: Int, step: PairingStep) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        Modifier.fillMaxWidth().padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
@@ -471,7 +475,7 @@ private fun TasksTopBar(
         Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 44.dp)
-            .background(Base0.copy(alpha = 0.90f))
+            .background(HeaderBackground)
             .padding(start = 12.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -494,19 +498,20 @@ private fun TasksTopBar(
                     },
                 ) {
                     if (refreshing) {
-                        OrbitDots(Modifier.size(18.dp), Purple400)
+                        OrbitDots(Modifier.size(18.dp), HeaderInk)
                     } else {
                         Icon(
                             Icons.Outlined.Refresh,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
-                            tint = if (refreshableHosts.isNotEmpty()) Purple400 else Gray400,
+                            tint = if (refreshableHosts.isNotEmpty()) HeaderInk else HeaderInk.copy(alpha = 0.38f),
                         )
                     }
                 }
             }
         } else {
-            Spacer(Modifier.weight(1f))
+            Text("PinkCollab", Modifier.weight(1f).padding(start = 8.dp),
+                style = MaterialTheme.typography.titleSmall, color = HeaderInk)
         }
         if (showWorkspaces) {
             TopBarAction(Icons.Outlined.FolderOpen, "Workspaces", openResources)
@@ -543,7 +548,7 @@ private fun HostSessionFilter(
     val options = remember(hosts) { hostFilterOptions(hosts) }
     val label = options.firstOrNull { it.hostId == selectedHostId }?.label ?: AllHostsFilterLabel
     var expanded by remember { mutableStateOf(false) }
-    val refreshColor = MaterialTheme.colorScheme.tertiary
+    val refreshColor = HeaderInk.copy(alpha = 0.24f)
     BoxWithConstraints(modifier) {
         val filterMaxWidth = maxWidth
         Box(Modifier.widthIn(max = filterMaxWidth)) {
@@ -554,7 +559,7 @@ private fun HostSessionFilter(
                     .clip(ButtonDefaults.textShape)
                     .drawBehind {
                         drawRect(
-                            color = refreshColor.copy(alpha = 0.8f * refreshOpacity()),
+                            color = refreshColor.copy(alpha = refreshColor.alpha * 0.8f * refreshOpacity()),
                             size = size.copy(width = size.width * refreshFill()),
                         )
                     },
@@ -574,7 +579,7 @@ private fun HostSessionFilter(
                     Modifier.widthIn(max = (filterMaxWidth - 33.dp).coerceAtLeast(0.dp)),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Medium,
-                    color = Purple400,
+                    color = HeaderInk,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     softWrap = false,
@@ -584,7 +589,7 @@ private fun HostSessionFilter(
                     if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = Purple400,
+                    tint = HeaderInk,
                 )
             }
             DropdownMenu(
@@ -675,13 +680,13 @@ private fun TopBarTextButton(
 @Composable
 private fun TopBarAction(icon: ImageVector, label: String, onClick: () -> Unit) {
     TopBarTextButton(onClick) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = Purple400)
+        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp), tint = HeaderInk)
         Spacer(Modifier.width(5.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Medium,
-            color = Purple400,
+            color = HeaderInk,
         )
     }
 }
@@ -708,10 +713,6 @@ private fun TasksPagerBar(
     }
     val cardWidth = 168.dp
     val startPadding = 12.dp
-    val selectedCardFill = remember {
-        Brush.linearGradient(listOf(lerp(Base1, BrandPurple, 0.46f), lerp(Base1, BrandPurple, 0.30f)))
-    }
-
     val backgroundHeight = height + 8.dp
     val solidStop = (height / 2) / backgroundHeight
     BoxWithConstraints(
@@ -751,24 +752,26 @@ private fun TasksPagerBar(
                 val selected = SessionKey(session.hostId, session.id) ==
                     (selectedSession ?: sessionKeys.getOrNull(currentPage))
                 val cardColor = when (cardStatus) {
-                    SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired -> Amber300
-                    SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> if (selected) Purple200 else Violet400
-                    SessionCardStatus.Ready -> Teal300
-                    else -> if (selected) TextMid else Gray400
+                    SessionCardStatus.NeedsInput, SessionCardStatus.SignIn, SessionCardStatus.UpdateRequired ->
+                        if (selected) Color(0xFFF0B6C1) else AccentRose
+                    SessionCardStatus.Working, SessionCardStatus.Starting, SessionCardStatus.Stopping -> if (selected) HeaderInk else Violet400
+                    SessionCardStatus.Ready -> if (selected) Color(0xFFB6CCBF) else Teal300
+                    else -> if (selected) HeaderInk.copy(alpha = 0.7f) else Gray400
                 }
                 val fileName = session.cwd.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifEmpty { session.cwd }
                 val hostName = hosts[session.hostId]?.paired?.displayName?.trim()?.ifEmpty { null } ?: session.hostId
-                val locationColor = if (selected) Purple200 else TextMid
+                val locationColor = if (selected) HeaderInk.copy(alpha = 0.7f) else TextMid
                 val shape = RoundedCornerShape(13.dp)
                 Column(
                     Modifier
                         .width(cardWidth)
                         .testTag("sessionCard:${session.id}")
                         .fillMaxHeight()
+                        .shadow(10.dp, shape)
                         .clip(shape)
                         .then(
-                            if (selected) Modifier.background(selectedCardFill, shape)
-                            else Modifier.background(lerp(Base0, Color.White, 0.14f), shape)
+                            if (selected) Modifier.background(BrandPurple, shape)
+                            else Modifier.background(Base1, shape)
                         )
                         .semantics {
                             this.selected = selected
@@ -790,7 +793,7 @@ private fun TasksPagerBar(
                             Modifier.weight(1f),
                             style = MaterialTheme.typography.titleSmall.copy(fontSize = 13.sp),
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (selected) TextHigh else TextMid,
+                            color = if (selected) HeaderInk else TextHigh,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
