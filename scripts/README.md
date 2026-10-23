@@ -49,11 +49,22 @@ optimized WebP for the README and website at quality 82 with encoding method 6
 at a compact download size. Each run starts from the lossless source
 to avoid repeated compression. Pages load only the optimized files.
 
-`model-picker-source.png` and `provider-usage-source.png` in the same directory
-generate the website's corresponding JPEGs, also limited to 1200 pixels per side
-at quality 86. These are illustrative product views with sample content, not
-device screenshots. Update their source files together with session artwork when
-changing the visual style; never re-encode an already compressed website asset.
+`model-picker-source.png` generates the website's JPEG at quality 86.
+`provider-usage-source.png` generates a WebP at quality 84 with encoding method 6
+(about 46 KB), replacing the older 68 KB JPEG. Both are limited to 1200 pixels per
+side and remain illustrative product views rather than device screenshots.
+The Usage artwork follows the supplied current Android screenshot: white Usage
+toolbar, thin outlined cards, centered percentage labels on muted green quota
+bars, and masked OpenAI Codex, xAI and Workbuddy accounts. Its built-in image
+generation brief is to preserve that interface and the 9%/23%/unavailable states
+within a front-facing phone on the right over the gray/white diagonal background.
+The left side carries the heading “Provider account quotas”, subtitle “Shared
+across conversations”, and a compact gallery of OpenAI, Claude, Gemini, Grok,
+DeepSeek and Qwen logos. These brand references remain outside the app interface;
+they do not imply that every provider reports account quotas. The OpenAI mark
+stays black, following its [brand guidance](https://openai.com/brand/).
+Update the source when the interface changes; never re-encode an already
+compressed website asset.
 
 The social card uses the same artwork, cropped to 1200 × 630 and encoded as an
 optimized progressive JPEG at quality 86 to keep smooth gradients and a small file.

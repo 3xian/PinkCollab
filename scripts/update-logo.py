@@ -51,12 +51,14 @@ def promotional_images() -> None:
     (ROOT / "website/assets/pinkcollab-session-review.webp").write_bytes(
         (ROOT / "docs/assets/pinkcollab-readme.webp").read_bytes()
     )
-    for name in ("model-picker", "provider-usage"):
+    for name, extension, options in (
+        ("model-picker", "jpg", dict(quality=86, subsampling=0, optimize=True, progressive=True)),
+        ("provider-usage", "webp", dict(quality=84, method=6)),
+    ):
         with Image.open(TEMPLATES / f"{name}-source.png") as artwork:
             photo = artwork.convert("RGB")
         photo.thumbnail((1200, 1200), LANCZOS)
-        photo.save(ROOT / f"website/assets/pinkcollab-{name}.jpg",
-                   quality=86, subsampling=0, optimize=True, progressive=True)
+        photo.save(ROOT / f"website/assets/pinkcollab-{name}.{extension}", **options)
 
 
 def launcher_background(size: int) -> Image.Image:
