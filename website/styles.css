@@ -166,40 +166,45 @@ a.omp-link:hover { color: oklch(0.42 0.2 340); }
 .getting-started { display: grid; grid-template-columns: minmax(0,.85fr) minmax(0,1.15fr); align-items: start; gap: 48px; }
 .start-copy h2 { margin: 22px 0 26px; }
 .start-copy>p:not(.eyebrow) { color: var(--muted); font-size: 14px; line-height: 1.9; }
-.requirement-list { display: grid; grid-template-columns: 1fr; gap: 7px; margin: 28px 0; }
-.requirement-list dt { margin-top: 14px; font-size: 12px; font-weight: 700; color: var(--text); }
+.requirement-list { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 24px 0 12px; }
+.requirement-list dt { margin-top: 12px; font-size: 12px; font-weight: 700; color: var(--text); }
 .requirement-list dd { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.9; }
-.requirement-list code, .route-note code, .next-steps code, .next-note code { background: #E8E8E4; color: #343433; padding: 2px 4px; border-radius: 3px; }
+.requirement-list code, .route-note code, .next-note code { background: #E8E8E4; color: #343433; padding: 2px 4px; border-radius: 3px; }
 .build-link { display: flex; width: fit-content; align-items: center; gap: 12px; color: var(--accent); font-size: 11px; }
 .start-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; }
-.build-note { display: block; margin-top: 14px; max-width: 420px; color: var(--soft); font-size: 11px; line-height: 1.9; }
+.start-copy>p.start-tip { margin-top: 22px; padding: 14px 16px; border-left: 2px solid #B7B7B1; background: #E8E8E4; font-size: 11px; line-height: 1.8; }
 .install-panel { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: #FAFAF8; overflow: hidden; }
 .install-top { background: var(--header); color: var(--header-text); display: flex; align-items: center; gap: 16px; padding: 21px 24px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 10px; }
+.install-recommended { margin-left: auto; color: #D4D4CF; font-family: var(--font); font-size: 9px; }
 .terminal-dots { display: flex; gap: 6px; }
 .terminal-dots i { width: 6px; height: 6px; border-radius: 50%; background: #D4D4CF; }
 .terminal-dots i:nth-child(2) { background: #A6A6A0; }
 .terminal-dots i:nth-child(3) { background: var(--signal); }
+.install-steps { margin: 0; padding: 0; list-style: none; }
+.install-route { padding: 20px 24px; }
 .install-route+.install-route { border-top: 1px solid var(--line); }
-.route-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 24px 24px 0; }
+.route-head { display: flex; align-items: center; gap: 12px; }
+.route-head>div { min-width: 0; }
+.step-number { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border: 1px solid #D4D4CF; border-radius: 7px; background: #F1F1EE; color: var(--accent); font-family: var(--mono); font-size: 10px; }
 .route-head h3 { font-size: 13px; font-weight: 600; letter-spacing: -.02em; }
-.route-badge { color: var(--soft); font-size: 9px; }
-.copy-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 0 10px; margin-left: auto; border: 1px solid #D4D4CF; border-radius: 5px; color: var(--accent); background: #F1F1EE; font-size: 10px; cursor: pointer; }
+.route-badge { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.route-body { margin: 12px 0 0 38px; }
+.install-download { min-height: 40px; padding: 0 14px; font-size: 11px; }
+.copy-button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 0 10px; margin-left: auto; border: 1px solid #D4D4CF; border-radius: 5px; color: var(--accent); background: #F1F1EE; font-size: 10px; cursor: pointer; }
 .copy-button:hover { background: #E4E4E1; border-color: #858580; }
-pre { margin: 18px 0 0; padding: 0 24px 24px; overflow-x: auto; color: var(--signal); font-size: 12px; line-height: 2; tab-size: 2; }
+pre { margin: 10px 0; padding: 12px; border: 1px solid #E1E1DC; border-radius: 6px; background: #F1F1EE; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--signal); font-size: 11px; line-height: 1.9; tab-size: 2; }
 pre code { font-size: inherit; }
-.route-note { margin: 0; padding: 0 24px 24px; color: var(--muted); font-size: 11px; line-height: 1.9; }
-.install-next { margin: 0 24px; padding: 24px 0; border-top: 1px solid var(--line); }
-.install-next>span { font-size: 9px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
-.next-steps { list-style: none; margin: 20px 0 0; padding: 0; display: grid; gap: 16px; counter-reset: step; }
-.next-steps li { position: relative; counter-increment: step; padding-left: 30px; color: var(--muted); font-size: 12px; line-height: 1.9; }
-.next-steps li::before { content: counter(step); position: absolute; left: 0; top: 2px; display: grid; place-items: center; width: 19px; height: 19px; border: 1px solid #B7B7B1; border-radius: 50%; color: var(--accent); font-size: 9px; }
-.install-details { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 18px; }
-.install-route .install-details { margin: 0 24px 24px; padding-top: 12px; }
-.install-details summary { min-height: 44px; cursor: pointer; color: var(--text); font-size: 11px; padding: 6px 0; }
-.next-note { margin-top: 16px; color: var(--muted); font-size: 11px; line-height: 1.9; }
-.copy-status { margin-top: 14px; color: var(--signal); font-size: 11px; line-height: 1.7; }
-.copy-status:empty { margin-top: 0; }
-.install-next>a { display: inline-flex; align-items: center; gap: 12px; margin-top: 22px; color: var(--accent); font-size: 11px; }
+.route-note { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.8; }
+.install-download+.route-note, .route-hint { margin-top: 10px; }
+.install-next { padding: 8px 24px 16px; border-top: 1px solid var(--line); background: #F5F5F2; }
+.install-details+.install-details { border-top: 1px solid var(--line); }
+.install-details summary { min-height: 44px; align-content: center; cursor: pointer; color: var(--text); font-size: 11px; padding: 10px 0; }
+.next-note { margin: 0 0 14px; color: var(--muted); font-size: 11px; line-height: 1.9; }
+.source-route { padding: 0 0 8px; }
+.source-route .route-body { margin-left: 0; }
+.copy-status { margin: 8px 0; color: var(--signal); font-size: 11px; line-height: 1.7; }
+.copy-status:empty { margin: 0; }
+.install-next>a { display: inline-flex; align-items: center; gap: 12px; color: var(--accent); font-size: 11px; }
 .closing { display: flex; flex-direction: column; align-items: center; padding: 56px 16px 64px; text-align: center; background: linear-gradient(150deg, #D4D4D0 0 36%, #FAFAF8 36% 100%); border-radius: 20px; margin-bottom: 32px; }
 .closing img { width: 56px; height: 56px; border-radius: 14px; margin-bottom: 24px; box-shadow: 0 5px 12px #24242418, 0 14px 28px #24242414; transform-origin: 50% 75%; animation: closing-logo-sway 4.2s ease-in-out infinite; }
 @keyframes closing-logo-sway {
@@ -286,7 +291,6 @@ footer a:hover { color: var(--accent); }
   .getting-started { gap: 40px; }
   .requirement-list { grid-template-columns: 120px 1fr; gap: 16px; }
   .requirement-list dt { margin-top: 0; }
-  .build-note { max-width: 620px; }
   footer p { display: none; }
 }
 @media (max-width: 520px) {
@@ -351,13 +355,17 @@ footer a:hover { color: var(--accent); }
   .powered-brand-capabilities { font-size: 8px; }
   .requirement-list { grid-template-columns: 1fr; gap: 6px; }
   .requirement-list dt { margin-top: 15px; }
-  .route-head { padding: 20px 18px 0; }
+  .install-top { padding: 18px 16px; gap: 10px; flex-wrap: wrap; }
+  .install-recommended { font-size: 8px; }
+  .install-route { padding: 18px 16px; }
+  .route-head { gap: 10px; }
   .route-head h3 { font-size: 12px; }
-  .route-badge { font-size: 8px; }
-  pre { padding: 0 18px 20px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
-  .route-note { padding: 0 18px 20px; }
-  .install-next { margin: 0 18px; }
-  .install-route .install-details { margin: 0 18px 20px; }
+  .route-badge { font-size: 9px; }
+  .route-body { margin-left: 0; }
+  pre { padding: 10px; font-size: 10px; }
+  .install-next { padding: 8px 16px 12px; }
+  .source-route { padding: 0 0 8px; }
+  .install-download { min-height: 44px; }
   .copy-button { min-height: 44px; }
   .closing { padding: 44px 0 64px; }
   .closing p { font-size: 38px; }
