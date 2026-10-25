@@ -59,7 +59,7 @@ git push origin main
 git push origin vX.Y.Z
 ```
 
-Use the `-F` command above: the tag must be annotated and its annotation must match the committed notes file. Missing or mismatched notes fail before the build; the workflow does not generate a commit list for new releases.
+Use the `-F` command above: the tag must be annotated and its annotation must match the committed notes file. Keep published notes unchanged during routine documentation maintenance: they describe that release and remain tied to its tag. Missing or mismatched notes fail before the build; the workflow does not generate a commit list for new releases.
 
 For a prerelease, use the same suffix in every manifest version, the notes filename, and the annotated tag (for example, `1.2.3-rc.1` and `docs/releases/v1.2.3-rc.1.md`). Stable releases publish all six npm packages to `latest`; prereleases publish to `next` without changing `latest`. Suffix tags become GitHub prereleases and are excluded from `/releases/latest`, which the Android updater uses.
 

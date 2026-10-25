@@ -23,7 +23,7 @@
 
 ### 1. Install
 
-On your phone, install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
+On your phone (Android 8.0 or later), install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk).
 
 On your computer, you need a working [OMP](https://omp.sh/) installation, Node.js 18+, and [Tailscale](https://tailscale.com/download) for the default setup. Use the same OS user that owns your OMP configuration and conversations; `omp --version` must work for that user.
 
@@ -67,7 +67,7 @@ On Windows, use a normal terminal as your OMP user. The Gateway starts automatic
 
 **Close the corresponding OMP instance on your computer before continuing a conversation from the phone.** This is not a takeover of a running terminal session; do not use the same conversation elsewhere while PinkCollab owns its runtime.
 
-Send a prompt and check that OMP responds. Swipe to switch sessions; use **Stop** to interrupt a turn and **Exit** to end its runtime. Tap the selected task card to open its information dialog, then choose **Delete** to permanently remove the task, its OMP history, session artifacts, and uploaded attachments. Exit its runtime and close any external OMP terminal using the session first. Deletion requires confirmation and leaves project files unchanged.
+Send a prompt and check that OMP responds. Swipe to switch sessions; use **Stop** to interrupt a turn and **End** to end its runtime. Tap the selected task card to open its information dialog, then choose **Delete** to permanently remove the task, its OMP history, session artifacts, and uploaded attachments. Exit its runtime and close any external OMP terminal using the session first. Deletion requires confirmation and leaves project files unchanged.
 
 If connection or prompts fail, run `pinkcollab doctor` and see [setup troubleshooting](docs/deployment.md#troubleshooting-setup). For missing conversations, see [history discovery](docs/deployment.md#discovering-host-omp-conversations).
 
@@ -81,7 +81,7 @@ If connection or prompts fail, run `pinkcollab doctor` and see [setup troublesho
 | Update the Gateway | `pinkcollab update` |
 | Add project roots | `pinkcollab setup --workspace /path/to/code --workspace /path/to/work` |
 
-To upgrade, install the APK and CLI from the same release, then run `pinkcollab update`. It applies this CLI to the installed Gateway and does not change workspaces, the public URL, or pairings. A changed running Gateway restarts and stops active OMP runtimes; finish current work first. Stopped Gateways stay stopped unless completing an interrupted restart or reloading a still-loaded macOS agent. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations).
+To upgrade, finish active work, install the APK and CLI from the same release, then run `pinkcollab update`. A required restart ends active OMP runtimes; configuration, stored sessions, and pairings remain. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations) for version verification and stopped-service behavior.
 
 ## Keep in mind
 
@@ -95,6 +95,7 @@ To upgrade, install the APK and CLI from the same release, then run `pinkcollab 
 - [Session interface](docs/session-presentation.md): status display and interaction behavior
 - [Architecture](docs/architecture.md) · [Protocol 4](docs/protocol.md)
 - [Development](docs/development.md) · [Release publishing](docs/npm-release.md)
+- [Asset maintenance](scripts/README.md) · [Versioned release notes](docs/releases/)
 
 ## License
 

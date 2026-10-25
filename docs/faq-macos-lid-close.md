@@ -67,6 +67,6 @@ pinkcollab service status
 tailscale status
 ```
 
-Check Gateway health, the background service state, and the Tailscale connection. After applying a solution, try connecting from the phone again with the Mac in the intended operating state. Diagnostics run while the Mac is awake do not prove that it stays reachable with the lid closed.
+Check Gateway health, the background service state, and the Tailscale connection. After applying a solution, tap refresh or Try again on the phone with the Mac in the intended operating state. PinkCollab does not reconnect automatically after the network returns. Diagnostics run while the Mac is awake do not prove that it stays reachable with the lid closed.
 
 If the phone still cannot connect while the Mac is awake, follow [deployment troubleshooting](deployment.md#troubleshooting-setup).

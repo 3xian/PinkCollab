@@ -16,7 +16,7 @@ Use Funnel for guided setup. Use [Serve](#other-https-front-ends) for tailnet-on
 
 Install Node.js 18+ and [OMP](https://omp.sh/) on the host. Configure OMP's provider credentials and confirm `omp --version` works as the Gateway user. For the default transport, also install [Tailscale](https://tailscale.com/download); setup does not install these prerequisites.
 
-Install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) on the phone and the CLI from the **same release**:
+Install the [Android APK](https://github.com/3xian/PinkCollab/releases/latest/download/pinkcollab-android.apk) on an Android 8.0+ phone and the CLI from the **same release**:
 
 ```sh
 npm install -g pinkcollab@latest
@@ -147,7 +147,7 @@ node "$launcher" update
 node "$launcher" doctor
 ```
 
-Use `setup` only when changing configuration. External HTTPS setup must keep its transport flags. For a read-only PATH diagnostic, run the package's `bin/check-install.js` through Node from your shell, outside npm lifecycle scripts. Shell aliases still require the shell checks above. Correct PATH or remove only the verified obsolete npm installation, then open a new terminal and recheck the version.
+For a read-only PATH diagnostic, run the package's `bin/check-install.js` through Node from your shell, outside npm lifecycle scripts. Shell aliases still require the shell checks above. Correct PATH or remove only the verified obsolete npm installation, then open a new terminal and recheck the version.
 
 ### Recover a stale OMP installation path
 
@@ -239,7 +239,7 @@ Start with `pinkcollab doctor`; it diagnoses without changing the installation. 
 
 | Problem | Next step |
 | --- | --- |
-| OMP unavailable or prompts fail | Run OMP as the Gateway user; check provider credentials, configured executable, and saved PATH. Reinstall/update startup after changing the launcher environment. |
+| OMP unavailable or prompts fail | Run OMP as the Gateway user; check provider credentials, configured executable, and saved PATH. Use [OMP path recovery](#recover-a-stale-omp-installation-path) to select a working launcher. |
 | Tailscale sign-in times out | Finish sign-in in Tailscale, check `tailscale status`, and rerun setup. |
 | Funnel approval missing | Follow [remote-access troubleshooting](#troubleshooting-remote-access) or choose another transport. |
 | Gateway stopped or update failed | For a stopped Gateway, run `pinkcollab service start`. For a failed update, inspect the platform logs above, fix the error, and rerun `pinkcollab update`. On Windows, check login startup and Windows Script Host. |
@@ -317,7 +317,7 @@ Set overrides in the Gateway's launch environment, not only your terminal. Recor
 
 ### Refresh and discovery limits
 
-Metadata is cached for 15 seconds and refreshed by the next list/host-snapshot request; reopen or reconnect after that interval. There is no polling daemon.
+Metadata is cached for 15 seconds and refreshed by the next list/host-snapshot request after expiry. The Tasks refresh button forces a fresh discovery scan even within that interval. Try again uses normal cache and replay behavior. Returning to the foreground or regaining network access does not reconnect automatically; use refresh or Try again. There is no polling daemon.
 
 Each refresh visits at most 8,192 entries, one level below standard storage or only the explicit session directory. It considers the newest 1,024 JSONL files and reads at most 16 KiB per file for metadata. Older files and ambiguous duplicate OMP IDs may be omitted. Discovery does not follow discovered links, scan project contents, or repair files.
 

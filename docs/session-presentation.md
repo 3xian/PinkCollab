@@ -12,7 +12,6 @@
 8. [Visual and interaction rules](#8-visual-and-interaction-rules)
 9. [Acceptance scenarios](#9-acceptance-scenarios)
 10. [Extension checklist and implementation map](#10-extension-checklist-and-implementation-map)
-- [Host session entries](#host-session-entries)
 
 ## 1. Scope and terminology
 
@@ -20,7 +19,7 @@ This document defines how Android presents a session: conversation content, tool
 
 The [protocol](protocol.md) owns wire formats and synchronization. The [architecture](architecture.md) owns data authority and lifecycle boundaries. This document owns their user-visible interpretation.
 
-The Android Tasks list places active sessions (`session.isActive`) first, ordered by `createdAt DESC` so live updates do not reorder them. Inactive sessions follow in `updatedAt DESC` order. This is display-only ordering; Gateway ordering and protocol fields are unchanged.
+The Android Tasks list places active sessions (`session.isActive`) first, ordered by `createdAt DESC` so live updates do not reorder them. Inactive sessions follow in `lastActivityAt DESC` order, falling back to `updatedAt` when activity is unavailable. Host ID and Session ID break ties. Gateway pagination remains creation-ordered.
 
 | Term | Meaning | Not equivalent to |
 | --- | --- | --- |
@@ -60,7 +59,7 @@ flowchart TD
 
 | Input | Authority | Presentation responsibility |
 | --- | --- | --- |
-| Saved history | OMP JSONL, reconstructed for the selected branch | Display retained messages and tool results; never infer live execution |
+| Saved history | OMP JSONL plus delivered feedback from Gateway receipts, merged on the selected branch | Display retained messages and tool results; never infer live execution |
 | Live items | Gateway projection for the current runtime generation | Upsert previews and tools by ID; preserve the supplied order |
 | Runtime state | Gateway runtime snapshot | Establish lifecycle and execution evidence |
 | Pending inputs | Runtime snapshot | Present the first pending request and its response controls |
@@ -68,24 +67,32 @@ flowchart TD
 | Receipts | Gateway command records | Report command failure or uncertain outcome separately from tool activity |
 | Draft, expansion, and scroll state | Android UI | Preserve local interaction state without becoming execution authority |
 
-### Protocol 4 boundary
+<a id="protocol-4-boundary"></a>
+
+### 2.1 Protocol 4 boundary
 
 Android consumes the flat protocol 4 events through `ProtocolReducer`; OMP frame names in section 3.2 describe Gateway inputs, not Android wire events.
 
 | Wire input | Presentation update |
 | --- | --- |
-| `host_snapshot` | Replace host summaries; invalidate old details and take fresh snapshots for the visible session |
+| `host_snapshot` | Replace host summaries, retaining only valid same-catalog paged entries; resubscribe the visible session as needed |
 | `session_snapshot` | Replace session detail, model, live timeline, and recent receipts; load saved history when `hasHistory` is true |
 | `session_state` | Replace session metadata and all runtime facts in the host list and subscribed detail |
 | `session_upsert` | Insert or replace the session summary; update an already subscribed detail when present |
 | `timeline` | Apply reset, removals, and upserts to live items only |
 | `operation` | Replace a receipt by its `id`; interpret public `state`, never internal dispatch stages |
+| `runtime_state` | Replace runtime facts using cached session metadata |
+| `message_patch` | Verify text hashes, append text and apply metadata; recover from a snapshot on mismatch |
+| `session_remove` | Remove the task and its cached detail, draft and attachments |
+| `host_sync`, `session_resume`, `session_sync` | Confirm scoped replay while retaining valid cached content; see the [protocol](protocol.md#websocket) |
 
 `runtime.state` is the sole wire status: `starting`, `idle`, `running`, `waiting_input`, or `stopping`. A null runtime clears generation, model, pending input, and work timing. Generation changes clear the live tail and invalidate in-flight history reads; saved history reloads when a mapping exists. Local snapshot tokens and history epochs reject stale responses and are never sent over the wire. The UI does not parse runtime `phase` or `execution`, or choose prompt delivery; the Gateway chooses normal versus steering at dispatch.
 
 Switching sessions invalidates the subscription snapshot, not the host connection. While an online host supplies a fresh snapshot, retained messages remain readable and the page shows conversation synchronization instead of current work or `Host offline`; runtime controls stay disabled. Actual host connection failures still take precedence, even when the session snapshot is missing. With no retained conversation, that failure uses the host recovery surface rather than a session-load failure.
 
-### Session switcher status
+<a id="session-switcher-status"></a>
+
+### 2.2 Session switcher status
 
 The top session cards derive status from the host connection and session runtime summary. Connection states take precedence over retained execution evidence. Online cards show On host for a discovered session. Otherwise they show Starting or Stopping during lifecycle transitions, Inactive when a managed session has no runtime, Needs you for pending input, `Working` for `running`, and `Ready` for attached `idle`. Starting includes execution not yet confirmed by the Gateway. Ready does not claim task completion; Inactive does not imply the session has never run. Cards do not infer status from transcript text or tool results.
 
@@ -94,7 +101,9 @@ The switcher uses 168dp-wide cards with 13dp corners, matching the Todo panel. S
 The phone host name is prefixed to the workspace's final path component, separated by `›`. The host name is capped so a long name cannot consume the project name; each truncates independently. Status does not share that row. A long connection status truncates in the corner and must not cover the title or the host/project line at enlarged font sizes.
 The card-strip background stays fully opaque `Base0` through 8dp below the cards' vertical center line, then fades downward to fully transparent 13dp below the cards' bottom edge. The gradient extends 8dp beyond the strip. It is drawn inside each page above the conversation content and below the floating TODO panel and composer, so the fade cannot wash out the TODO surface or its shadow. The cards remain in the fixed strip above the pager. There is no separate black shadow. The conversation timeline runs underneath the strip, so scrolling earlier content passes behind that ramp. Card fills are opaque, and the strip reserves its height in the timeline's top content inset so the first item is not hidden.
 
-### 2.1 Ordering and source boundaries
+<a id="21-ordering-and-source-boundaries"></a>
+
+### 2.3 Ordering and source boundaries
 
 - The page renders one conversation timeline. History defines branch order; live items replace shared identities and extend that timeline. There is no separate live section or duplicate-message warning.
 - Gateway supplies `sourceId` for final messages, derived from the message's role, original timestamp and complete text. RPC process-local IDs and JSONL entry IDs are not interchangeable. `messageKey` bridges persistence-before-message-end races only when the lifecycle timestamp is unambiguous in both sources. Never deduplicate by text alone.
@@ -183,7 +192,7 @@ Individual status still comes only from structured flags: unfinished is Running;
 
 Only the final visible activity group may automatically open, and only when the selected page is active, its subscribed host is online, the runtime is attached and Running, no attention request or separate streaming reply is present, and the group contains a live call after the newest live user message. Matching uses tool call IDs, not timeline item IDs. An unfinished step animates only if its own call belongs to that current live turn. Older groups and saved-only calls cannot become current work.
 
-A qualified sequence opens automatically with a small localized pink work indicator. A faint vertical rail connects its icon-and-intent rows. The live sequence title and the focused running step use a neutral highlight sweeping horizontally across the glyphs; settled and disconnected titles stay still. The newest focused step opens a rounded preview using supplied targets/files; when another step takes focus, the previous automatic preview closes. Heights animate over 240–300ms and disclosure arrows rotate over 220ms. New live steps fade and rise 6dp over 260ms; result/status updates and reopening an already seen step do not replay that entrance. Manual sequence folding survives new calls and status updates in the same live phase. Manually opened or closed step previews remain explicit choices while the group is mounted.
+A qualified sequence opens automatically with a small localized neutral work indicator. A faint vertical rail connects its icon-and-intent rows. The live sequence title and the focused running step use a neutral highlight sweeping horizontally across the glyphs; settled and disconnected titles stay still. The newest focused step opens a rounded preview using supplied targets/files; when another step takes focus, the previous automatic preview closes. Heights animate over 240–300ms and disclosure arrows rotate over 220ms. New live steps fade and rise 6dp over 260ms; result/status updates and reopening an already seen step do not replay that entrance. Manual sequence folding survives new calls and status updates in the same live phase. Manually opened or closed step previews remain explicit choices while the group is mounted.
 
 When a reply appears, runtime settles, attention arrives, the page loses focus or the host disconnects, the sequence folds to its call-count summary. It remains manually expandable. The header and each expandable step expose their expanded/collapsed state and button action. There is no horizontal stack of overlapping status icons. Step rows have a compact 32dp minimum height, flexible two-line intents and a decorative disclosure chevron. Historical groups start folded. A successful folded summary has no success checkmark; failure and unfinished indicators remain explicit.
 
@@ -238,7 +247,7 @@ For states other than `Working`, when the work-status title changes, the old tex
 
 ### 6.2 Precedence table
 
-Evaluate top to bottom; the first matching row wins.
+Evaluate top to bottom; the first matching row wins. Working titles are derived state, not repeated composer labels: the timeline presents active actions while the composer shows duration and speed.
 
 | Priority | Condition | `WorkStatusKind` | Meaning / title | Active indicator |
 | --- | --- | --- | --- | --- |
@@ -263,7 +272,7 @@ Evaluate top to bottom; the first matching row wins.
 - One unfinished tool shows its intent. Multiple tools show `N tools running`, without a second-line description.
 - Completing one tool removes it from this selection; starting a new user turn excludes unfinished tools before that boundary.
 
-The strip uses the first nonblank `i` or `description` as intent, otherwise a tool label. Read/search/edit/command families have specific labels; other names use `Using <tool>` or `Running tool`.
+Work-status derivation uses the first nonblank `i` or `description` as intent, otherwise a tool label. Read/search/edit/command families have specific labels; other names use `Using <tool>` or `Running tool`.
 
 The status row and timeline share a normalized, typed tool identity. Their classification and intent policies remain surface-specific: the timeline recognizes more prefixes and also considers `title`, while the status row recognizes additional exact command aliases. Do not assume their labels must be byte-identical.
 
@@ -350,6 +359,8 @@ Refresh batch membership and completed-host counts belong to `HostOperations` in
 | Conversation loading skeleton | 24dp top inset; each placeholder breathes in sequence on a shared 2.4-second cycle with 240ms phase spacing; only opacity changes, not layout |
 | Indeterminate resource progress | Orbiting dots default to 18dp for compact controls; morphing silhouettes default to 48dp for larger loading surfaces. The morph cycles through a circle, rounded square, deep three-lobed shape and flattened ellipse over 2.8 seconds. Each 700ms stage spends 420ms morphing and 280ms holding its endpoints. Matching outline points are sampled once and reused during drawing. Caller dimensions take precedence, and both indicators expose indeterminate progress accessibility semantics |
 
+### 8.1 Typography and color
+
 - Color is supplementary; state remains distinguishable through text and icons.
 - The Android app uses only the platform default font and the bundled Maple Mono face. UI labels, speaker titles, model metadata, timestamps, tool status labels and detail toggles use the default font. Session body text, tool-step intents and Markdown code blocks use Maple; sequence headers use the platform default font; native Markdown font fallback uses the platform default, never a separate system monospace face.
 - Application dialog and pairing titles use the shared 20sp `DialogHeadlineStyle`; Models and Usage sheet titles use the shared 18sp `SheetTitleStyle`. General body styles use 11–13sp, action labels use 10–12sp, and ordinary page titles use 13–18sp. These title styles retain normal system font scaling.
@@ -357,29 +368,45 @@ Refresh batch membership and completed-host counts belong to `HostOperations` in
 - Conversation bodyLarge, bodyMedium and bodySmall styles share a 12sp font size, so You, Agent, retained/raw messages, streaming replies and tool details do not use different body sizes. Sequence headers and tool-step intents inherit the conversation bodyMedium size. Native Markdown updates its TextView size when conversation typography changes instead of retaining its creation-time size. Markdown heading semantics retain their relative styling; composer controls and session cards keep their existing typography.
 - Agent Markdown strong emphasis uses the theme's high-contrast foreground. Inline code inherits the surrounding font and size and uses the brand accent unless nested inside strong emphasis, where it inherits the same high-contrast foreground, including through a link. Heading weight alone does not imply strong emphasis. The timeline renderer resolves this color from Markdown ancestry, not mutable paint state, without adding spaces around inline code; surrounding source whitespace is preserved. Neither has an inline background; adjacent or wrapped lines must not form joined highlight bands. Fenced code blocks keep their separate block styling.
 - Agent Markdown supports GFM pipe tables through Markwon's table extension. Tables occupy the full message-body width with equal-width columns, wrapped cell text, header styling and source-defined left/center/right alignment. Cells retain inline formatting and tappable links; long-press copies the complete Markdown source, including every cell. Tables remain in the native TextView rather than a separate horizontally scrolling widget. The screen caches parsed Markdown trees (up to 64 entries and 128,000 source characters), not rendered spans; parsing and rendering stay serialized off the UI thread. Each message view owns fresh mutable spans so Markwon can attach its width reference without sharing table layouts or invalidation callbacks. Typography and text-color changes recreate those spans, including when the message width is unchanged.
+
+### 8.2 Accessibility and scrolling
+
 - The live timeline action is a polite accessibility live region; other states announce the fixed work-status title. Streaming tokens, duration ticks and tool output are not individually announced through these regions.
 - The timeline follows new content at the end through one measured-layout follower, including asynchronous Markdown reply growth and work-sequence expand/collapse animations. Timeline rows fade in without placement animation competing with bottom following. User-initiated backward scrolling or manually inspecting an activity disclosure suspends following; programmatic following does not suspend itself. Scrolling forward to the end or returning to the session re-enables it. Layout changes alone must not re-enable following after manual inspection. Manual inspection must not jump to the bottom of a tall sequence.
 - Bottom clearance includes both the status row and the complete input card so the final content can be scrolled above them.
 - The floating composer uses a static paper-gray scrim, fading in above the status row and becoming opaque at the bottom.
+
+### 8.3 Composer and controls
+
 - An empty composer shows the latest user instruction from the merged conversation timeline, regardless of runtime status; sessions without a user instruction retain `What should OMP do?`. The gray placeholder stays on one line with end ellipsis for overflow, including multiline instructions. This does not limit the editable draft's multiline behavior.
 - Status is not action permission. `sessionControls` independently gates sending, attachment, model selection, interrupt, and runtime exit. For example, Ready does not override an input-busy operation.
 - While sending, the composer status row shows a static submission label or the current file index and count, without a file-name line. The submission label has no trailing ellipsis. There is no animated progress bar. After sending finishes, the row resumes runtime work status; host connection status takes precedence while disconnected.
 - The composer action rail is ordered End, Stop, Send from top to bottom. Each button has a 44dp minimum visual height, 10dp vertical label padding and a 6dp gap; Compose retains the expanded minimum touch target. The input card follows the rail's intrinsic height, so the default row is 144dp tall while multiline drafts, attachments and larger fonts can grow it. Stop interrupts the turn; End is a separate runtime action with confirmation. A status-label change must not change those meanings.
-- End, Stop and Send retain their rounded fills and labels but have no border. The input card also has no border in idle or focused states, and the Fast switch has no border in checked, unchecked or disabled states; fills, cursor and switch-thumb position still distinguish the controls and their states. The Fast switch graphic and its allocated width both scale to 80% of the Material size, so scaling adds no empty space beside the track in either layout direction. Its label, existing end inset and the row's minimum 48dp touch target remain unchanged.
-- Composer controls use rounded Material surfaces: End remains neutral, Stop uses an error tint and Send uses a solid charcoal fill, each with an icon and retained label. Disabled controls use muted text. Attachment and model controls use brand accents; enabled Fast remains distinct. Touch targets remain at least 48dp. At narrow widths or large font scales, Model and Fast stack rather than losing a control. The model name truncates while a fixed 14dp thinking ring stays visible immediately after it, with no trailing dropdown chevron; tapping the model area still opens the picker. Following OMP's circular effort glyph convention, the static clockwise ring shows off as empty, minimal as one eighth, low as one quarter, med/medium as one half, high as three quarters, and xhigh as full; max adds a center dot to the full ring. Auto uses a static circular-arrow icon; unknown levels use a question-circle rather than inventing an effort value. Missing thinking level hides the indicator. No thinking-level word is painted in the composer; the model button's accessibility description retains the exact level, and the picker retains its textual settings. Input uses a rounded paper-white surface and charcoal cursor; action gating and End confirmation are unchanged.
-  - The thinking indicator uses the model name's exact foreground color in both enabled and disabled states; only the unfilled ring track is dimmed.
+- End, Stop and Send retain rounded fills and labels without borders. The input card is also borderless in idle and focused states. Fast uses the outlined pill described in the surface table.
+- Composer controls use rounded Material surfaces: End remains neutral, Stop uses an error tint and Send uses a solid charcoal fill, each with an icon and retained label. Disabled controls use muted text. Attachment and model controls use brand accents; enabled Fast remains distinct. Touch targets remain at least 48dp. Model and Fast share a row; the model label truncates to preserve Fast, Quick inputs and the fixed 14dp thinking ring immediately after the model name, with no trailing dropdown chevron; tapping the model area still opens the picker. Following OMP's circular effort glyph convention, the static clockwise ring shows off as empty, minimal as one eighth, low as one quarter, med/medium as one half, high as three quarters, and xhigh as full; max adds a center dot to the full ring. Auto uses a static circular-arrow icon; unknown levels use a question-circle rather than inventing an effort value. Missing thinking level hides the indicator. No thinking-level word is painted in the composer; the model button's accessibility description retains the exact level, and the picker retains its textual settings. Input uses a rounded paper-white surface and charcoal cursor; action gating and End confirmation are unchanged.
+- The thinking indicator uses the model name's exact foreground color in both enabled and disabled states; only the unfilled ring track is dimmed.
+
+### 8.4 Shared surfaces and directory browsing
+
 - The whole app shares compact paper surfaces (`Base0` `#EDEDEB`, `Base1` `#FAFAF8`), charcoal headers (`#343433`) and controls (`#242424`), fine neutral outlines, and restrained muted rose accents (`#A33750`). This applies to workspaces, pairing, recovery/loading, configuration, model/usage sheets, attention cards and update dialogs. Main content panels have 24dp top corners; conversations retain 12sp body text and system font scaling. The robot keeps its black, white and cyan identity; the app icon uses the approved light-gray/white diagonal background. Conversation backgrounds remain static.
 - Workspace rows on the Resources screen show the full path as their only content: no leading folder icon, no name line, no trailing chevron. The row uses a 12dp corner radius and 9dp vertical padding for a compact single-line default; long paths wrap without truncation so the final directory remains visible. Host cards use paper surfaces, fine neutral outlines and subdued OS wallpaper art, without a heavy elevation shadow.
 - The directory browser is a compact paper-gray list, not a stack of cards. Its top bar title is the phone's host name, or Browse workspace when that name is blank. A borderless header is a horizontal row of tags for the workspace root plus each directory inside it. The current tag is non-interactive. The parent tag, system back, and the top bar share one parent: the loaded listing's parent, including none at the allowlist boundary. Before that listing arrives, back only offers a parent still inside a known workspace root. Other ancestor tags open a directory only when that path is a server path already returned by a listing or opened from one; a reconstructed path is a label, not a navigation target. Long paths scroll instead of wrapping. Folder rows are a single-line list without per-row cards or borders; each row opens that directory. Seven or more folders can be filtered locally in a borderless field without changing where Create session starts. The create action stays docked, names the current folder with a folder icon immediately before that name, and sits 12dp above the screen's navigation inset. Pull to refresh keeps the current listing visible and reports a refresh failure without replacing it. The first load uses a static skeleton, and a failed first load keeps the retry state. An empty directory shows a horizontally centered prompt and can still start a session. Touch targets stay at least 48dp.
 
+### 8.5 Startup
+
 - Native cold-start and system-bar resources in `res/values/styles.xml` and `res/values-v31/styles.xml` use paper gray (`#EDEDEB`) for window and Android 12+ splash backgrounds, charcoal (`#242424`) for the accent, and charcoal (`#343433`) for the status bar. Navigation bars use paper gray with dark icons; Compose uses the same paper-gray `Base0`.
 - The startup screen centers the animated character itself at the screen's vertical midpoint, with the PinkCollab title 20dp above its layout bounds. The title's “Pink” uses `BrandPurple`; “Collab” retains the theme's normal foreground. Connection/synchronization progress text sits at the bottom with 64dp clearance above the navigation inset; there is no decorative loading line and no indeterminate loading bar. The newest progress entry uses 80% text opacity; earlier entries use 55%. A vertical alpha mask on the 108dp viewport fades the top and bottom edges. Bounded history scrolls to the newest entry with a 1.2-second eased animation, following the measured content end rather than overshooting a list-item target, and system animation-duration settings remain respected. Readiness gating is unchanged.
 - The startup character retains its transparent animated artwork over the paper-gray surface; the static fallback uses the separate transparent mascot master. The neutral logo background must never be keyed out by color, because it overlaps the mascot's white face.
+
+### 8.6 Models and usage
+
 - The model-picker heading shares its row with the Reload/Usage actions. The heading reserves its full intrinsic text width; the actions use the remaining width and wrap onto extra lines at narrow widths or large font scales rather than squeezing the title. Compact model rows and apply/cancel actions retain at least 48dp touch targets.
-- Usage progress bars have a 26dp minimum height and 3dp vertical label padding; they can grow with font scaling. Normal and near-limit quotas use the theme's teal tertiary accent with a translucent fill, while exhausted quotas retain red. Percentages and explicit warning/exhausted text remain visible independently of color.
+- Usage progress bars have a 26dp minimum height and 3dp vertical label padding; they can grow with font scaling. Normal and near-limit quotas use the theme's green tertiary accent with a translucent fill, while exhausted quotas retain red. Percentages and explicit warning/exhausted text remain visible independently of color.
 - Without a known model, the composer button reads `model`; a known model still shows its name or ID. Opening the picker for a detached runtime starts OMP. `SessionOperations` owns the attempt; closing and reopening the picker does not dispatch a duplicate pending start. Startup remains pending across separate operation and runtime-snapshot updates; a falling startup flag alone is not failure evidence. Explicit command errors and failed, cancelled, or unconfirmed start receipts resolve the attempt to a visible, retryable error even when the receipt has no error message. Retry clears that attempt's error without resending an unconfirmed outbox command under a new identity.
 
-## Host session entries
+<a id="host-session-entries"></a>
+
+### 8.7 Host session entries
 
 Session `origin` is an explicit protocol fact. A discovered entry uses the compact **On host** card label and **Session on host** work-status text, without a second-line continuation hint. These labels describe the session's source, not whether an external OMP process is running, idle, or exited; Gateway does not observe that process. Connectivity still qualifies the card status. No runtime, elapsed time, completion or success is inferred from saved messages. Opening loads the existing history pipeline and recoverable error presentation. The composer submits its ordinary generation-less prompt; adoption replaces the same ID with managed state, preserving Tasks pager/card selection, draft/outbox identity and cached history. No import dialog is required.
 
@@ -389,7 +416,7 @@ These are behavior checks, not requirements to pin exact wording in tests.
 
 | Scenario | Expected observation |
 | --- | --- |
-| Read a file with an intent and path | Intent visible by default; path and full arguments available in details |
+| Read a file with an intent and path | Intent visible by default; path available in the summary preview; full arguments remain available through the debug/raw detail loader |
 | Run an arbitrary shell command successfully | Command count in the folded sequence; tool icon and accessible Completed outcome, never an inferred Verified |
 | Receive an unfamiliar structured tool | Visible operation under Other, with available details |
 | One operation fails while another in its group continues | Group remains running and exposes the failure count/details |
@@ -412,7 +439,7 @@ Before adding a new presentation type or changing a mapping:
 4. Specify updates, terminal evidence, disconnect behavior, and interaction with a new user turn.
 5. Update this catalog and the relevant projection/derivation together. Change the protocol only when the wire contract changes.
 6. Exercise consumer-visible boundaries and precedence. Use focused behavioral tests where regressions are plausible; do not test copied wording or source text.
-7. For UI changes, inspect the real session surface on a device/emulator, including long targets, expansion, waiting, and disconnection. State whether evidence used fixtures or a live Gateway.
+7. For UI changes, inspect the real session surface on a wireless physical device first, using an emulator when needed, including long targets, expansion, waiting, and disconnection. State whether evidence used fixtures or a live Gateway.
 
 | Responsibility | Implementation |
 | --- | --- |

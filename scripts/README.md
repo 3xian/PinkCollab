@@ -1,116 +1,69 @@
-# Logo resources
+# Asset maintenance
 
-`update-logo.py` builds all static PinkCollab logos from
-`docs/assets/pinkcollab-logo-source.png`, using Pillow:
+Run these scripts from the repository root. Both need Python and Pillow; the demo script also requires FFmpeg on PATH. Keep lossless artwork and original recordings as the sources, rather than re-encoding published assets.
 
-```powershell
+## Logo resources
+
+```sh
 python scripts/update-logo.py
 ```
 
-The approved source uses the light-gray/white diagonal background. Run the script
-from the repository root. The source is kept unchanged; the script generates Android launcher/transparent resources,
-website icons, the README logo, the social card, and the README/website promotional
-images. Transparent artwork comes from the separate lossless
-`docs/assets/branding/mascot-source.png`; do not extract it by background color,
-because paper white also appears in the robot's face. Adaptive icons use that
-mascot in the central 72dp of a 108dp canvas over a crisp 30° light-gray/white
-split. The transparent `moon_robot.png` and `disconnected_robot.png` resources
-come from `empty-state-source.png` and `disconnected-source.png` in the branding
-directory. Their paper-gray moon/stars and muted rose connection indicator match
-the UI while preserving the mascot's cyan details. The transparent animated
-`login_logo.gif` already shares that mascot and is kept unchanged.
+The script builds Android launcher/transparent resources, website icons, the README logo and promotional images. It preserves the source artwork and the existing animated `login_logo.gif`.
+
+| Source | Outputs / purpose |
+| --- | --- |
+| `docs/assets/pinkcollab-logo-source.png` | Static logos and website icons with the gray/white diagonal background |
+| `docs/assets/branding/mascot-source.png` | Transparent mascot and adaptive-icon foreground |
+| `docs/assets/branding/empty-state-source.png` | `moon_robot.png` |
+| `docs/assets/branding/disconnected-source.png` | `disconnected_robot.png` |
+
+Do not remove the background by color: the mascot's face also contains white. Adaptive icons place the transparent mascot in the central 72dp of a 108dp canvas over a crisp 30° gray/white split.
 
 ## Visual identity
 
-Android, the website and documentation use paper gray (`#EDEDEB`), paper white
-(`#FAFAF8`), light gray (`#D4D4D0`), charcoal headers (`#343433`) and controls
-(`#242424`). Muted rose (`#A33750`) marks small highlights; the mascot retains
-its black, white and cyan details. Use flat surfaces, fine neutral outlines,
-compact spacing and small readable text rather than colored glow or glass effects.
-The 30° gray/white diagonal is the shared logo and promotional background motif.
-OMP keeps its own pink/purple/cyan mark and dark promotional panel. Links to OMP
-use its purple accent (a darker shade on paper and a lighter shade on dark surfaces).
-Do not recolor OMP's brand assets to match PinkCollab's neutral palette.
+Use paper gray (`#EDEDEB`), paper white (`#FAFAF8`), light gray (`#D4D4D0`), charcoal headers (`#343433`) and controls (`#242424`). Muted rose (`#A33750`) marks small highlights; the mascot keeps its black, white and cyan details. Use flat surfaces, fine outlines, compact spacing and readable type. The 30° diagonal is the shared logo and promotional background.
 
-The artwork was edited with the built-in image generation tool. Its production
-brief is: preserve the robot's identity, pose and cyan details; use a light-gray
-and white diagonal backdrop; depict compact charcoal headers, paper-white cards,
-small type and restrained rose highlights. The session banner, model picker and
-usage illustration share that direction. The empty-state edit changes the yellow
-moon and stars to paper white/light gray; the disconnected edit changes only the
-red Wi-Fi slash to muted rose. Both keep a genuinely transparent background.
+OMP retains its own pink/purple/cyan mark and dark promotional panel. Do not recolor third-party brand assets to match PinkCollab. UI behavior and typography belong in the [session presentation contract](../docs/session-presentation.md).
 
 ## Promotional artwork
 
-`docs/assets/branding/session-review-source.png` is the approved promotional
-artwork, including its mascot and wordmark. The script preserves its composition
-and scales it proportionally to at most 1200 pixels per side, producing the same
-optimized WebP for the README and website at quality 82 with encoding method 6
-at a compact download size. Each run starts from the lossless source
-to avoid repeated compression. Pages load only the optimized files.
-
-`model-picker-source.png` generates the website's JPEG at quality 86.
-`provider-usage-source.png` generates a WebP at quality 84 with encoding method 6
-(about 46 KB), replacing the older 68 KB JPEG. Both are limited to 1200 pixels per
-side and remain illustrative product views rather than device screenshots.
-The Usage artwork follows the supplied current Android screenshot: white Usage
-toolbar, thin outlined cards, centered percentage labels on muted green quota
-bars, and masked OpenAI Codex, xAI and Workbuddy accounts. Its built-in image
-generation brief is to preserve that interface and the 9%/23%/unavailable states
-within a front-facing phone on the right over the gray/white diagonal background.
-The left side carries the heading “Provider account quotas”, subtitle “Shared
-across conversations”, and a compact gallery of OpenAI, Claude, Gemini, Grok,
-DeepSeek and Qwen logos. These brand references remain outside the app interface;
-they do not imply that every provider reports account quotas. The OpenAI mark
-stays black, following its [brand guidance](https://openai.com/brand/).
-Update the source when the interface changes; never re-encode an already
-compressed website asset.
-
-The social card uses the same artwork, cropped to 1200 × 630 and encoded as an
-optimized progressive JPEG at quality 86 to keep smooth gradients and a small file.
-To rebuild only the promotional images without touching Android or logo assets:
-
 ```sh
-python3 scripts/update-logo.py --promotional-only
+python scripts/update-logo.py --promotional-only
 ```
 
-`node .github/actions/check-website/build-social-card.mjs` calls this same generator.
-It requires Pillow and does not need a browser installation. Website layout
-changes still require desktop/mobile browser review and an updated stylesheet
-content hash in both HTML pages; see [development checks](../docs/development.md).
+This rebuilds only the following images from `docs/assets/branding/`:
+
+| Source | Generated asset | Encoding |
+| --- | --- | --- |
+| `session-review-source.png` | `website/assets/pinkcollab-session-review.webp` and identical `docs/assets/pinkcollab-readme.webp` | At most 1200px per side; WebP quality 82, method 6 |
+| `session-review-source.png` | `website/assets/social-card.jpg` | 1200 × 630 crop; progressive JPEG quality 86 |
+| `model-picker-source.png` | `website/assets/pinkcollab-model-picker.jpg` | At most 1200px per side; JPEG quality 86 |
+| `provider-usage-source.png` | `website/assets/pinkcollab-provider-usage.webp` | At most 1200px per side; WebP quality 84, method 6 |
+
+These are illustrations, not device screenshots. The current README cover comes from `prepare-demo.py`, not `pinkcollab-readme.webp`. Update the lossless source when the interface changes. The Usage artwork's provider-logo gallery is outside the illustrated app interface and does not imply every provider reports quotas.
+
+`node .github/actions/check-website/build-social-card.mjs` invokes the same promotional generator; it needs Pillow, not a browser. Website layout and stylesheet-hash checks are in [Development](../docs/development.md#website-checks).
 
 ## App demo video
 
-`prepare-demo.py` prepares the supplied 30-second Android screen recording for
-the README and website. Keep the original recording outside the repository and
-always encode from that original:
+Keep the original recording outside the repository and pass its path:
 
-```powershell
-python scripts/prepare-demo.py "D:/视频/PinkCollab/10月23日.mp4"
+```sh
+python scripts/prepare-demo.py /path/to/original-recording.mp4
 ```
 
-FFmpeg must be on PATH and Pillow must be installed. The script uses Arial Bold on Windows, DejaVu Sans Bold
-on Linux, or Arial Bold on macOS; pass `--font /path/to/bold.ttf` if needed.
-It preserves the recording's dimensions, frame rate, duration and audio, using
-H.264 at CRF 27 and AAC at 96 kbps. The original 14.4 MB recording becomes a
-roughly 1.1 MB MP4 in `website/media/`, with its metadata at the front
-(`+faststart`) so playback can start before the full download finishes.
+The cover crop requires a **720 × 1558** recording. The default poster frame is at 28 seconds; use `--poster-time <seconds>` for another moment. The script finds Arial Bold on Windows/macOS or DejaVu Sans Bold on Linux; use `--font /path/to/bold.ttf` if needed.
 
-The frame at 28 seconds produces a WebP poster in `website/assets/`. The README
-cover in `docs/assets/` is a 1600 × 1120 promotional poster: the mascot and a
-large “Your OMP. Anywhere.” headline sit on the gray/white diagonal, beside a
-framed real app screen. The screenshot keeps its native 720-pixel width, with
-Android's system bars removed and the device extending past the bottom edge.
-The final response stays visible. The crop expects the supplied 720 × 1558
-recording. The cover uses lossless WebP to preserve text, displays at up to
-960 pixels wide, and links to the full-resolution image. Pass `--poster-time`
-to choose another moment in the same recording.
-To rebuild this cover without re-encoding the published video or poster:
+| Output | Behavior |
+| --- | --- |
+| `website/media/pinkcollab-demo.mp4` | H.264 CRF 27, optional source audio encoded as AAC 96 kbps, and `+faststart` metadata |
+| `website/assets/pinkcollab-demo-poster.webp` | Selected frame, WebP quality 82 |
+| `docs/assets/pinkcollab-demo.webp` | 1600 × 1120 lossless cover with mascot, headline and real app screen; removes system bars and preserves the screenshot's 720px width |
 
-```powershell
-python scripts/prepare-demo.py "D:/视频/PinkCollab/10月23日.mp4" --cover-only
+To rebuild only the README cover:
+
+```sh
+python scripts/prepare-demo.py /path/to/original-recording.mp4 --cover-only
 ```
 
-The website uses native playback controls, `playsinline` and `preload="none"`, without
-autoplay. Links below the README cover open the website player or the MP4;
-both surfaces share one video file.
+The website uses native controls, `playsinline` and `preload="none"`, without autoplay. The README links to the website player and the same MP4; its cover links to the full-resolution image.
