@@ -16,6 +16,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,10 +28,12 @@ import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import dev.pinkcollab.data.WorkTiming
+import dev.pinkcollab.ui.theme.rememberHapticOnClick
 import kotlinx.coroutines.delay
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -53,6 +56,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.data.ConnectionState
+import dev.pinkcollab.data.ConnectionFailure
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.SessionDetail
 import dev.pinkcollab.data.SessionStatus
@@ -72,6 +76,7 @@ internal data class SessionWorkStatus(
     val active: Boolean = false,
     val timing: WorkTiming? = null,
     val tokensPerSecond: Double? = null,
+    val connectionHint: String? = null,
 )
 
 internal fun sessionWorkStatus(
@@ -110,14 +115,20 @@ internal fun workDurationLabel(elapsedMs: Long): String {
 
 private fun deriveSessionWorkStatus(detail: SessionDetail, host: HostState?): SessionWorkStatus {
     if (host?.connected != true) {
-        val title = when (host?.connection) {
-            ConnectionState.Connecting -> "Connecting to host"
-            ConnectionState.Synchronizing -> "Syncing with host"
+        val title = when (val connection = host?.connection) {
+            ConnectionState.Connecting -> "Reconnecting to host"
+            ConnectionState.Synchronizing -> "Synchronizing with host"
             ConnectionState.AuthenticationRequired -> "Host sign-in required"
             ConnectionState.UpgradeRequired -> "Update required"
-            else -> "Host offline"
+            is ConnectionState.Offline -> {
+                if (connection.failure == ConnectionFailure.NetworkUnavailable) "No network" else "Host unavailable"
+            }
+            else -> "Host unavailable"
         }
-        return SessionWorkStatus(WorkStatusKind.Offline, title)
+        val hint = if (detail.session.runtimeAttached)
+            "Task may still be running on the host. Reconnect before sending."
+        else "Your draft stays here. Reconnect before sending."
+        return SessionWorkStatus(WorkStatusKind.Offline, title, connectionHint = hint)
     }
     val session = detail.session
     if (session.origin == dev.pinkcollab.data.SessionOrigin.Discovered) {
@@ -184,7 +195,11 @@ private fun ToolArguments.firstString(vararg keys: String): String? {
 }
 
 @Composable
-internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier = Modifier) {
+internal fun SessionWorkStatusLine(
+    status: SessionWorkStatus,
+    modifier: Modifier = Modifier,
+    recoveryAction: RecoveryPrimaryAction? = null,
+) {
     val sendingTextEffect = if (status.kind == WorkStatusKind.Sending) workTextShimmer() else Modifier
     val tint = when (status.kind) {
         WorkStatusKind.Attention -> Amber300
@@ -196,6 +211,8 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Column(Modifier.weight(1f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
         if (status.kind != WorkStatusKind.Working) {
             if (status.kind == WorkStatusKind.Loading) {
                 DownloadingIcon(
@@ -261,6 +278,17 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
                 )
             }
         }
+        }
+        status.connectionHint?.let {
+            Text(it, color = TextMid, style = MaterialTheme.typography.bodySmall)
+        }
+        }
+        if (recoveryAction != null) {
+            TextButton(
+                onClick = rememberHapticOnClick(recoveryAction.onClick),
+                enabled = recoveryAction.enabled,
+            ) { Text(recoveryAction.label) }
+        } else if (status.kind != WorkStatusKind.Offline) {
         Text(
             status.tokensPerSecond?.takeIf { it.isFinite() && it >= 0.0 }
                 ?.let { String.format(Locale.ROOT, "%.0f tok/s", it) } ?: "… tok/s",
@@ -269,6 +297,7 @@ internal fun SessionWorkStatusLine(status: SessionWorkStatus, modifier: Modifier
             style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
         )
+        }
     }
 }
 

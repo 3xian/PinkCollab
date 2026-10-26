@@ -65,8 +65,11 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     private fun showError(message: String) = showToast(message)
     private val connectivity = application.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            repository.setNetworkAvailable(true)
+        }
         override fun onLost(network: Network) {
-            if (connectivity.activeNetwork == null) repository.networkUnavailable()
+            if (connectivity.activeNetwork == null) repository.setNetworkAvailable(false)
         }
     }
 
@@ -122,6 +125,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         savedStateHandle.setSavedStateProvider("sessionDraftsV2") {
             Bundle().apply { putString("value", encodeDrafts(draftStore.state.value)) }
         }
+        repository.setNetworkAvailable(connectivity.activeNetwork != null)
         connectivity.registerDefaultNetworkCallback(networkCallback)
         viewModelScope.launch { repository.errors.collect(::showError) }
         viewModelScope.launch { repository.state.collect { app ->
@@ -132,6 +136,11 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
                 }
             }
         } }
+    }
+
+    internal fun setForeground(foreground: Boolean) {
+        if (foreground) repository.setNetworkAvailable(connectivity.activeNetwork != null)
+        repository.setForeground(foreground)
     }
 
     internal suspend fun followTaskFocus(selections: Flow<SessionKey?>) {
@@ -186,7 +195,15 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         mutableAvailableUpdate.value = null
     }
 
-    internal fun sendPrompt(session: Session) = sessionCoordinator.send(session)
+    internal fun sendPrompt(session: Session) {
+        val app = repository.state.value
+        val key = SessionKey(session.hostId, session.id)
+        if (app.hosts[session.hostId]?.connected != true || app.details[key]?.snapshotToken == null) {
+            showToast("Wait for the connection to sync before sending")
+            return
+        }
+        sessionCoordinator.send(session)
+    }
     internal fun sessionCommand(session: Session, command: SessionUserCommand) {
         sessionCoordinator.updateDetails(repository.state.value.details)
         sessionCoordinator.command(session, command, ::removeSession)

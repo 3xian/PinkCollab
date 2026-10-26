@@ -62,14 +62,34 @@ class SessionPresentationTest {
         host: HostState? = online,
         activity: SessionActivity = SessionActivity(),
         selectingFiles: Int = 0,
-    ) = sessionControls(SessionDetail(session, liveItems = listOf(TimelineItem("live", "user", "hi", "", ""))),
+    ) = sessionControls(SessionDetail(session, snapshotToken = "ready",
+        liveItems = listOf(TimelineItem("live", "user", "hi", "", ""))),
         host, draft, selectingFiles, activity)
 
-    @Test fun disconnected_host_disables_composer_and_controls() {
+    @Test fun disconnected_host_allows_draft_editing_but_gates_runtime_actions() {
         val state = controls(host = online.copy(connection = ConnectionState.Offline()))
-        assertFalse(state.inputEnabled)
+        assertTrue(state.inputEnabled)
+        assertTrue(state.canAttach)
         assertFalse(state.canSend)
         assertFalse(state.canStop)
+        assertFalse(state.canInterrupt)
+        assertFalse(state.canChooseModel)
+    }
+
+    @Test fun connection_and_snapshot_readiness_both_gate_runtime_actions_without_losing_drafts() {
+        val detail = SessionDetail(session)
+        for (connection in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing,
+            ConnectionState.AuthenticationRequired, ConnectionState.UpgradeRequired, ConnectionState.Offline(),
+            ConnectionState.Online(2L))) {
+            val state = sessionControls(detail, online.copy(connection = connection), draft, 0, SessionActivity())
+            assertTrue(state.inputEnabled)
+            assertFalse(state.canSend)
+            assertFalse(state.canStop)
+            assertFalse(state.canInterrupt)
+            assertFalse(state.canChooseModel)
+        }
+        assertTrue(sessionControls(detail.copy(snapshotToken = "fresh"), online, draft, 0,
+            SessionActivity()).canSend)
     }
 
     @Test fun pending_operation_disables_its_actions_and_file_selection_blocks_send() {

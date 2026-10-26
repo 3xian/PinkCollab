@@ -276,6 +276,9 @@ internal fun TasksScreen(
                             onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
                             loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
                             topScrim = { TasksPagerBackground(cardStripHeight) },
+                            recoveryAction = host?.takeIf { !it.connected }?.let {
+                                recoveryPrimaryAction(listOf(it), actions)
+                            },
                         )
                     }
                 }

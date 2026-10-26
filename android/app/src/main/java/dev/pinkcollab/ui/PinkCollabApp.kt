@@ -20,6 +20,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -46,6 +47,23 @@ fun PinkCollabApp(vm: CollabViewModel = viewModel()) {
     val sessionDisplayCache = remember { mutableStateMapOf<SessionKey, SessionDisplay>() }
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(vm, lifecycleOwner) {
+        val lifecycle = lifecycleOwner.lifecycle
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> vm.setForeground(true)
+                Lifecycle.Event.ON_STOP -> vm.setForeground(false)
+                else -> Unit
+            }
+        }
+        lifecycle.addObserver(observer)
+        vm.setForeground(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        onDispose {
+            lifecycle.removeObserver(observer)
+            vm.setForeground(false)
+        }
+    }
 
     LaunchedEffect(vm) {
         awaitStartupReadiness(vm.appState)

@@ -123,7 +123,7 @@ class ComposerRailDeviceTest {
         val host = PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client")
         val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
             "", "", false, null)
-        val controls = sessionControls(SessionDetail(session), HostState(host, connection = ConnectionState.Online(1L)),
+        val controls = sessionControls(SessionDetail(session, snapshotToken = "ready"), HostState(host, connection = ConnectionState.Online(1L)),
             SessionDraft(text = "hello"), 0, SessionActivity())
         val sent = AtomicInteger()
         compose.setContent {

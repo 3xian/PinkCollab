@@ -70,6 +70,7 @@ internal fun SessionPage(
     contentTopInset: Dp = 0.dp,
     loadToolDetails: suspend (String, String?) -> ToolDetailPage = { _, _ -> error("Tool details unavailable") },
     topScrim: @Composable () -> Unit = {},
+    recoveryAction: RecoveryPrimaryAction? = null,
 ) {
     val load = state.detail
     val host = state.host.takeIf { load is LoadState.Ready && load.value.snapshotToken != null }
@@ -371,7 +372,7 @@ internal fun SessionPage(
                 .padding(horizontal = 12.dp, vertical = 6.dp)
                 .onSizeChanged { composerHeightPx = it.height },
         ) {
-            workStatus?.let { SessionWorkStatusLine(it) }
+            workStatus?.let { SessionWorkStatusLine(it, recoveryAction = recoveryAction) }
             Row(
                 Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -82,9 +82,17 @@ internal fun ResourcesScreen(
             val connectionPending = host.connection == ConnectionState.Connecting ||
                 host.connection == ConnectionState.Synchronizing
             val (connectionLabel, connectionColor) = when (host.connection) {
-                ConnectionState.Connecting, ConnectionState.Synchronizing -> "Connecting" to BrandPink
+                ConnectionState.Connecting -> "Reconnecting" to BrandPink
+                ConnectionState.Synchronizing -> "Synchronizing" to BrandPink
                 is ConnectionState.Online -> "$activeTasks active" to Teal300
-                is ConnectionState.Offline -> "Offline" to Gray400
+                is ConnectionState.Offline -> {
+                    val offline = host.connection as ConnectionState.Offline
+                    if (offline.failure == dev.pinkcollab.data.ConnectionFailure.NetworkUnavailable) {
+                        "No network" to Gray400
+                    } else {
+                        "Host unavailable" to Gray400
+                    }
+                }
                 ConnectionState.AuthenticationRequired -> "Reconnect required" to Red400
                 ConnectionState.UpgradeRequired -> "App update required" to Red400
             }

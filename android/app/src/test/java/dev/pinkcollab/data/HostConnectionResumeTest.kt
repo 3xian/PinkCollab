@@ -1,6 +1,8 @@
 package dev.pinkcollab.data
 
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
@@ -9,6 +11,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -72,47 +75,99 @@ class HostConnectionResumeTest {
         }
     }
 
-    @Test fun closed_socket_stays_offline_until_an_explicit_connect() = runBlocking {
+    @Test fun foreground_recovery_resumes_host_and_session_sequences_without_discarding_loaded_history() = runBlocking {
         val server = MockWebServer()
         val sockets = Channel<WebSocket>(Channel.UNLIMITED)
-        val messages = Channel<String>(Channel.UNLIMITED)
-        repeat(2) {
+        val subscriptions = Channel<JSONObject>(Channel.UNLIMITED)
+        repeat(2) { index ->
             server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) { sockets.trySend(webSocket) }
-                override fun onMessage(webSocket: WebSocket, text: String) { messages.trySend(text) }
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    sockets.trySend(webSocket)
+                    webSocket.send(JSONObject().put("type", "host_sync").put("protocolVersion", 4)
+                        .put("epoch", "epoch").put("sequence", 20 + index * 10).toString())
+                }
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    val command = JSONObject(text)
+                    subscriptions.trySend(command)
+                    webSocket.send(JSONObject().put("type", "session_resume").put("sessionId", "session")
+                        .put("epoch", "epoch").put("sequence", command.getLong("sequence")).toString())
+                    webSocket.send(JSONObject().put("type", "timeline").put("sessionId", "session")
+                        .put("epoch", "epoch").put("sequence", 22 + index * 10)
+                        .put("remove", JSONArray()).put("upsert", JSONArray().put(JSONObject()
+                            .put("id", "live-$index").put("kind", "assistant").put("text", "Reply $index")
+                            .put("timestamp", ""))).toString())
+                    webSocket.send(JSONObject().put("type", "session_sync").put("sessionId", "session")
+                        .put("epoch", "epoch").put("sequence", 23 + index * 10).toString())
+                }
             }))
         }
         server.start()
         val client = OkHttpClient()
         val transport = object : GatewayTransport by GatewayApi() { override val client = client }
-        val states = Channel<ConnectionState>(Channel.UNLIMITED)
-        val supervisor = HostConnectionSupervisor(this, transport,
-            { _, state -> states.trySend(state) }, { _, _ -> }, { _, _ -> })
         val paired = PairedHost(Host("host", "Desktop", "linux", "", ""),
             server.url("/").toString().trimEnd('/'), "token", "client")
+        val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null, "", "", false)
+        val saved = SavedHistory.Ready("source", listOf(TimelineItem("saved", "user", "Keep me", "", "")), "older")
+        val key = SessionKey("host", "session")
+        val app = MutableStateFlow(AppState(
+            hosts = mapOf("host" to HostState(paired, sessions = listOf(session), initialSync = InitialSyncState.Ready,
+                serverEpoch = "epoch", wireSequence = 12, catalogVersion = "catalog")),
+            details = mapOf(key to SessionDetail(session, savedHistory = saved, serverEpoch = "epoch", wireSequence = 7)),
+        ))
+        val states = Channel<ConnectionState>(Channel.UNLIMITED)
+        val supervisor = HostConnectionSupervisor(this, transport,
+            { id, connection ->
+                app.update { it.copy(hosts = it.hosts + (id to it.hosts.getValue(id).withConnectionState(connection))) }
+                states.trySend(connection)
+            },
+            { id, frame -> app.update { reduceProtocol(it, id, frame, 1).state } },
+            { _, _ -> app.update { it.copy(details = it.details + (key to it.details.getValue(key).copy(snapshotToken = null))) } },
+            cachedHost = { app.value.hosts[it] }, cachedSession = { _, _ -> app.value.details[key] })
         try {
             supervisor.focus("host", "session")
-            supervisor.connect(paired)
-            val socket = withTimeout(5_000) {
-                assertEquals(ConnectionState.Connecting, states.receive())
-                assertEquals(ConnectionState.Synchronizing, states.receive())
-                assertEquals("subscribe", JSONObject(messages.receive()).getString("type"))
-                sockets.receive()
-            }
-            socket.close(1000, "gone")
-            withTimeout(5_000) {
-                assertTrue(states.receive() is ConnectionState.Offline)
-            }
-            assertEquals(1, server.requestCount)
-            assertTrue(states.tryReceive().isFailure)
+            withTimeout(5_000) { supervisor.connect(paired, refreshDiscovery = true).await() }
+            val firstSocket = withTimeout(5_000) { sockets.receive() }
+            val firstRequest = server.takeRequest().requestUrl!!
+            val firstSubscription = withTimeout(5_000) { subscriptions.receive() }
+            assertEquals("1", firstRequest.queryParameter("refresh"))
+            assertEquals("12", firstRequest.queryParameter("sequence"))
+            assertEquals(7L, firstSubscription.getLong("sequence"))
+            assertEquals(listOf("Reply 0"), app.value.details.getValue(key).liveItems.map { it.text })
 
-            supervisor.connect(paired)
-            withTimeout(5_000) {
-                assertEquals(ConnectionState.Connecting, states.receive())
-                assertEquals(ConnectionState.Synchronizing, states.receive())
-                sockets.receive()
-            }
+            firstSocket.close(1000, "background disconnect")
+            withTimeout(5_000) { while (states.receive() !is ConnectionState.Offline) { } }
+            assertEquals(1, server.requestCount)
+            assertEquals(saved, app.value.details.getValue(key).savedHistory)
+            assertEquals(InitialSyncState.Ready, app.value.hosts.getValue("host").initialSync)
+            assertNull(app.value.details.getValue(key).snapshotToken)
+
+            supervisor.setForeground(true)
+            withTimeout(5_000) { while (states.receive() !is ConnectionState.Online) { } }
+            val recoveredSocket = withTimeout(5_000) { sockets.receive() }
+            val recoveredRequest = server.takeRequest().requestUrl!!
+            val recoveredSubscription = withTimeout(5_000) { subscriptions.receive() }
             assertEquals(2, server.requestCount)
+            assertNull(recoveredRequest.queryParameter("refresh"))
+            assertEquals("epoch", recoveredRequest.queryParameter("epoch"))
+            assertEquals("20", recoveredRequest.queryParameter("sequence"))
+            assertEquals("catalog", recoveredRequest.queryParameter("catalog"))
+            assertEquals("subscribe", recoveredSubscription.getString("type"))
+            assertEquals("epoch", recoveredSubscription.getString("epoch"))
+            assertEquals(23L, recoveredSubscription.getLong("sequence"))
+            assertTrue(recoveredSubscription.getBoolean("hasCachedHistory"))
+            assertEquals(saved, app.value.details.getValue(key).savedHistory)
+            assertEquals(listOf("Reply 0", "Reply 1"), app.value.details.getValue(key).liveItems.map { it.text })
+            assertEquals(33L, app.value.details.getValue(key).wireSequence)
+            assertNotNull(app.value.details.getValue(key).snapshotToken)
+
+            recoveredSocket.close(1000, "recovered connection ended")
+            withTimeout(5_000) { while (states.receive() !is ConnectionState.Offline) { } }
+            assertEquals(2, server.requestCount)
+            assertEquals(saved, app.value.details.getValue(key).savedHistory)
+            assertEquals(listOf("Reply 0", "Reply 1"), app.value.details.getValue(key).liveItems.map { it.text })
+            assertEquals(33L, app.value.details.getValue(key).wireSequence)
+            assertEquals(InitialSyncState.Ready, app.value.hosts.getValue("host").initialSync)
+            assertNull(app.value.details.getValue(key).snapshotToken)
         } finally {
             supervisor.forget("host")
             server.shutdown()

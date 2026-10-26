@@ -72,16 +72,17 @@ internal fun sessionControls(
     activity: SessionActivity,
 ): SessionControlsState {
     val session = detail.session
-    val connected = host?.connected == true
+    val connected = host?.connected == true && detail.snapshotToken != null
     val attached = session.runtimeAttached && connected
-    val inputEnabled = connected && !activity.inputBusy && session.attention == null &&
-        session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping
+    val inputEnabled = !activity.inputBusy && (!connected || (session.attention == null &&
+        session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping))
     return SessionControlsState(
         attached = attached,
         inputEnabled = inputEnabled,
-        canSend = (draft.text.isNotBlank() || draft.files.isNotEmpty()) && inputEnabled && selectingFiles == 0,
+        canSend = connected && (draft.text.isNotBlank() || draft.files.isNotEmpty()) &&
+            inputEnabled && selectingFiles == 0,
         canAttach = inputEnabled && draft.files.size + selectingFiles < 5,
-        canChooseModel = (attached || (!session.runtimeAttached && inputEnabled)) &&
+        canChooseModel = connected && (attached || (!session.runtimeAttached && inputEnabled)) &&
             session.status != SessionStatus.Starting && session.status != SessionStatus.Stopping &&
             !activity.inputBusy,
         canInterrupt = attached && !activity.control && session.status in setOf(SessionStatus.Running, SessionStatus.NeedsInput),

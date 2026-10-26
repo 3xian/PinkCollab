@@ -146,9 +146,9 @@ internal class GatewayRepository(
         state.value.hosts[id]?.paired?.let { connections.connect(it).await() }
     }
 
-    fun networkUnavailable() {
-        connections.networkUnavailable(state.value.hosts.filterValues { it.connection != ConnectionState.AuthenticationRequired && it.connection != ConnectionState.UpgradeRequired }.keys)
-    }
+    fun setForeground(foreground: Boolean) = connections.setForeground(foreground)
+
+    fun setNetworkAvailable(available: Boolean) = connections.setNetworkAvailable(available)
 
     suspend fun listing(hostId: String, path: String, forceRefresh: Boolean = false) =
         directories.listing(hostId, path, forceRefresh)

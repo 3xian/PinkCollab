@@ -19,7 +19,6 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
     if (type == "host_sync") {
         require(frame.getInt("protocolVersion") == 4 && epoch == host.serverEpoch)
         return ProtocolReduction(app.copy(hosts = app.hosts + (hostId to host.copy(
-            connection = ConnectionState.Online(nowEpochMillis),
             snapshotToken = UUID.randomUUID().toString(), revision = host.revision + 1,
             catalogVersion = frame.opt("catalogVersion") as? String ?: host.catalogVersion,
             totalSessions = frame.optInt("totalSessions", host.totalSessions ?: host.sessions.size),
@@ -39,7 +38,7 @@ internal fun reduceProtocol(app: AppState, hostId: String, frame: JSONObject, no
             retained.none { it.runtimeAttached || it.id in host.removedSessionIds }
         return ProtocolReduction(app.copy(
             hosts = app.hosts + (hostId to host.copy(
-                paired = host.paired.copy(host = identity), connection = ConnectionState.Online(nowEpochMillis),
+                paired = host.paired.copy(host = identity),
                 sessions = incoming + if (keepPages) retained else emptyList(),
                 pagedSessionIds = if (keepPages) host.pagedSessionIds else emptySet(),
                 pagesCatalogVersion = if (keepPages) catalog else null,

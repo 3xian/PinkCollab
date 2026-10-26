@@ -127,9 +127,25 @@ class SessionWorkStatusTest {
             val status = sessionWorkStatus(detail, online.copy(connection = connection))
             assertEquals(WorkStatusKind.Offline, status.kind)
             assertFalse(status.active)
+            assertTrue(!status.connectionHint.isNullOrBlank())
+            assertEquals(session.status, detail.session.status)
+            assertEquals(session.runtimeAttached, detail.session.runtimeAttached)
         }
         assertEquals(WorkStatusKind.Offline, sessionWorkStatus(detail, null).kind)
     }
+    @Test fun recovery_status_distinguishes_network_host_and_explicit_action_blockers() {
+        val detail = SessionDetail(session)
+        val connections = listOf(
+            ConnectionState.Offline(failure = dev.pinkcollab.data.ConnectionFailure.NetworkUnavailable),
+            ConnectionState.Offline(failure = dev.pinkcollab.data.ConnectionFailure.Unreachable),
+            ConnectionState.Connecting, ConnectionState.Synchronizing,
+            ConnectionState.AuthenticationRequired, ConnectionState.UpgradeRequired,
+        )
+        val statuses = connections.map { sessionWorkStatus(detail, online.copy(connection = it)) }
+        assertEquals(connections.size, statuses.map { it.title }.toSet().size)
+        assertTrue(statuses.all { it.kind == WorkStatusKind.Offline && !it.active && it.timing == null })
+    }
+
 
     @Test fun starting_state_never_reuses_cached_active_work() {
         val detail = SessionDetail(

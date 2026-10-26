@@ -234,6 +234,8 @@ class SessionGatewayTest {
     @Test fun unsubscribe_and_disconnect_keep_the_visible_transcript() = runTest {
         val key = SessionKey("host", "session")
         val ready = loadingDetail().copy(
+            streaming = "Keep streaming text", serverEpoch = "epoch", wireSequence = 23,
+            liveItems = listOf(TimelineItem("live", "assistant", "Keep live reply", "", "")),
             savedHistory = SavedHistory.Ready("source", listOf(TimelineItem("saved", "user", "Keep me", "", "")), "older"))
         for (disconnect in listOf("unsubscribe", "offline", "forget")) {
             val state = MutableStateFlow(AppState())
@@ -246,14 +248,12 @@ class SessionGatewayTest {
 
             when (disconnect) {
                 "unsubscribe" -> connections.unsubscribe("host", "session")
-                "offline" -> connections.networkUnavailable(listOf("host"))
+                "offline" -> connections.setNetworkAvailable(false)
                 "forget" -> connections.forget("host")
             }
 
             val retained = state.value.details.getValue(key)
-            assertEquals(ready.savedHistory, retained.savedHistory)
-            assertEquals(ready.session, retained.session)
-            assertNull(retained.snapshotToken)
+            assertEquals(ready.copy(snapshotToken = null), retained)
             assertEquals(disconnect == "offline", connections.isDesired("host", "session"))
         }
     }

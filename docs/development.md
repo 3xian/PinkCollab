@@ -105,7 +105,7 @@ sh ./gradlew :app:connectedReleaseTestAndroidTest -PtestBuildType=releaseTest -P
 
 `releaseTest` enables R8/resource shrinking, uses debug signing and a separate application ID, and installs alongside production.
 
-Connection regressions `HostRetryStateTest` and `HostConnectionResumeTest` verify explicit recovery: failed opens and closed sockets stay offline until refresh or Try again. Foreground/network availability does not reconnect. The 20-second heartbeat detects dead sockets; authentication and upgrade failures require their dedicated actions.
+Connection regressions `HostRetryStateTest`, `HostConnectionResumeTest` and `SessionGatewayTest` cover one automatic attempt per foreground/network restoration, late failure callbacks after thaw, no repeat after automatic failure or success, in-progress attempts, lifecycle/network ordering, superseded attempts, fifteen-second synchronization timeouts, and host/session sequence resumption with retained history. `ProtocolReducerTest` verifies that protocol snapshots preserve supervisor-owned connection state. Authentication and upgrade failures require their dedicated actions. Online requires the host boundary and every requested session's snapshot/sync; a resume marker alone cannot enable sending. The 20-second heartbeat detects dead sockets. For a physical-device smoke check, verify that a brief background interval preserves a healthy socket; then background the signed Release until the OS freezes it and destroys its TCP sockets, return without refresh, and verify automatic synchronization and retained conversation position. Do not send or modify the user's existing draft or restart an active Gateway.
 
 ### Website checks
 
