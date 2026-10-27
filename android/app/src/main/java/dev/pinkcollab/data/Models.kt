@@ -44,6 +44,16 @@ data class ModelInfo(
     val fastModeActive: Boolean? = null,
 )
 data class ModelCatalog(val models: List<ModelInfo>, val thinkingLevels: List<String>)
+data class SlashCommandInput(val hint: String? = null)
+data class SlashSubcommand(val name: String, val description: String? = null, val usage: String? = null)
+data class SlashCommand(
+    val name: String,
+    val source: String,
+    val aliases: List<String>? = null,
+    val description: String? = null,
+    val input: SlashCommandInput? = null,
+    val subcommands: List<SlashSubcommand>? = null,
+)
 enum class SessionStatus { Starting, Running, NeedsInput, Stopping, Idle }
 
 enum class SessionOrigin { Managed, Discovered }
@@ -318,6 +328,17 @@ fun JSONObject.modelInfo() = ModelInfo(
     thinkingLevels = optJSONArray("thinkingLevels")?.strings(),
     fastModeEnabled = opt("fastModeEnabled") as? Boolean,
     fastModeActive = opt("fastModeActive") as? Boolean,
+)
+
+fun JSONObject.slashCommand(): SlashCommand = SlashCommand(
+    name = getString("name"),
+    source = getString("source"),
+    aliases = optJSONArray("aliases")?.strings(),
+    description = opt("description") as? String,
+    input = optJSONObject("input")?.let { SlashCommandInput(it.opt("hint") as? String) },
+    subcommands = optJSONArray("subcommands")?.objects()?.map {
+        SlashSubcommand(it.getString("name"), it.opt("description") as? String, it.opt("usage") as? String)
+    },
 )
 
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObject(it) }

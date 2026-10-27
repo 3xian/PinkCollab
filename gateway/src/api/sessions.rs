@@ -270,6 +270,24 @@ pub(super) async fn api_operation(
         })?;
     Ok(Json(json!(OperationDto::from(&operation))))
 }
+pub(super) async fn api_commands(
+    State(app): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let commands = app.sessions.commands(&id).await.map_err(|err| {
+        let code = if err.to_string().contains("runtime") {
+            "runtime_required"
+        } else {
+            "unsupported_capability"
+        };
+        ApiError(
+            StatusCode::CONFLICT,
+            code,
+            format!("Command catalog unavailable: {err}"),
+        )
+    })?;
+    Ok(Json(json!({"commands":commands})))
+}
 pub(super) async fn api_models(
     State(app): State<App>,
     Path(id): Path<String>,

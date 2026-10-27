@@ -327,6 +327,7 @@ private fun RawTimelineCard(item: TimelineItem, renderer: SessionMarkdownRendere
                 "tool" -> "Tool call"
                 "subagent" -> "Subagent"
                 "error" -> "Error"
+                "system" -> if (item.detail == "command output") "Command output" else "System"
                 else -> "Activity"
             },
             style = MaterialTheme.typography.bodyMedium,

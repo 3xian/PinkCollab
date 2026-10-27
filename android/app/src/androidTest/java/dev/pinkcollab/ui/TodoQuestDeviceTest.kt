@@ -43,7 +43,12 @@ class TodoQuestDeviceTest {
         } }
         // Infinite breathing is deliberate; drive the animation clock explicitly.
         compose.mainClock.autoAdvance = false
-        compose.onNodeWithTag("todoHeader").assertIsDisplayed().performClick()
+        val header = compose.onNodeWithTag("todoHeader")
+        header.assertIsDisplayed()
+        compose.onNode(hasText(phases[1].tasks[0].content) and hasAnyAncestor(hasTestTag("todoHeader")),
+            useUnmergedTree = true).assertIsDisplayed()
+        saveScreenshot("todo-active-collapsed.png")
+        header.performClick()
         compose.mainClock.advanceTimeBy(500)
         compose.onNodeWithText("Review on a small screen · Waiting for device access").assertIsDisplayed()
         compose.onNodeWithText("Previous approach").assertIsDisplayed()
@@ -56,6 +61,8 @@ class TodoQuestDeviceTest {
         compose.mainClock.advanceTimeBy(750)
         compose.onNodeWithTag("todoHeader")
             .assertContentDescriptionEquals("Task plan, 3 of 5 settled")
+        compose.onNode(hasText(phases[1].tasks[0].content) and hasAnyAncestor(hasTestTag("todoHeader")),
+            useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("Build & verify").assertIsDisplayed()
     }
 

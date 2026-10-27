@@ -164,6 +164,8 @@ struct ControllerState {
     // Unmatched call metadata from the latest finalized assistant message, not live activity.
     pending_tool_arguments: HashMap<String, Value>,
     pending_prompt_results: HashMap<String, (String, String)>,
+    // Kept across exit so a racing RPC cannot turn a failed generation into success.
+    local_timeline_failure: Option<(String, String)>,
     settled_revision: u64,
     dirty_messages: HashSet<String>,
     published_messages: HashMap<String, TimelineItem>,
@@ -197,6 +199,7 @@ pub struct SessionDirectory {
 }
 
 mod catalog;
+mod commands;
 pub use catalog::SessionCatalogPage;
 mod deletion;
 mod directory;
@@ -285,10 +288,25 @@ impl SessionController {
         result: Option<Value>,
         error: Option<Value>,
     ) -> Result<()> {
-        let _state = self.state.lock().await;
-        receipt.status = status.into();
-        receipt.result = result;
-        receipt.error = error;
+        let state = self.state.lock().await;
+        let failure = state
+            .local_timeline_failure
+            .as_ref()
+            .filter(|(generation, _)| {
+                receipt.runtime_generation.as_deref() == Some(generation.as_str())
+                    && receipt.command_type == "prompt"
+                    && status != "dispatching"
+            });
+        if let Some((_, message)) = failure {
+            receipt.status = "outcome_unknown".into();
+            receipt.result = None;
+            receipt.error = Some(json!({"code":"output_persistence_failed","message":message}));
+        } else {
+            receipt.status = status.into();
+            receipt.result = result;
+            receipt.error = error;
+        }
+        drop(state);
         receipt.updated_at = Utc::now();
         if self.persist_receipt(receipt).await? {
             self.bus.publish(ServerEvent::Operation {
@@ -368,6 +386,7 @@ impl SessionController {
                 file_ids,
                 generation,
             } => {
+                commands::validate_managed_prompt(&message)?;
                 // None means the client observed no process. Ordinary dispatch serializes starts.
                 if generation.is_none() && self.state.lock().await.runtime.is_some() {
                     return Err(CommandFailure::failed(
@@ -409,9 +428,24 @@ impl SessionController {
                         )
                     })?;
                 let mark_session = receipt.session_id.clone();
+                let is_slash = message.starts_with('/');
+                let mark_reference = reference.clone();
+                let file_exists = tokio::fs::try_exists(&reference).await.map_err(|err| {
+                    CommandFailure::failed("history_unavailable", err.to_string())
+                })?;
                 let marked = self
                     .store
-                    .run(move |store| store.mark_history_may_write(&mark_session, &reference))
+                    .run(move |store| {
+                        if is_slash {
+                            store.prepare_response_history(
+                                &mark_session,
+                                &mark_reference,
+                                file_exists,
+                            )
+                        } else {
+                            store.mark_history_may_write(&mark_session, &mark_reference)
+                        }
+                    })
                     .await
                     .map_err(|_| {
                         CommandFailure::failed(
@@ -440,20 +474,52 @@ impl SessionController {
                 let response = runtime
                     .request_with_id_after_write(rpc_id.clone(), frame, || drop(admission.take()))
                     .await;
+                if is_slash
+                    && !matches!(&response, Ok(reply) if reply["data"]["agentInvoked"] == false)
+                {
+                    let session_id = receipt.session_id.clone();
+                    self.store
+                        .run(move |store| {
+                            ensure!(
+                                store.mark_history_may_write(&session_id, &reference)?,
+                                "OMP history mapping changed during prompt"
+                            );
+                            Ok(())
+                        })
+                        .await
+                        .map_err(|err| CommandFailure::uncertain(err.to_string()))?;
+                }
                 match response {
                     Ok(response) => {
                         if let Err(err) = self.record_activity(&generation).await {
                             eprintln!("Could not persist prompt activity: {err}");
                         }
-                        if let Err(err) = self.update_prompt_title(&generation, &message).await {
+                        if response["data"]["agentInvoked"] != false
+                            && let Err(err) = self.update_prompt_title(&generation, &message).await
+                        {
                             eprintln!("Could not persist latest prompt title: {err}");
                         }
                         if response["data"]["agentInvoked"] == false {
+                            // RPC replies bypass the ordered stdout consumer. Drain preceding
+                            // output before deciding that this local command durably succeeded.
+                            runtime.drain_output().await.map_err(|err| {
+                                CommandFailure::uncertain(format!(
+                                    "Local command completed; output drain failed: {err:#}"
+                                ))
+                            })?;
+                            self.check_local_timeline(&generation).await?;
                             self.state
                                 .lock()
                                 .await
                                 .pending_prompt_results
                                 .remove(&rpc_id);
+                            self.refresh_state(&generation, &runtime)
+                                .await
+                                .map_err(|err| {
+                                    CommandFailure::uncertain(format!(
+                                        "Local command completed; state refresh failed: {err:#}"
+                                    ))
+                                })?;
                             return Ok(CommandResult::Succeeded(
                                 json!({"generation":generation,"agentInvoked":false}),
                             ));
@@ -571,6 +637,19 @@ impl SessionController {
         }
         Ok(())
     }
+    async fn check_local_timeline(
+        &self,
+        generation: &str,
+    ) -> std::result::Result<(), CommandFailure> {
+        let state = self.state.lock().await;
+        if let Some((failed_generation, message)) = &state.local_timeline_failure
+            && failed_generation == generation
+        {
+            return Err(CommandFailure::uncertain(message.clone()));
+        }
+        Self::matching_runtime(&state, generation)?;
+        Ok(())
+    }
     fn matching_runtime(
         state: &ControllerState,
         expected: &str,
@@ -628,6 +707,20 @@ impl SessionController {
             .is_none_or(|r| r.generation != generation)
         {
             return Ok(());
+        }
+        if state
+            .session
+            .engine_session_ref
+            .as_deref()
+            .is_some_and(|reference| data["sessionFile"].as_str() != Some(reference))
+        {
+            if let Some(snapshot) = state.projection.as_mut() {
+                snapshot.phase = "stopping".into();
+            }
+            self.publish_state(&mut state);
+            drop(state);
+            runtime.stop_confirmed().await?;
+            anyhow::bail!("history_unavailable: slash command changed the managed OMP session");
         }
         if let Some(snapshot) = state.projection.as_mut() {
             snapshot.actual_model = model_info(data);

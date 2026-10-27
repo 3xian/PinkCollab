@@ -13,7 +13,7 @@ fn identity(item: &TimelineItem) -> &str {
     item.source_id.as_deref().unwrap_or(&item.id)
 }
 
-/// Gateway-owned input delivery, stored in the command receipt rather than OMP's JSONL.
+/// Gateway-owned feedback or command output, anchored in the local timeline ledger, not OMP's JSONL.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct FeedbackRecord {
     pub reference: String,

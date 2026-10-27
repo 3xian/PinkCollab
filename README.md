@@ -64,6 +64,7 @@ On Windows, use a normal terminal as your OMP user. The Gateway starts automatic
 - **Continue a conversation:** open an **On host** entry in **Tasks**. Its project must be inside your configured workspace roots.
 - **Start a new session:** open **Workspaces**, choose a directory, and create a session.
 - **Reuse a prompt:** tap the **Quick inputs** icon beside the model and **Fast** pill button. Save the current draft or enter new text, then tap a saved entry to append it to the input box. Entries can be edited or deleted and stay on this Android device across conversations and app restarts.
+- **Use a slash command:** with OMP running, type `/` in the composer to browse the runtime's commands. Names and aliases filter the list; tap a command to insert it, add any arguments, then tap **Send**. Command descriptions and argument hints come from OMP.
 
 **Close the corresponding OMP instance on your computer before continuing a conversation from the phone.** This is not a takeover of a running terminal session; do not use the same conversation elsewhere while PinkCollab owns its runtime.
 

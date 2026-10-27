@@ -18,6 +18,7 @@ impl Store {
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for table in [
             "operation_records",
+            "local_timeline_records",
             "omp_adoptions",
             "engine_references",
             "session_records",

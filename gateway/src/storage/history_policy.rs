@@ -67,7 +67,7 @@ impl Store {
         Ok(!expected)
     }
 
-    /// Replace an absent, explicitly allowed transcript and move its durable root feedback
+    /// Replace an absent, explicitly allowed transcript and move its durable local timeline
     /// in the same transaction. Written or observed transcripts are never replaceable here.
     pub fn replace_missing_engine_ref_with_feedback(
         &self,
@@ -87,35 +87,7 @@ impl Store {
         if changed {
             tx.execute("DELETE FROM engine_references WHERE session_id=?1", [id])?;
             claim_reference(&tx, id, &key)?;
-            let results = {
-                let mut query = tx.prepare(
-                    "SELECT client_id,command_id,result FROM operation_records
-                     WHERE session_id=?1 AND command_type='respond' AND status='succeeded' AND result IS NOT NULL",
-                )?;
-                query
-                    .query_map([id], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-            };
-            for (client_id, command_id, raw) in results {
-                let mut result: serde_json::Value = serde_json::from_str(&raw)?;
-                if result["feedback"]["reference"] == old_reference {
-                    ensure!(
-                        result["feedback"]["anchor"] == "",
-                        "history_unavailable: missing transcript has non-root feedback"
-                    );
-                    result["feedback"]["reference"] = reference.into();
-                    tx.execute(
-                        "UPDATE operation_records SET result=?1 WHERE client_id=?2 AND session_id=?3 AND command_id=?4",
-                        params![serde_json::to_string(&result)?, client_id, id, command_id],
-                    )?;
-                }
-            }
+            super::timeline::remap_reference(&tx, id, old_reference, reference)?;
         }
         tx.commit()?;
         Ok(changed)
@@ -206,19 +178,25 @@ mod tests {
     }
 
     #[test]
-    fn missing_reference_replacement_moves_root_feedback_atomically() {
+    fn missing_reference_replacement_moves_both_local_item_kinds_atomically() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(dir.path()).unwrap();
         let db = store.db.lock();
         db.execute_batch(
             "INSERT INTO session_records (id,host_id,cwd,title,metadata_revision,created_at,updated_at,engine_session_ref,history_may_have_been_written)
-             VALUES ('session','host','cwd','',0,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','old.jsonl',1);
-             INSERT INTO operation_records (client_id,session_id,command_id,command_type,request_fingerprint,status,result,created_at,updated_at)
-             VALUES ('client','session','response','respond','fingerprint','succeeded',
-             '{\"feedback\":{\"reference\":\"old.jsonl\",\"anchor\":\"\",\"item\":{\"id\":\"answer\"}}}',
-             '2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');",
+             VALUES ('session','host','cwd','',0,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','old.jsonl',1);",
         ).unwrap();
         drop(db);
+        for (id, kind) in [("answer", "feedback"), ("output", "command_output")] {
+            let record = serde_json::from_value(serde_json::json!({
+                "reference": "old.jsonl", "anchor": "", "sequence": 0,
+                "item": {"id": id, "kind": kind, "text": id, "detail": "",
+                         "timestamp": "2026-01-01T00:00:00Z"}
+            }))
+            .unwrap();
+            store.record_local_timeline("session", record).unwrap();
+        }
+        let before = store.feedback_records("session", "old.jsonl").unwrap();
         assert!(
             !store
                 .replace_missing_engine_ref_with_feedback("session", 1, "old.jsonl", "new.jsonl")
@@ -234,18 +212,21 @@ mod tests {
                 .reference_is_unwritten("session", "new.jsonl")
                 .unwrap()
         );
-        let result: String = store
-            .db
-            .lock()
-            .query_row(
-                "SELECT result FROM operation_records WHERE command_id='response'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        let result: serde_json::Value = serde_json::from_str(&result).unwrap();
-        assert_eq!(result["feedback"]["reference"], "new.jsonl");
-        assert_eq!(result["feedback"]["item"]["id"], "answer");
+        assert!(
+            store
+                .feedback_records("session", "old.jsonl")
+                .unwrap()
+                .is_empty()
+        );
+        let moved = store.feedback_records("session", "new.jsonl").unwrap();
+        assert_eq!(moved.len(), 2);
+        for (before, after) in before.iter().zip(&moved) {
+            assert_eq!(after.reference, "new.jsonl");
+            assert_eq!(after.item.id, before.item.id);
+            assert_eq!(after.item.kind, before.item.kind);
+            assert_eq!(after.sequence, before.sequence);
+            assert_eq!(after.anchor, before.anchor);
+        }
         assert!(
             store
                 .history_read_policy("session", "old.jsonl", false)
@@ -255,6 +236,34 @@ mod tests {
             store
                 .history_read_policy("session", "new.jsonl", false)
                 .unwrap()
+        );
+        let non_root = serde_json::from_value(serde_json::json!({
+            "reference": "new.jsonl", "anchor": "unexpected-root", "sequence": 0,
+            "item": {"id": "anchored-output", "kind": "command_output", "text": "", "detail": "",
+                     "timestamp": "2026-01-01T00:00:00Z"}
+        }))
+        .unwrap();
+        store.record_local_timeline("session", non_root).unwrap();
+        assert!(
+            store
+                .replace_missing_engine_ref_with_feedback("session", 1, "new.jsonl", "third.jsonl")
+                .is_err()
+        );
+        let session = store.v2_session("session").unwrap().unwrap();
+        assert_eq!(session.engine_session_ref.as_deref(), Some("new.jsonl"));
+        assert_eq!(session.metadata_revision, 1);
+        assert_eq!(
+            store
+                .feedback_records("session", "new.jsonl")
+                .unwrap()
+                .len(),
+            3
+        );
+        assert!(
+            store
+                .feedback_records("session", "third.jsonl")
+                .unwrap()
+                .is_empty()
         );
     }
 

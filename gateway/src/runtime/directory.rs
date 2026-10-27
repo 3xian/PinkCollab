@@ -58,6 +58,7 @@ impl SessionDirectory {
                 finalized_messages: HashSet::new(),
                 pending_tool_arguments: HashMap::new(),
                 pending_prompt_results: HashMap::new(),
+                local_timeline_failure: None,
                 settled_revision: 0,
                 dirty_messages: HashSet::new(),
                 published_messages: HashMap::new(),
@@ -505,6 +506,45 @@ impl SessionDirectory {
         self.store
             .run(move |store| store.operation(&client_id, &session_id, &command_id))
             .await
+    }
+    pub async fn commands(&self, id: &str) -> Result<Vec<commands::SlashCommand>> {
+        let controller = self
+            .active_controller(id)
+            .await
+            .context("runtime required")?;
+        let (generation, runtime) = {
+            let state = controller.state.lock().await;
+            let current = state.runtime.as_ref().context("runtime required")?;
+            ensure!(
+                current.process.alive()
+                    && state
+                        .projection
+                        .as_ref()
+                        .is_some_and(|p| p.phase == "ready"),
+                "runtime required"
+            );
+            (current.generation.clone(), current.process.clone())
+        };
+        let response = runtime
+            .request(json!({"type":"get_available_commands"}))
+            .await?;
+        let commands = serde_json::from_value::<Vec<commands::SlashCommand>>(
+            response["data"]["commands"].clone(),
+        )
+        .context("OMP returned an invalid command catalog")?;
+        let state = controller.state.lock().await;
+        ensure!(
+            state
+                .runtime
+                .as_ref()
+                .is_some_and(|r| r.generation == generation && r.process.alive())
+                && state
+                    .projection
+                    .as_ref()
+                    .is_some_and(|p| p.phase == "ready"),
+            "runtime generation changed"
+        );
+        Ok(commands::managed_catalog(commands))
     }
     pub async fn models(&self, id: &str) -> Result<(Vec<ModelInfo>, Vec<String>)> {
         let controller = self

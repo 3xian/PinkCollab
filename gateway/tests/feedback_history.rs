@@ -317,7 +317,7 @@ async fn forward_sync_cursor_rejects_feedback_changes_with_an_unchanged_transcri
 }
 
 #[tokio::test]
-async fn saved_responses_outlive_receipt_windows_and_sqlite_reopen() {
+async fn migrated_responses_outlive_receipt_windows_and_sqlite_reopen() {
     let _history_reads = HISTORY_READS.lock().await;
     use pinkcollab_gateway::{
         domain::{OperationRecord, SessionRecord},
@@ -380,6 +380,21 @@ async fn saved_responses_outlive_receipt_windows_and_sqlite_reopen() {
     rejected.command_id = "rejected".into();
     rejected.status = "failed".into();
     assert!(store.insert_operation(&rejected).unwrap());
+    // Seed a real pre-ledger database: only migration may import embedded legacy feedback.
+    drop(store);
+    let db = rusqlite::Connection::open(data.join("pinkcollab.db")).unwrap();
+    db.execute_batch("DROP TABLE local_timeline_records; PRAGMA user_version=9;")
+        .unwrap();
+    drop(db);
+    let store = Store::open(&data).unwrap();
+    assert_eq!(
+        store
+            .operation("client", "session", "answer-119")
+            .unwrap()
+            .unwrap()
+            .result,
+        Some(json!({"inputRequestId": "question-119"}))
+    );
     assert_eq!(store.recent_operations("session", 20).unwrap().len(), 20);
     assert_eq!(
         store.feedback_records("session", &reference).unwrap().len(),

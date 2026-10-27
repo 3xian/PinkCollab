@@ -125,6 +125,7 @@ impl SessionController {
             });
             state.work_clock = None;
             state.settled_revision = 0;
+            state.local_timeline_failure = None;
             state.messages.clear();
             state.finalized_messages.clear();
             state.pending_tool_arguments.clear();
@@ -150,6 +151,9 @@ impl SessionController {
             while let Some(event) = output.recv().await {
                 match event {
                     Output::Frame(frame) => controller.apply_frame(&event_generation, frame).await,
+                    Output::Barrier(ack) => {
+                        let _ = ack.send(());
+                    }
                     Output::Exited(reason) => {
                         controller.apply_exit(&event_generation, reason).await;
                         break;

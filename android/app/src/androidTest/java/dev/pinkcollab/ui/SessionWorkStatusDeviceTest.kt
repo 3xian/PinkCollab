@@ -81,7 +81,7 @@ class SessionWorkStatusDeviceTest {
             currentHost.value = host.copy(connection = ConnectionState.Offline())
         }
         compose.mainClock.advanceTimeBy(500)
-        compose.onNodeWithTag("sessionWorkSpeed").assertIsDisplayed()
+        compose.onNodeWithText("Host unavailable").assertIsDisplayed()
         compose.runOnIdle { currentHost.value = host }
         compose.mainClock.advanceTimeBy(500)
         compose.onNodeWithTag("sessionWorkSpeed").assertTextEquals("42 tok/s")

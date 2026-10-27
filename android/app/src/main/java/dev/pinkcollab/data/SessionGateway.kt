@@ -234,6 +234,14 @@ internal class SessionGateway(
         }
     }
 
+    suspend fun commands(hostId: String, id: String): List<SlashCommand> {
+        val p = paired(hostId)
+        val response = api.request(p.url, p.credential, "/api/v4/sessions/$id/commands")
+        return withContext(Dispatchers.Default) {
+            JSONObject(response).getJSONArray("commands").objects().map { it.slashCommand() }
+        }
+    }
+
     suspend fun toolDetails(hostId: String, id: String, callId: String, cursor: String?): ToolDetailPage {
         val p = paired(hostId)
         val callPath = encodeGatewayComponent(callId)

@@ -138,32 +138,8 @@ impl SessionController {
             }
         };
         *receipt = completed;
-        let mut state = self.state.lock().await;
-        // A delivered answer stays durable even if Stop completed during persistence,
-        // but must never reintroduce live messages into an exited/new generation.
-        if state
-            .runtime
-            .as_ref()
-            .is_some_and(|runtime| runtime.generation == generation)
-        {
-            state.messages.push(item.clone());
-            let excess = state.messages.len().saturating_sub(LIVE_ITEM_LIMIT);
-            let removed: Vec<_> = state.messages.drain(..excess).map(|item| item.id).collect();
-            for id in &removed {
-                state.finalized_messages.remove(id);
-                state.dirty_messages.remove(id);
-                state.published_messages.remove(id);
-            }
-            state
-                .published_messages
-                .insert(item.id.clone(), item.clone());
-            self.bus.publish(ServerEvent::Timeline {
-                session_id: state.session.id.clone(),
-                upsert: vec![item],
-                remove: removed,
-                reset: false,
-            });
-        }
+        // Delivery remains durable across Stop, but stale generations cannot republish it.
+        self.publish_local_timeline(generation, item).await;
         self.bus.publish(ServerEvent::Operation {
             session_id: receipt.session_id.clone(),
             operation: OperationDto::from(&*receipt),

@@ -16,6 +16,31 @@ import org.junit.Test
 import java.io.IOException
 
 class SessionGatewayTest {
+    @Test fun commands_get_uses_paired_credentials_and_decodes_optional_metadata() = runTest {
+        val transport = object : GatewayTransport {
+            override val client = OkHttpClient()
+            override fun validateURL(value: String) = value
+            override suspend fun request(url: String, credential: String?, path: String, method: String,
+                body: JSONObject?, query: Pair<String, String>?): String {
+                assertEquals("https://host", url)
+                assertEquals("credential", credential)
+                assertEquals("/api/v4/sessions/session/commands", path)
+                assertEquals("GET", method)
+                assertNull(body)
+                return """{"commands":[{"name":"compact","source":"builtin","aliases":["summarize"],"description":"Summarize context","input":{"hint":"Optional instructions"},"subcommands":[{"name":"status","description":"Show state","usage":"status"}]},{"name":"custom","source":"extension"}]}"""
+            }
+            override suspend fun upload(url: String, credential: String, path: String, name: String,
+                bytes: ByteArray): String = error("unexpected upload")
+        }
+        assertEquals(listOf(
+            SlashCommand("compact", "builtin", listOf("summarize"), "Summarize context",
+                SlashCommandInput("Optional instructions"), listOf(SlashSubcommand("status", "Show state", "status"))),
+            SlashCommand("custom", "extension"),
+        ), gatewayWith(MutableStateFlow(AppState()), transport).commands("host", "session"))
+        assertEquals(emptyList<SlashCommand>(),
+            gatewayWith(MutableStateFlow(AppState()), HistoryTransport { """{"commands":[]}""" }).commands("host", "session"))
+    }
+
     @Test fun deleted_creation_receipt_rotates_retry_id_but_transport_failures_keep_it() = runTest {
         val ids = mutableListOf<String>()
         val transport = object : GatewayTransport {

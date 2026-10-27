@@ -86,6 +86,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         { hostId ->
             removeHostDrafts(hostId)
             resourceLoader.removeHost(hostId)
+            commandLoader.removeHost(hostId)
             usageLoader.removeHost(hostId)
             mutableFileSelections.update { it.filterKeys { key -> key.hostId != hostId } }
         },
@@ -117,6 +118,8 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     }, ::showError)
     internal val detailLoads = resourceLoader.detailLoads
     internal val modelLoads = resourceLoader.modelLoads
+    private val commandLoader = SessionCommandLoader(viewModelScope) { repository.commands(it.hostId, it.id) }
+    internal val commandLoads = commandLoader.state
     private val usageLoader = HostUsageLoader(viewModelScope, repository::usage)
     internal val usageLoads = usageLoader.state
 
@@ -130,6 +133,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         viewModelScope.launch { repository.errors.collect(::showError) }
         viewModelScope.launch { repository.state.collect { app ->
             sessionCoordinator.updateDetails(app.details)
+            commandLoader.updateSessions(app.hosts.values.flatMap { it.sessions })
             app.hosts.forEach { (hostId, host) ->
                 host.removedSessionIds.forEach { id ->
                     removeSession(SessionKey(hostId, id))
@@ -224,6 +228,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
             is SessionAction.Command -> sessionCommand(session, action.command)
             is SessionAction.Respond -> respond(session, action.response)
             is SessionAction.LoadModels -> loadModels(session, action.force)
+            is SessionAction.LoadCommands -> commandLoader.load(session, action.force)
             SessionAction.LoadUsage -> usageLoader.load(session.hostId)
             SessionAction.LoadEarlierHistory -> loadEarlierHistory(session)
         }
@@ -279,6 +284,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         sessionCoordinator.removeSession(key)
         draftStore.removeSession(key)
         resourceLoader.removeSession(key)
+        commandLoader.removeSession(key)
         mutableFileSelections.update { it - key }
         releaseUnusedUris(before)
     }

@@ -57,7 +57,7 @@ pub struct TimelineItem {
 }
 
 /// Structured tool data is part of the wire timeline only. OMP's session JSONL remains the
-/// canonical, lossless tool transcript; Gateway feedback is persisted separately in receipts.
+/// canonical, lossless tool transcript; Gateway-owned items live in the local timeline ledger.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolTrace {

@@ -33,6 +33,7 @@ internal data class SessionPageState(
     val summary: Session? = null,
     val usage: LoadState<dev.pinkcollab.data.UsageSnapshot>? = null,
     val runtimeStart: RuntimeStartAttempt? = null,
+    val commands: LoadState<SessionCommands>? = null,
 )
 
 /** Connection recovery waits for a fresh snapshot; old request errors no longer describe it. */
@@ -50,6 +51,7 @@ internal sealed interface SessionAction {
     data class Command(val command: SessionUserCommand) : SessionAction
     data class Respond(val response: AttentionResponse) : SessionAction
     data class LoadModels(val force: Boolean) : SessionAction
+    data class LoadCommands(val force: Boolean = false) : SessionAction
     data object LoadUsage : SessionAction
     data object LoadEarlierHistory : SessionAction
 }

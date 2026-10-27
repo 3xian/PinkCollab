@@ -68,6 +68,8 @@ pub async fn version(executable: &str) -> String {
 
 pub enum Output {
     Frame(Value),
+    /// Acknowledged by the ordered consumer after all preceding frames have applied.
+    Barrier(oneshot::Sender<()>),
     /// The process is gone. `Some` carries why the transport failed, `None` means it exited
     /// normally or because we asked it to.
     Exited(Option<String>),
@@ -406,6 +408,7 @@ impl Shutdown {
 
 pub struct Runtime {
     input: mpsc::Sender<(Value, oneshot::Sender<Result<()>>)>,
+    output: mpsc::WeakSender<Output>,
     pending: Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>,
     progress: watch::Receiver<Progress>,
     exited: watch::Receiver<bool>,
@@ -627,6 +630,7 @@ impl Runtime {
         Ok((
             Arc::new(Self {
                 input,
+                output: output.downgrade(),
                 pending,
                 progress,
                 exited,
@@ -718,6 +722,23 @@ impl Runtime {
         .await;
         self.pending.lock().remove(&request_id);
         result
+    }
+
+    /// Call after an RPC response, outside controller ordering locks. Responses bypass
+    /// the event queue, but every preceding stdout event has already entered it.
+    pub(crate) async fn drain_output(&self) -> Result<()> {
+        let (ack, drained) = oneshot::channel();
+        let output = self
+            .output
+            .upgrade()
+            .context("OMP output producer exited before drain")?;
+        output
+            .send(Output::Barrier(ack))
+            .await
+            .context("OMP output consumer closed before drain")?;
+        drained
+            .await
+            .context("OMP output consumer exited before drain")
     }
 
     /// Ends the OMP process. Bounded by [`TERMINATE_GRACE`]: termination is owned by [`Process`],

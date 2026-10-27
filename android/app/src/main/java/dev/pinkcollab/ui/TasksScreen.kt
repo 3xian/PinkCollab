@@ -76,6 +76,7 @@ internal data class TasksScreenState(
     val runtimeStarts: Map<SessionKey, RuntimeStartAttempt> = emptyMap(),
     val hostOperations: Set<OperationKey> = emptySet(),
     val refreshBatch: HostRefreshBatch? = null,
+    val commandLoads: Map<SessionKey, LoadState<SessionCommands>> = emptyMap(),
 )
 
 internal data class TasksScreenActions(
@@ -266,6 +267,7 @@ internal fun TasksScreen(
                                 activity = sessionOperations.activity(key),
                                 sendProgress = sendProgress[key],
                                 model = modelLoads[key],
+                                commands = state.commandLoads[key],
                                 usage = state.usageLoads[session.hostId],
                                 runtimeStart = state.runtimeStarts[key],
                                 historyItems = displayed?.historyItems,

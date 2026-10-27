@@ -12,6 +12,7 @@ mod catalog;
 mod deletion;
 mod history_policy;
 mod references;
+mod timeline;
 use references::claim_reference;
 use references::reference_key;
 
@@ -92,7 +93,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 9,
+            schema_version <= 10,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -160,11 +161,9 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         if schema_version < 9 {
             references::migrate_shared_references(&db)?;
         }
-        db.execute_batch(
-            "CREATE INDEX IF NOT EXISTS response_feedback
-             ON operation_records(session_id)
-             WHERE command_type='respond' AND status='succeeded';",
-        )?;
+        if schema_version < 10 {
+            timeline::migrate(&db)?;
+        }
         Ok(Self {
             db: Mutex::new(db),
             blocking_slots: Arc::new(Semaphore::new(4)),
@@ -505,34 +504,6 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         )?==1)
     }
 
-    /// Commit transport-delivered feedback and its receipt together, assigning order by
-    /// delivery commit rather than wall-clock timestamps or command admission order.
-    pub(crate) fn complete_response(
-        &self,
-        mut receipt: OperationRecord,
-        mut feedback: crate::history::FeedbackRecord,
-        input_request_id: &str,
-    ) -> Result<Option<OperationRecord>> {
-        let mut db = self.db.lock();
-        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        feedback.sequence = tx.query_row(
-            "SELECT COUNT(*)+1 FROM operation_records
-             WHERE session_id=?1 AND command_type='respond' AND status='succeeded'",
-            [&receipt.session_id],
-            |row| row.get(0),
-        )?;
-        receipt.status = "succeeded".into();
-        receipt.updated_at = feedback.item.timestamp;
-        receipt.error = None;
-        receipt.result = Some(serde_json::json!({
-            "inputRequestId":input_request_id,
-            "feedback":feedback,
-        }));
-        let saved = write_operation(&tx, &receipt)?;
-        tx.commit()?;
-        Ok(saved.then_some(receipt))
-    }
-
     pub fn recent_operations(
         &self,
         session_id: &str,
@@ -551,42 +522,46 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
             .collect()
     }
 
-    /// Successful Respond receipts are also the durable authority for Gateway feedback.
-    /// These records are not subject to the bounded recent-operations display window.
-    pub fn feedback_records(
-        &self,
-        session_id: &str,
-        reference: &str,
-    ) -> Result<Vec<crate::history::FeedbackRecord>> {
-        #[derive(serde::Deserialize)]
-        struct ResponseResult {
-            feedback: Option<crate::history::FeedbackRecord>,
-        }
-        let db = self.db.lock();
-        let mut query = db.prepare(
-            "SELECT result FROM operation_records
-             WHERE session_id=?1 AND command_type='respond' AND status='succeeded' AND result IS NOT NULL
-             ORDER BY rowid",
-        )?;
-        let rows = query.query_map([session_id], |row| row.get::<_, String>(0))?;
-        let mut records = Vec::new();
-        for row in rows {
-            let result: ResponseResult = serde_json::from_str(&row?)?;
-            if let Some(record) = result.feedback
-                && record.reference == reference
-            {
-                records.push(record);
-            }
-        }
-        Ok(records)
-    }
-
     pub fn mark_generation_unknown(&self, session_id: &str, generation: &str) -> Result<()> {
         self.db.lock().execute(
             "UPDATE operation_records SET status='outcome_unknown',error='{\"code\":\"runtime_exited_before_result\"}',updated_at=?1 WHERE session_id=?2 AND runtime_generation=?3 AND status IN ('dispatching','running')",
             params![Utc::now().to_rfc3339(),session_id,generation],
         )?;
         Ok(())
+    }
+
+    /// Fence receipts for a generation whose local output could not be saved.
+    pub(crate) fn fail_generation_local_timeline(
+        &self,
+        session_id: &str,
+        generation: &str,
+        message: &str,
+    ) -> Result<Vec<OperationRecord>> {
+        let mut db = self.db.lock();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut receipts = {
+            let mut query = tx.prepare(
+                "SELECT client_id,session_id,command_id,command_type,request_fingerprint,runtime_generation,status,result,error,created_at,updated_at
+                 FROM operation_records WHERE session_id=?1 AND runtime_generation=?2
+                 AND command_type='prompt'
+                 AND status IN ('dispatching','running','outcome_unknown') ORDER BY rowid",
+            )?;
+            query
+                .query_map(params![session_id, generation], operation_columns)?
+                .map(|row| parse_operation(row?))
+                .collect::<Result<Vec<_>>>()?
+        };
+        let now = Utc::now();
+        for receipt in &mut receipts {
+            receipt.status = "outcome_unknown".into();
+            receipt.error = Some(serde_json::json!({
+                "code": "output_persistence_failed", "message": message
+            }));
+            receipt.updated_at = now;
+            write_operation(&tx, receipt)?;
+        }
+        tx.commit()?;
+        Ok(receipts)
     }
 
     /// A durable lease is deliberately conservative. An unclean Gateway exit leaves it behind,
@@ -637,12 +612,12 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
     pub fn recover_operations(&self) -> Result<()> {
         let mut db = self.db.lock();
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        // A crash can interrupt Respond after delivery but before its durable feedback.
-        // Those sessions must not treat missing OMP content as successful feedback-only history.
+        // A crash can interrupt a delivery before its durable local completion.
+        // An uncertain prompt/answer may already have written OMP conversation content.
         tx.execute_batch(
             "UPDATE session_records SET history_file_expected=1
              WHERE EXISTS(SELECT 1 FROM operation_records
-                 WHERE session_id=session_records.id AND command_type='respond'
+                 WHERE session_id=session_records.id AND command_type IN ('respond','prompt')
                  AND status IN ('dispatching','running'));",
         )?;
         tx.execute("UPDATE operation_records SET status='cancelled',error='{\"code\":\"gateway_restarted_before_dispatch\"}',updated_at=?1 WHERE status='accepted'",[Utc::now().to_rfc3339()])?;
@@ -652,9 +627,11 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
     }
 }
 
+// Controller state is released before SQLite work. A stale prompt completion must
+// not replace a durable output-failure fence, including with another unknown error.
 fn write_operation(db: &Connection, op: &OperationRecord) -> Result<bool> {
     let changed = db.execute(
-        "UPDATE operation_records SET runtime_generation=?1,status=?2,result=?3,error=?4,updated_at=?5 WHERE client_id=?6 AND session_id=?7 AND command_id=?8 AND (CASE ?2 WHEN 'dispatching' THEN status='accepted' WHEN 'running' THEN status IN ('accepted','dispatching') ELSE 1 END)",
+        "UPDATE operation_records SET runtime_generation=?1,status=?2,result=?3,error=?4,updated_at=?5 WHERE client_id=?6 AND session_id=?7 AND command_id=?8 AND (CASE ?2 WHEN 'dispatching' THEN status='accepted' WHEN 'running' THEN status IN ('accepted','dispatching') ELSE 1 END) AND (COALESCE(json_extract(error,'$.code'),'')!='output_persistence_failed' OR (?2='outcome_unknown' AND json_extract(?4,'$.code')='output_persistence_failed'))",
         params![op.runtime_generation,op.status,op.result.as_ref().map(serde_json::to_string).transpose()?,
             op.error.as_ref().map(serde_json::to_string).transpose()?,op.updated_at.to_rfc3339(),
             op.client_id,op.session_id,op.command_id],

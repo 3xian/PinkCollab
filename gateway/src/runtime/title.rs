@@ -132,6 +132,7 @@ mod tests {
                 finalized_messages: HashSet::new(),
                 pending_tool_arguments: HashMap::new(),
                 pending_prompt_results: HashMap::new(),
+                local_timeline_failure: None,
                 settled_revision: 0,
                 dirty_messages: HashSet::new(),
                 published_messages: HashMap::new(),

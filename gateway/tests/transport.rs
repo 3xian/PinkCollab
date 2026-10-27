@@ -242,6 +242,9 @@ fn drain(
                     );
                     frames.push(frame);
                 }
+                Output::Barrier(ack) => {
+                    let _ = ack.send(());
+                }
                 Output::Exited(reason) => return (frames, reason),
             }
         }

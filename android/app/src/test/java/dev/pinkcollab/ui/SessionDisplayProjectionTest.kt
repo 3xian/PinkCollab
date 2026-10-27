@@ -10,6 +10,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SessionDisplayProjectionTest {
+    @Test fun command_output_remains_visible_without_becoming_an_assistant_message() {
+        val output = TimelineItem("command", "system", "Compaction complete", "command output", "")
+        assertEquals(listOf(SessionDisplayItem.Raw(output.id, output)), projectSessionTimeline(listOf(output)))
+    }
+
     private fun message(id: String, kind: String, text: String) =
         TimelineItem(id, kind, text, "", "2026-09-20T00:00:00Z")
 

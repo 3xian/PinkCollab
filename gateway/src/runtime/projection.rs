@@ -5,11 +5,34 @@ impl SessionController {
         // Answer-triggered frames follow durable feedback publication. Exit/Stop
         // bypass this gate, so a stalled writer cannot delay termination.
         let _feedback = self.feedback_order.lock().await;
+        if self
+            .state
+            .lock()
+            .await
+            .local_timeline_failure
+            .as_ref()
+            .is_some_and(|(failed_generation, _)| failed_generation == generation)
+        {
+            return;
+        }
         let kind = omp::string(&frame, "type").to_owned();
         if matches!(kind.as_str(), "prompt_result" | "session_settled")
             && let Err(err) = self.record_activity(generation).await
         {
             eprintln!("Could not persist completed activity: {err}");
+        }
+        if kind == "command_output" {
+            self.command_output(generation, omp::string(&frame, "text"))
+                .await;
+            return;
+        }
+        if kind == "session_info_update" {
+            if let Some(title) = frame["title"].as_str()
+                && let Err(error) = self.update_prompt_title(generation, title).await
+            {
+                eprintln!("Could not persist session title: {error:#}");
+            }
+            return;
         }
         if kind == "prompt_result" {
             let (session_id, key, status, error) = {
@@ -129,12 +152,14 @@ impl SessionController {
                     }
                 }
             }
-            "model_changed" => {
+            "model_changed" | "config_update" => {
                 let controller = self.clone();
                 let generation = generation.to_owned();
                 if let Some(runtime) = state.runtime.as_ref().map(|r| r.process.clone()) {
                     tokio::spawn(async move {
-                        let _ = controller.refresh_state(&generation, &runtime).await;
+                        if let Err(error) = controller.refresh_state(&generation, &runtime).await {
+                            eprintln!("Could not refresh runtime state: {error:#}");
+                        }
                     });
                 }
             }

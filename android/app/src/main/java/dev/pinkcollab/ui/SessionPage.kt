@@ -191,6 +191,15 @@ internal fun SessionPage(
     }
 
     val inputEnabled = controls.inputEnabled
+    val commandSession = state.summary ?: session
+    val commandQuery = slashCommandQuery(prompt)
+    val commandsAvailable = attached && commandSession.runtimeAttached
+    val commandState = currentCommands(state.commands, commandSession.generation)
+    LaunchedEffect(isActive, commandQuery != null, commandsAvailable, commandSession.generation) {
+        if (isActive && commandQuery != null && commandsAvailable) {
+            onAction(SessionAction.LoadCommands())
+        }
+    }
     var composerHeightPx by remember(session.id) { mutableIntStateOf(0) }
     val timelineScrollIntent = remember(timelineState) {
         object : NestedScrollConnection {
@@ -373,6 +382,17 @@ internal fun SessionPage(
                 .onSizeChanged { composerHeightPx = it.height },
         ) {
             workStatus?.let { SessionWorkStatusLine(it, recoveryAction = recoveryAction) }
+            if (isActive && commandQuery != null) {
+                SlashCommandSuggestions(
+                    state = commandState,
+                    query = commandQuery,
+                    available = commandsAvailable,
+                    enabled = inputEnabled,
+                    retry = { onAction(SessionAction.LoadCommands(force = true)) },
+                    select = onDraftTextChange,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
             Row(
                 Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

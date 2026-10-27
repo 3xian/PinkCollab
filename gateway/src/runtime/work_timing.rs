@@ -118,6 +118,7 @@ mod tests {
             finalized_messages: Default::default(),
             pending_tool_arguments: Default::default(),
             pending_prompt_results: Default::default(),
+            local_timeline_failure: None,
             settled_revision: 0,
             dirty_messages: Default::default(),
             published_messages: Default::default(),

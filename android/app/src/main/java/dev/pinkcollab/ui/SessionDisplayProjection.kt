@@ -104,6 +104,10 @@ fun projectSessionTimeline(
                 flushGroup()
                 output += SessionDisplayItem.Feedback(item.id, item.detail, item.text, item.timestamp)
             }
+            "system" -> if (item.detail == "command output" && item.text.isNotBlank()) {
+                flushGroup()
+                output += SessionDisplayItem.Raw(item.id, item)
+            }
             // Thinking, compaction, subagent bookkeeping, metadata and successful raw results
             // intentionally have no concise representation and do not split a visible group.
         }

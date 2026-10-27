@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.pinkcollab.ui.theme.*
@@ -91,12 +92,14 @@ internal fun FloatingTodoPanel(
                 if (progress > 0f) Box(Modifier.fillMaxWidth(progress).fillMaxHeight()
                     .background(Brush.horizontalGradient(listOf(
                         Purple400.copy(alpha = 0.28f), accent.copy(alpha = 0.32f), Teal300.copy(alpha = 0.28f)))))
-                Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically,
+                Row(Modifier.fillMaxWidth().align(Alignment.CenterStart).padding(start = 28.dp, end = 32.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("TODOs", style = MaterialTheme.typography.labelMedium,
+                    Text("TODO ($closed/${tasks.size})", style = MaterialTheme.typography.labelMedium,
                         color = if (quiet) TextMid else TextHigh)
-                    Text("$closed/${tasks.size}", color = if (quiet) TextMid else TextHigh,
-                        style = MaterialTheme.typography.labelMedium)
+                    if (focus?.status == TodoStatus.Active) Text(focus.content,
+                        modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = TextHigh, style = MaterialTheme.typography.labelMedium)
                 }
                 if (focus?.status == TodoStatus.Active) GlowDot(accent,
                     modifier = Modifier.align(Alignment.CenterStart).padding(start = 10.dp).todoDotBreathing(live),

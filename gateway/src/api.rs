@@ -20,8 +20,8 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sessions::{
-    api_command, api_create, api_delete, api_detail, api_models, api_operation, api_sessions,
-    api_upload,
+    api_command, api_commands, api_create, api_delete, api_detail, api_models, api_operation,
+    api_sessions, api_upload,
 };
 use std::{path::Path as FsPath, sync::Arc};
 use stream::api_stream;
@@ -48,7 +48,10 @@ pub fn router(app: App) -> Router {
         .route("/api/v4/fs/list", get(list))
         .route("/api/v4/sessions", get(api_sessions).post(api_create))
         .route("/api/v4/sessions/{id}", get(api_detail).delete(api_delete))
-        .route("/api/v4/sessions/{id}/commands", post(api_command))
+        .route(
+            "/api/v4/sessions/{id}/commands",
+            get(api_commands).post(api_command),
+        )
         .route(
             "/api/v4/sessions/{id}/files/{file_id}",
             put(api_upload).layer(DefaultBodyLimit::max(uploads::MAX_FILE_BYTES)),

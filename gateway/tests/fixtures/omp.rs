@@ -503,6 +503,30 @@ fn main() {
                 }
             }
             "get_available_models" => ack(json!({"models":models})),
+            "get_available_commands" => {
+                if args.iter().any(|arg| arg == "--unsupported-commands") {
+                    emit(
+                        json!({"type":"response","id":frame["id"],"command":"get_available_commands","success":false,"error":"Unknown command"}),
+                    );
+                    continue;
+                }
+                if args.iter().any(|arg| arg == "--slow-commands") {
+                    std::fs::write(
+                        std::env::current_dir().unwrap().join("catalog-requested"),
+                        "",
+                    )
+                    .unwrap();
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+                ack(json!({"commands":[
+                    {"name":"model","source":"builtin","aliases":["models"],"description":"Select model","input":{"hint":"[model]"}},
+                    {"name":"fast","source":"builtin","subcommands":[{"name":"on","description":"Enable fast mode"},{"name":"status","usage":"[verbose]"}]},
+                    {"name":"fixture:review","source":"extension","description":"Review fixture"},
+                    {"name":"move","source":"builtin","description":"Move session"},
+                    {"name":"wt","source":"builtin","aliases":["worktree"]},
+                    {"name":"session","source":"builtin","input":{"hint":"[info|delete|pin]"},"subcommands":[{"name":"info"},{"name":"delete"},{"name":"pin"}]}
+                ]}));
+            }
             "set_model" => {
                 let selected = models.iter().position(|model| {
                     model["provider"] == frame["provider"] && model["id"] == frame["modelId"]
@@ -535,6 +559,49 @@ fn main() {
                     .unwrap();
                 }
                 let message = frame["message"].as_str().unwrap_or_default();
+                if matches!(
+                    message,
+                    "/model" | "/models" | "/fast on" | "/fixture multi" | "/fixture error"
+                ) {
+                    if message == "/fast on" {
+                        fast_mode = true;
+                        model_index = 1;
+                        thinking_level = "high".into();
+                        emit(
+                            json!({"type":"config_update","model":models[model_index],"thinkingLevel":thinking_level}),
+                        );
+                    }
+                    emit(
+                        json!({"type":"command_output","text":if message == "/fixture error" { "Could not run fixture command" } else { "Current model: fixture/smart" }}),
+                    );
+                    if message == "/fixture multi" {
+                        emit(json!({"type":"command_output","text":"Second command output"}));
+                    }
+                    if message == "/fixture error" {
+                        emit(
+                            json!({"type":"response","id":frame["id"],"command":"prompt","success":false,"error":"fixture slash failure"}),
+                        );
+                    } else {
+                        ack(json!({"agentInvoked":false}));
+                    }
+                    continue;
+                }
+                if let Some(title) = message.strip_prefix("/rename ") {
+                    session_title = title.into();
+                    std::fs::write(&title_file, &session_title).unwrap();
+                    save_title(&log, &session_title);
+                    emit(
+                        json!({"type":"session_info_update","title":session_title,"sessionId":session_id}),
+                    );
+                    emit(json!({"type":"command_output","text":"Session renamed"}));
+                    ack(json!({"agentInvoked":false}));
+                    continue;
+                }
+                if message == "/fixture switch" {
+                    log = log.with_extension("changed.jsonl");
+                    ack(json!({"agentInvoked":false}));
+                    continue;
+                }
                 if let Some(title) = message.strip_prefix("silent-title:") {
                     session_title = title.to_owned();
                     std::fs::write(&title_file, &session_title).unwrap();

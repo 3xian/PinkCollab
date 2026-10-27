@@ -71,12 +71,13 @@ Run a focused integration suite with `cargo test --all-features --locked --test 
 
 | Area | Suites and coverage |
 | --- | --- |
-| History and receipts | `core`: bounded receipt ordering, decoding and corrupt records; `feedback_history`: durable feedback and branches; `lazy_tools`: incremental tool reads |
+| History and receipts | `core`: bounded receipt ordering, decoding and corrupt records; `feedback_history`: durable feedback and branches; `storage::timeline::tests`: schema migration, mixed local-record ordering and atomic receipt rollback; `lazy_tools`: incremental tool reads |
 | History readers | `cargo test --all-features --locked --lib history::tests`: missing-file policy, 128 MiB bound, metadata changes, cursors and two-reader limit; sync releases its permit before paging fallback |
 | Discovery HTTP errors | `discovery history_routes_preserve_distinct_http_errors`: distinct paging, synchronization and tool-detail errors |
 | Tool intent | `transcript_details`: live/history parity, late metadata, preserved outcomes and no resurrection of retired or unexecuted calls |
 | Runtime and deletion | `runtime_lease_recovery`, `deletion`: process ownership, durable cleanup and shared-history protection |
 | Windows background startup | `windows_background`: hidden launcher, duplicate starts, stop/restart, external setup and host identity |
+| Slash commands | `model_settings`: authenticated discovery, generation fencing, ordered local completion/output, injected timeline-write failure and healthy-generation recovery, settings/title updates, history retention and managed-session protections |
 
 Windows background tests use isolated temporary directories and `gateway-fixture`, which injects an empty legacy-service lookup. They neither touch machine-wide services nor register real login startup. Production service discovery and ownership checks remain enabled, including builds with `test-fixtures`.
 
@@ -89,9 +90,10 @@ Prefer a wireless physical device; use an emulator when needed. Unit tests need 
 | Area | Tests / checks |
 | --- | --- |
 | Activity timeline | `ActivityGroupDeviceTest`, `ActivityTimelineSessionDeviceTest`: mixed tools, focused previews, manual disclosure, reply/settlement/disconnect folding, earlier-turn isolation and enlarged text |
-| Work status and cards | `SessionWorkStatusDeviceTest`, `TasksPagerBarDeviceTest`: timeline-only active actions, composer timing/speed, attention and long status labels |
+| Work status and cards | `SessionWorkStatusDeviceTest`, `TasksPagerBarDeviceTest`: timeline-only active actions, composer timing/speed, offline status and speed restoration after reconnect, attention and long status labels |
 | Markdown | `SessionMarkdownDeviceTest`: tables, links, exact source copying, independent layouts, typography reflow and reading-position/follow-latest behavior |
 | Insets | `DirectoryBrowserDeviceTest`: keyboard transitions, create-button clearance, touch delivery and return to the home header |
+| Slash commands | `SlashCommandsDeviceTest`: alias filtering, canonical insertion without auto-send, normal Send, catalog errors/retry, empty/unknown results and stale-generation hiding |
 
 Timeline scenarios reading older content must swipe backward before `performScrollToNode`; a programmatic jump can race follow-latest layout updates. To resume following after a long reply, swipe forward with a bounded gesture count until `timelineEnd` is visible, then verify that further reply growth is followed. Scope card assertions to the card when host recovery repeats the same label elsewhere.
 
@@ -133,7 +135,7 @@ This transport is between Gateway and OMP; Android still uses Gateway API v4. Th
 
 Gateway validates chunk metadata, ordering, sizes, UTF-8 and the final JSON object. Malformed or incomplete transport fails explicitly. Serialized limits do not bound parsed JSON heap usage. Text deltas use lossless backpressure. Legacy v1 uses unchunked lines and cannot carry responses above the physical bound.
 
-Failures retain exported `omp::TransportError` / `TransportErrorKind` through pending request completion. Tests assert typed categories rather than wording. Readiness sees a terminal error immediately; pending requests and exit notification wait for confirmed process termination. Public output remains `Output::Frame(Value)` or `Output::Exited(Option<String>)`.
+Failures retain exported `omp::TransportError` / `TransportErrorKind` through pending request completion. Tests assert typed categories rather than wording. Readiness sees a terminal error immediately; pending requests and exit notification wait for confirmed process termination. Output is `Output::Frame(Value)`, `Output::Barrier` or `Output::Exited(Option<String>)`. A local prompt enqueues a barrier after its RPC acknowledgement and waits for the ordered consumer to apply preceding frames before reporting success. Never wait for that barrier while holding `feedback_order`; Stop and process-exit cleanup bypass the gate.
 
 Startup must not hold `feedback_order` while awaiting RPC: ordinary events need to drain through the capacity-one queue. After the final RPC, the gate covers durable mapping/state commit only. Validate generation under the controller state lock and keep validation, saving and ready publication together so an exited generation cannot publish stale state.
 

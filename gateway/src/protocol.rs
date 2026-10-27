@@ -112,6 +112,9 @@ impl From<&OperationRecord> for OperationDto {
                         "runtime_stopping" => "Runtime is not accepting commands",
                         "outcome_unknown" => "Command outcome could not be confirmed",
                         "persistence_unavailable" => "Command receipt could not be saved",
+                        "output_persistence_failed" => {
+                            "Command output could not be saved; outcome is unknown"
+                        }
                         "invalid_file" => "Prompt attachment is unavailable or invalid",
                         _ => "Command did not complete successfully",
                     },
