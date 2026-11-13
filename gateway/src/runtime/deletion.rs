@@ -42,7 +42,10 @@ impl SessionDirectory {
                     store.runtime_lease_generation(&lookup)?.is_none(),
                     "runtime_exit_unconfirmed"
                 );
-                ensure!(!store.session_has_pending_operations(&lookup)?, "session_busy");
+                ensure!(
+                    !store.session_has_pending_operations(&lookup)?,
+                    "session_busy"
+                );
                 Ok(())
             })
             .await?;

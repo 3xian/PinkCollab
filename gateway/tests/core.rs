@@ -687,7 +687,12 @@ fn finishing_runtime_is_generation_scoped_and_preserves_terminal_receipts() {
     assert!(store.reserve_runtime("session", "new-generation").unwrap());
     let mut receipts = Vec::new();
     for (index, status) in [
-        "dispatching", "running", "accepted", "succeeded", "failed", "cancelled",
+        "dispatching",
+        "running",
+        "accepted",
+        "succeeded",
+        "failed",
+        "cancelled",
         "outcome_unknown",
     ]
     .into_iter()
@@ -716,7 +721,11 @@ fn finishing_runtime_is_generation_scoped_and_preserves_terminal_receipts() {
     );
     for expected in receipts.iter().chain([&other_generation, &other_session]) {
         let actual = store
-            .operation(&expected.client_id, &expected.session_id, &expected.command_id)
+            .operation(
+                &expected.client_id,
+                &expected.session_id,
+                &expected.command_id,
+            )
             .unwrap()
             .unwrap();
         if expected.session_id == "session"
@@ -798,7 +807,11 @@ fn finishing_runtime_rolls_back_receipts_and_lease_on_storage_failure() {
 fn v11_migration_preserves_unverified_leases_and_linux_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
-    assert!(store.reserve_runtime("session", "legacy-generation").unwrap());
+    assert!(
+        store
+            .reserve_runtime("session", "legacy-generation")
+            .unwrap()
+    );
     drop(store);
     let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
     db.execute_batch(
@@ -835,9 +848,18 @@ fn v11_migration_preserves_unverified_leases_and_linux_metadata() {
         .unwrap();
     assert_eq!(
         legacy,
-        ("legacy-generation".into(), "2026-10-10T00:00:00Z".into(), None, None)
+        (
+            "legacy-generation".into(),
+            "2026-10-10T00:00:00Z".into(),
+            None,
+            None
+        )
     );
-    assert!(store.reserve_runtime("linux-session", "linux-generation").unwrap());
+    assert!(
+        store
+            .reserve_runtime("linux-session", "linux-generation")
+            .unwrap()
+    );
     db.execute(
         "UPDATE runtime_leases SET linux_boot_id=?1,linux_process_group=?2
          WHERE session_id='linux-session' AND generation='linux-generation'",
@@ -848,7 +870,11 @@ fn v11_migration_preserves_unverified_leases_and_linux_metadata() {
     drop(store);
 
     let store = Store::open(dir.path()).unwrap();
-    assert!(!store.reserve_runtime("linux-session", "replacement").unwrap());
+    assert!(
+        !store
+            .reserve_runtime("linux-session", "replacement")
+            .unwrap()
+    );
     let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
     assert_eq!(
         db.query_row(

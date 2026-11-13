@@ -630,11 +630,15 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         ).optional()?)
     }
     pub(crate) fn runtime_lease_generation(&self, session_id: &str) -> Result<Option<String>> {
-        Ok(self.db.lock().query_row(
-            "SELECT generation FROM runtime_leases WHERE session_id=?1",
-            [session_id],
-            |row| row.get(0),
-        ).optional()?)
+        Ok(self
+            .db
+            .lock()
+            .query_row(
+                "SELECT generation FROM runtime_leases WHERE session_id=?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
     pub fn runtime_leases(&self) -> Result<Vec<(String, String)>> {
         let db = self.db.lock();
@@ -913,7 +917,10 @@ fn migrate_linux_runtime_identity(db: &Connection) -> Result<()> {
     db.execute_batch("BEGIN IMMEDIATE;")?;
     let result = (|| -> Result<()> {
         for (column, statement) in [
-            ("linux_boot_id", "ALTER TABLE runtime_leases ADD COLUMN linux_boot_id TEXT;"),
+            (
+                "linux_boot_id",
+                "ALTER TABLE runtime_leases ADD COLUMN linux_boot_id TEXT;",
+            ),
             (
                 "linux_process_group",
                 "ALTER TABLE runtime_leases ADD COLUMN linux_process_group INTEGER;",
