@@ -128,6 +128,11 @@ pub(super) async fn api_delete(
             "session_busy",
             "Exit the session runtime and wait for pending actions before deleting".into(),
         ),
+        crate::runtime::DeleteError::UnconfirmedRuntime => ApiError(
+            StatusCode::CONFLICT,
+            "runtime_exit_unconfirmed",
+            "Old runtime exit is unverified. Check leases on the host before deleting.".into(),
+        ),
         crate::runtime::DeleteError::ExternalBusy => ApiError(
             StatusCode::CONFLICT,
             "external_session_busy",

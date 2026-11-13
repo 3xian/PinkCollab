@@ -1,10 +1,9 @@
 use super::*;
 
 impl Store {
-    pub(crate) fn session_delete_busy(&self, id: &str) -> Result<bool> {
+    pub(crate) fn session_has_pending_operations(&self, id: &str) -> Result<bool> {
         Ok(self.db.lock().query_row(
-            "SELECT EXISTS(SELECT 1 FROM runtime_leases WHERE session_id=?1)
-             OR EXISTS(SELECT 1 FROM operation_records WHERE session_id=?1
+            "SELECT EXISTS(SELECT 1 FROM operation_records WHERE session_id=?1
              AND status IN ('accepted','dispatching','running'))",
             [id],
             |r| r.get(0),

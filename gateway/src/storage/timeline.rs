@@ -289,11 +289,6 @@ mod tests {
                 );
             }
             let db = store.db.lock();
-            assert_eq!(
-                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
-                    .unwrap(),
-                10
-            );
             assert_eq!(db.query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('command_outputs','response_feedback')",
                 [], |r| r.get::<_, i64>(0),

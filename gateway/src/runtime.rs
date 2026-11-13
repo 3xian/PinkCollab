@@ -204,6 +204,7 @@ pub use catalog::SessionCatalogPage;
 mod deletion;
 mod directory;
 pub use deletion::DeleteError;
+mod leases;
 mod lifecycle;
 pub use lifecycle::{CreateError, UploadError};
 mod response;

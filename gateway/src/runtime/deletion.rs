@@ -4,6 +4,7 @@ use std::{fs, io::ErrorKind, path::Path};
 #[derive(Debug)]
 pub enum DeleteError {
     Busy,
+    UnconfirmedRuntime,
     ExternalBusy,
     Failed,
 }
@@ -18,6 +19,8 @@ impl SessionDirectory {
                 DeleteError::ExternalBusy
             } else if error.to_string().contains("session_busy") {
                 DeleteError::Busy
+            } else if error.to_string().contains("runtime_exit_unconfirmed") {
+                DeleteError::UnconfirmedRuntime
             } else {
                 DeleteError::Failed
             }
@@ -25,23 +28,27 @@ impl SessionDirectory {
     }
 
     async fn delete_detached(&self, id: &str) -> Result<()> {
-        let lookup = id.to_owned();
-        ensure!(
-            !self
-                .store
-                .run(move |s| s.session_delete_busy(&lookup))
-                .await?,
-            "session_busy"
-        );
-        let Some(view) = self.view(id).await? else {
-            return Ok(());
-        };
         if let Some(controller) = self.active_controller(id).await {
             ensure!(
                 controller.state.lock().await.runtime.is_none(),
                 "session_busy"
             );
         }
+        let lookup = id.to_owned();
+        self.store
+            .run(move |store| {
+                super::leases::recover(store, &lookup)?;
+                ensure!(
+                    store.runtime_lease_generation(&lookup)?.is_none(),
+                    "runtime_exit_unconfirmed"
+                );
+                ensure!(!store.session_has_pending_operations(&lookup)?, "session_busy");
+                Ok(())
+            })
+            .await?;
+        let Some(view) = self.view(id).await? else {
+            return Ok(());
+        };
         let reference = view.session.engine_session_ref.clone();
         if let Some(reference) = &reference {
             let path = Path::new(reference);

@@ -27,23 +27,12 @@ impl SessionController {
                 return Ok((current.generation.clone(), current.process.clone()));
             }
         }
-        #[cfg(windows)]
-        {
-            let session_id = self.state.lock().await.session.id.clone();
-            self.store
-                .run(move |store| {
-                    if let Some((generation, name)) = store.runtime_job(&session_id)?
-                        && crate::windows_job::Job::absent(&name)?
-                    {
-                        // A named job disappears only after its handles and contained processes
-                        // are gone. Legacy leases have no such proof and remain fail-closed.
-                        store.mark_generation_unknown(&session_id, &generation)?;
-                        store.release_runtime(&session_id, &generation)?;
-                    }
-                    Ok(())
-                })
-                .await?;
-        }
+        let session_id = self.state.lock().await.session.id.clone();
+        self.store
+            .run(move |store| super::leases::recover(store, &session_id))
+            .await?;
+        #[cfg(target_os = "linux")]
+        let boot_id = omp::linux_boot_id()?;
         let permit = self
             .quota
             .clone()
@@ -105,6 +94,34 @@ impl SessionController {
                 return Err(err);
             }
         };
+        #[cfg(target_os = "linux")]
+        {
+            let session_id = session.id.clone();
+            let runtime_generation = generation.clone();
+            let group_id = runtime.process_group_id();
+            if let Err(error) = self
+                .store
+                .run(move |store| {
+                    store.set_runtime_process_group(
+                        &session_id,
+                        &runtime_generation,
+                        &boot_id,
+                        group_id,
+                    )
+                })
+                .await
+            {
+                // No command may reach an untracked process. A failed stop keeps the lease.
+                if runtime.stop_confirmed().await.is_ok() {
+                    let session_id = session.id.clone();
+                    let generation = generation.clone();
+                    self.store
+                        .run(move |store| store.finish_runtime(&session_id, &generation))
+                        .await?;
+                }
+                return Err(error);
+            }
+        }
         {
             let mut state = self.state.lock().await;
             ensure!(state.runtime.is_none(), "runtime started concurrently");
@@ -130,7 +147,6 @@ impl SessionController {
             state.finalized_messages.clear();
             state.pending_tool_arguments.clear();
             state.dirty_messages.clear();
-            state.published_messages.clear();
             state.published_messages.clear();
             state.removed_messages.clear();
             state.display_flush_scheduled = false;

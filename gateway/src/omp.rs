@@ -229,6 +229,38 @@ pub(crate) fn finite_output(
     output
 }
 
+/// Identifies this Linux boot so persisted process groups cannot outlive a reboot.
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_boot_id() -> Result<String> {
+    let mut boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
+        .context("cannot read Linux boot ID")?;
+    boot_id.truncate(boot_id.trim_end().len());
+    let leading = boot_id.len() - boot_id.trim_start().len();
+    boot_id.drain(..leading);
+    ensure!(!boot_id.is_empty(), "Linux boot ID is empty");
+    Ok(boot_id)
+}
+
+/// Proves a persisted runtime is gone without signalling it or ignoring descendants.
+#[cfg(target_os = "linux")]
+pub(crate) fn linux_runtime_exited(boot_id: &str, group_id: i32) -> Result<bool> {
+    ensure!(group_id > 0, "invalid OMP process group ID");
+    ensure!(!boot_id.trim().is_empty(), "missing Linux boot ID");
+    if linux_boot_id()? != boot_id {
+        return Ok(true);
+    }
+    // A leader's exit alone is insufficient. Only ESRCH proves the entire group absent;
+    // unlike termination cleanup, even a group containing only zombies stays fail-closed.
+    if unsafe { libc::killpg(group_id, 0) } == 0 {
+        return Ok(false);
+    }
+    let err = std::io::Error::last_os_error();
+    if err.raw_os_error() == Some(libc::ESRCH) {
+        return Ok(true);
+    }
+    Err(err).context("cannot inspect persisted OMP process group")
+}
+
 #[cfg(unix)]
 fn unix_group_has_live_members(group_id: i32) -> Result<bool> {
     #[cfg(target_os = "macos")]
@@ -417,6 +449,11 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    #[cfg(target_os = "linux")]
+    pub(crate) fn process_group_id(&self) -> i32 {
+        self.process.group_id
+    }
+
     pub fn spawn(
         executable: &str,
         args: &[String],
@@ -837,4 +874,76 @@ pub fn text_content(message: &Value) -> String {
                 .join("\n")
         })
         .unwrap_or_else(|| string(message, "content").to_owned())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_exit_tests {
+    use super::*;
+
+    struct IsolatedChild(Child);
+
+    impl IsolatedChild {
+        fn spawn() -> Self {
+            Self(
+                Command::new("/bin/sh")
+                    .args(["-c", "read line"])
+                    .process_group(0)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .expect("spawn isolated child"),
+            )
+        }
+
+        fn group_id(&self) -> i32 {
+            self.0.id() as i32
+        }
+
+        fn reap(&mut self) {
+            drop(self.0.stdin.take());
+            self.0.wait().expect("reap isolated child");
+        }
+    }
+
+    impl Drop for IsolatedChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[test]
+    fn boot_change_proves_runtime_exited_even_with_live_group() {
+        let child = IsolatedChild::spawn();
+        let old_boot_id = format!("{}-previous", linux_boot_id().unwrap());
+        assert!(linux_runtime_exited(&old_boot_id, child.group_id()).unwrap());
+    }
+
+    #[test]
+    fn invalid_group_cannot_prove_runtime_exited() {
+        let boot_id = linux_boot_id().unwrap();
+        for group_id in [0, -1, i32::MIN] {
+            assert!(linux_runtime_exited(&boot_id, group_id).is_err());
+            assert!(linux_runtime_exited("previous-boot", group_id).is_err());
+        }
+        assert!(linux_runtime_exited("", 1).is_err());
+    }
+
+    #[test]
+    fn live_group_does_not_prove_runtime_exited() {
+        let child = IsolatedChild::spawn();
+        let boot_id = linux_boot_id().unwrap();
+        assert!(!linux_runtime_exited(&boot_id, child.group_id()).unwrap());
+        assert!(child.0.stdin.is_some());
+    }
+
+    #[test]
+    fn reaped_absent_group_proves_runtime_exited() {
+        let mut child = IsolatedChild::spawn();
+        let boot_id = linux_boot_id().unwrap();
+        let group_id = child.group_id();
+        child.reap();
+        assert!(linux_runtime_exited(&boot_id, group_id).unwrap());
+    }
 }

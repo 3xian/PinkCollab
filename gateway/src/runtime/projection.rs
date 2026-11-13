@@ -481,6 +481,16 @@ impl SessionController {
             {
                 return;
             }
+            let cleanup_session = state.session.id.clone();
+            let cleanup_generation = generation.to_owned();
+            if let Err(error) = self
+                .store
+                .run(move |store| store.finish_runtime(&cleanup_session, &cleanup_generation))
+                .await
+            {
+                // Keep the durable lease on failure; OS evidence can reconcile it later.
+                eprintln!("Could not persist confirmed runtime exit: {error:#}");
+            }
             state.runtime = None;
             state.projection = None;
             state.work_clock = None;
@@ -501,22 +511,7 @@ impl SessionController {
             });
             state.session.id.clone()
         };
-        let cleanup_session = session_id.clone();
-        let cleanup_generation = generation.to_owned();
-        let cleanup = self
-            .store
-            .run(move |store| {
-                let unknown = store.mark_generation_unknown(&cleanup_session, &cleanup_generation);
-                let release = store.release_runtime(&cleanup_session, &cleanup_generation);
-                Ok((unknown, release))
-            })
-            .await;
-        if let Ok((Err(err), _)) = &cleanup {
-            eprintln!("Could not mark exited runtime operations uncertain: {err}");
-        }
-        if let Ok((_, Err(err))) = cleanup {
-            eprintln!("Could not release confirmed runtime lease: {err}");
-        }
+        drop(state);
         if let Ok(operations) = self
             .store
             .run(move |store| store.recent_operations(&session_id, 20))

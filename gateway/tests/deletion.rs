@@ -65,6 +65,19 @@ async fn stop_survives_unreadable_session_records_and_unwritable_receipts() {
         ALTER TABLE hidden_operations RENAME TO operation_records;",
     )
     .unwrap();
+    // Exit was confirmed while persistence was unavailable. Deletion must reconcile
+    // the retained lease once storage returns, rather than demand another runtime stop.
+    #[cfg(any(windows, target_os = "linux"))]
+    assert_eq!(
+        client
+            .delete(&session)
+            .bearer_auth(&credential)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        204
+    );
 }
 
 #[tokio::test]
@@ -370,15 +383,16 @@ async fn missing_expected_history_and_stale_runtime_leases_remain_safe_to_handle
     let session = create_session(&client, &harness, &credential, &harness.cwd("missing")).await;
     let id = session.rsplit('/').next().unwrap();
     harness.store.reserve_runtime(id, "old-generation").unwrap();
+    let blocked = client
+        .delete(&session)
+        .bearer_auth(&credential)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(blocked.status(), 409);
     assert_eq!(
-        client
-            .delete(&session)
-            .bearer_auth(&credential)
-            .send()
-            .await
-            .unwrap()
-            .status(),
-        409
+        blocked.json::<Value>().await.unwrap()["code"],
+        "runtime_exit_unconfirmed"
     );
     harness.store.release_runtime(id, "old-generation").unwrap();
     let missing = workspace::display(&files.path().join("absent/directory/history.jsonl"));

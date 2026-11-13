@@ -174,7 +174,7 @@ pub fn clear_lease(
         .context("stop the Gateway before clearing a runtime lease")?;
     let store = Store::open(dir)?;
     ensure!(
-        store.release_runtime(session, generation)?,
+        store.finish_runtime(session, generation)?,
         "no matching runtime lease"
     );
     println!("Cleared lease for {session} {generation}");

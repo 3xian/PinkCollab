@@ -246,10 +246,5 @@ mod tests {
         )
         .unwrap();
         assert_ne!(store.catalog_ledger().unwrap().version(), version);
-        assert_eq!(
-            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
-                .unwrap(),
-            10
-        );
     }
 }

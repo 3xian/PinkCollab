@@ -93,7 +93,7 @@ impl Store {
         db.execute_batch("PRAGMA journal_mode=WAL;")?;
         let schema_version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         ensure!(
-            schema_version <= 10,
+            schema_version <= 11,
             "database schema is newer than this Gateway"
         );
         if existing && schema_version < 2 {
@@ -163,6 +163,9 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
         }
         if schema_version < 10 {
             timeline::migrate(&db)?;
+        }
+        if schema_version < 11 {
+            migrate_linux_runtime_identity(&db)?;
         }
         Ok(Self {
             db: Mutex::new(db),
@@ -522,12 +525,20 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
             .collect()
     }
 
-    pub fn mark_generation_unknown(&self, session_id: &str, generation: &str) -> Result<()> {
-        self.db.lock().execute(
+    /// Fence unfinished receipts and release their runtime lease as one durable change.
+    pub fn finish_runtime(&self, session_id: &str, generation: &str) -> Result<bool> {
+        let mut db = self.db.lock();
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute(
             "UPDATE operation_records SET status='outcome_unknown',error='{\"code\":\"runtime_exited_before_result\"}',updated_at=?1 WHERE session_id=?2 AND runtime_generation=?3 AND status IN ('dispatching','running')",
-            params![Utc::now().to_rfc3339(),session_id,generation],
+            params![Utc::now().to_rfc3339(), session_id, generation],
         )?;
-        Ok(())
+        let released = tx.execute(
+            "DELETE FROM runtime_leases WHERE session_id=?1 AND generation=?2",
+            params![session_id, generation],
+        )? == 1;
+        tx.commit()?;
+        Ok(released)
     }
 
     /// Fence receipts for a generation whose local output could not be saved.
@@ -590,6 +601,39 @@ CREATE TABLE IF NOT EXISTS pairing (token_hash TEXT PRIMARY KEY,expires_at INTEG
             "SELECT generation,windows_job_name FROM runtime_leases WHERE session_id=?1 AND windows_job_name IS NOT NULL",
             [session_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?)
+    }
+    #[cfg(target_os = "linux")]
+    pub(crate) fn set_runtime_process_group(
+        &self,
+        session_id: &str,
+        generation: &str,
+        boot_id: &str,
+        group_id: i32,
+    ) -> Result<()> {
+        let changed = self.db.lock().execute(
+            "UPDATE runtime_leases SET linux_boot_id=?1,linux_process_group=?2 WHERE session_id=?3 AND generation=?4",
+            params![boot_id, group_id, session_id, generation],
+        )?;
+        ensure!(changed == 1, "runtime lease generation no longer reserved");
+        Ok(())
+    }
+    #[cfg(target_os = "linux")]
+    pub(crate) fn runtime_process_group(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<(String, String, i32)>> {
+        Ok(self.db.lock().query_row(
+            "SELECT generation,linux_boot_id,linux_process_group FROM runtime_leases WHERE session_id=?1 AND linux_boot_id IS NOT NULL AND linux_process_group IS NOT NULL",
+            [session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?)
+    }
+    pub(crate) fn runtime_lease_generation(&self, session_id: &str) -> Result<Option<String>> {
+        Ok(self.db.lock().query_row(
+            "SELECT generation FROM runtime_leases WHERE session_id=?1",
+            [session_id],
+            |row| row.get(0),
         ).optional()?)
     }
     pub fn runtime_leases(&self) -> Result<Vec<(String, String)>> {
@@ -861,6 +905,88 @@ fn migrate_v2(db: &Connection) -> Result<()> {
         Err(err) => {
             let _ = db.execute_batch("ROLLBACK;");
             Err(err)
+        }
+    }
+}
+
+fn migrate_linux_runtime_identity(db: &Connection) -> Result<()> {
+    db.execute_batch("BEGIN IMMEDIATE;")?;
+    let result = (|| -> Result<()> {
+        for (column, statement) in [
+            ("linux_boot_id", "ALTER TABLE runtime_leases ADD COLUMN linux_boot_id TEXT;"),
+            (
+                "linux_process_group",
+                "ALTER TABLE runtime_leases ADD COLUMN linux_process_group INTEGER;",
+            ),
+        ] {
+            if db.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('runtime_leases') WHERE name=?1",
+                [column],
+                |row| row.get::<_, i64>(0),
+            )? == 0
+            {
+                db.execute_batch(statement)?;
+            }
+        }
+        db.execute_batch("PRAGMA user_version=11;")?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => db.execute_batch("COMMIT;").map_err(Into::into),
+        Err(error) => {
+            let _ = db.execute_batch("ROLLBACK;");
+            Err(error)
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_runtime_identity_tests {
+    use super::*;
+
+    #[test]
+    fn process_group_identity_requires_exact_lease_and_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert!(store.runtime_process_group("missing").unwrap().is_none());
+        assert!(
+            store
+                .set_runtime_process_group("missing", "generation", "boot", 123)
+                .is_err()
+        );
+        assert!(store.reserve_runtime("session", "generation").unwrap());
+        assert!(store.runtime_process_group("session").unwrap().is_none());
+        assert!(
+            store
+                .set_runtime_process_group("session", "other-generation", "boot", 123)
+                .is_err()
+        );
+        assert!(store.runtime_process_group("session").unwrap().is_none());
+        store
+            .set_runtime_process_group("session", "generation", "boot", 123)
+            .unwrap();
+        drop(store);
+
+        let store = Store::open(dir.path()).unwrap();
+        assert_eq!(
+            store.runtime_process_group("session").unwrap(),
+            Some(("generation".into(), "boot".into(), 123))
+        );
+        assert!(
+            store
+                .set_runtime_process_group("session", "other-generation", "other-boot", 456)
+                .is_err()
+        );
+        assert_eq!(
+            store.runtime_process_group("session").unwrap(),
+            Some(("generation".into(), "boot".into(), 123))
+        );
+        for statement in [
+            "UPDATE runtime_leases SET linux_boot_id=NULL",
+            "UPDATE runtime_leases SET linux_boot_id='boot',linux_process_group=NULL",
+        ] {
+            store.db.lock().execute_batch(statement).unwrap();
+            assert!(store.runtime_process_group("session").unwrap().is_none());
         }
     }
 }

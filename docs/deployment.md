@@ -276,6 +276,20 @@ The default data directory is `~/.pinkcollab` (`./.pinkcollab` if no home direct
 
 For an existing manual configuration, use `service install`, `service start`, then `doctor` instead of writing your own service definition. Use the same user and data directory as `init`.
 
+### Recover an inactive session blocked by a lease
+
+`Inactive` means no runtime is attached to this Gateway; it does not prove an old process and its descendants have exited. Startup and deletion recover recorded Windows jobs and Linux process groups automatically when the OS proves they are gone. Linux leases also recover after a reboot. Legacy leases without process identity remain blocked with `runtime_exit_unconfirmed`.
+
+For a legacy lease, run `pinkcollab leases` on the affected host using the same OS user and data directory. Verify that the old OMP process **and its descendants** have exited, stop the Gateway, and back up its data. Then clear only the matching session and generation:
+
+```sh
+pinkcollab clear-lease --session <session-id> --generation <generation-id> --verified-exited
+pinkcollab service start
+```
+
+This releases the verified lease and settles its unfinished operation receipts; it does not delete conversation history or project files. Retry deletion in Android afterward. Never clear all leases or infer exit solely from age, an inactive card, or an absent parent process.
+
+
 ### Configuration
 
 File: `<data-dir>/config.yaml`. See [the example](../gateway/config.example.yaml). Unknown keys are rejected. Before editing, finish active work and stop the service; after editing, rerun setup with your chosen transport, then run `doctor`. Setup merges workspace roots; remove unwanted roots by editing `workspaces` rather than rerunning setup with fewer flags.

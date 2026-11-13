@@ -681,6 +681,193 @@ fn runtime_lease_requires_the_exact_generation_to_clear() {
 }
 
 #[test]
+fn finishing_runtime_is_generation_scoped_and_preserves_terminal_receipts() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    assert!(store.reserve_runtime("session", "new-generation").unwrap());
+    let mut receipts = Vec::new();
+    for (index, status) in [
+        "dispatching", "running", "accepted", "succeeded", "failed", "cancelled",
+        "outcome_unknown",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut receipt = operation_receipt(index as i64);
+        receipt.runtime_generation = Some("old-generation".into());
+        receipt.status = status.into();
+        store.insert_operation(&receipt).unwrap();
+        receipts.push(receipt);
+    }
+    let mut other_generation = operation_receipt(10);
+    other_generation.runtime_generation = Some("new-generation".into());
+    other_generation.status = "running".into();
+    store.insert_operation(&other_generation).unwrap();
+    let mut other_session = operation_receipt(11);
+    other_session.session_id = "other-session".into();
+    other_session.runtime_generation = Some("old-generation".into());
+    other_session.status = "dispatching".into();
+    store.insert_operation(&other_session).unwrap();
+
+    assert!(!store.finish_runtime("session", "old-generation").unwrap());
+    assert_eq!(
+        store.runtime_leases().unwrap(),
+        vec![("session".into(), "new-generation".into())]
+    );
+    for expected in receipts.iter().chain([&other_generation, &other_session]) {
+        let actual = store
+            .operation(&expected.client_id, &expected.session_id, &expected.command_id)
+            .unwrap()
+            .unwrap();
+        if expected.session_id == "session"
+            && expected.runtime_generation.as_deref() == Some("old-generation")
+            && matches!(expected.status.as_str(), "dispatching" | "running")
+        {
+            assert_eq!(actual.status, "outcome_unknown");
+            assert_eq!(
+                actual.error,
+                Some(json!({"code": "runtime_exited_before_result"}))
+            );
+            assert_eq!(actual.runtime_generation, expected.runtime_generation);
+            assert_eq!(actual.result, expected.result);
+        } else {
+            assert_eq!(actual.status, expected.status);
+            assert_eq!(actual.error, expected.error);
+            assert_eq!(actual.result, expected.result);
+            assert_eq!(actual.updated_at, expected.updated_at);
+            assert_eq!(actual.runtime_generation, expected.runtime_generation);
+        }
+    }
+    assert!(store.finish_runtime("session", "new-generation").unwrap());
+    assert!(store.runtime_leases().unwrap().is_empty());
+    let finished = store
+        .operation(
+            &other_generation.client_id,
+            "session",
+            &other_generation.command_id,
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(finished.status, "outcome_unknown");
+    assert_eq!(
+        finished.error,
+        Some(json!({"code": "runtime_exited_before_result"}))
+    );
+    assert!(!store.finish_runtime("session", "new-generation").unwrap());
+}
+
+#[test]
+fn finishing_runtime_rolls_back_receipts_and_lease_on_storage_failure() {
+    for failure in [
+        // FAIL retains the triggering statement's earlier changes unless the transaction rolls back.
+        "CREATE TRIGGER fail_finish AFTER UPDATE ON operation_records
+         BEGIN SELECT RAISE(FAIL, 'operation update failed'); END;",
+        "CREATE TRIGGER fail_finish BEFORE DELETE ON runtime_leases
+         BEGIN SELECT RAISE(FAIL, 'lease delete failed'); END;",
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        assert!(store.reserve_runtime("session", "generation").unwrap());
+        let mut receipt = operation_receipt(0);
+        receipt.status = "running".into();
+        store.insert_operation(&receipt).unwrap();
+        let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+        db.execute_batch(failure).unwrap();
+
+        assert!(store.finish_runtime("session", "generation").is_err());
+        assert_eq!(
+            store.runtime_leases().unwrap(),
+            vec![("session".into(), "generation".into())]
+        );
+        let actual = store
+            .operation(&receipt.client_id, "session", &receipt.command_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(actual.status, receipt.status);
+        assert_eq!(actual.error, receipt.error);
+        assert_eq!(actual.result, receipt.result);
+        assert_eq!(actual.updated_at, receipt.updated_at);
+        assert_eq!(actual.runtime_generation, receipt.runtime_generation);
+        db.execute_batch("DROP TRIGGER fail_finish;").unwrap();
+        assert!(store.finish_runtime("session", "generation").unwrap());
+        assert!(store.runtime_leases().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn v11_migration_preserves_unverified_leases_and_linux_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    assert!(store.reserve_runtime("session", "legacy-generation").unwrap());
+    drop(store);
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    db.execute_batch(
+        "ALTER TABLE runtime_leases DROP COLUMN linux_boot_id;
+         ALTER TABLE runtime_leases DROP COLUMN linux_process_group;
+         UPDATE runtime_leases SET created_at='2026-10-10T00:00:00Z';
+         PRAGMA user_version=10;",
+    )
+    .unwrap();
+    drop(db);
+
+    let store = Store::open(dir.path()).unwrap();
+    assert!(!store.reserve_runtime("session", "replacement").unwrap());
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        11
+    );
+    let legacy = db
+        .query_row(
+            "SELECT generation,created_at,linux_boot_id,linux_process_group
+             FROM runtime_leases WHERE session_id='session'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i32>>(3)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        legacy,
+        ("legacy-generation".into(), "2026-10-10T00:00:00Z".into(), None, None)
+    );
+    assert!(store.reserve_runtime("linux-session", "linux-generation").unwrap());
+    db.execute(
+        "UPDATE runtime_leases SET linux_boot_id=?1,linux_process_group=?2
+         WHERE session_id='linux-session' AND generation='linux-generation'",
+        rusqlite::params!["recorded-boot", 12345],
+    )
+    .unwrap();
+    drop(db);
+    drop(store);
+
+    let store = Store::open(dir.path()).unwrap();
+    assert!(!store.reserve_runtime("linux-session", "replacement").unwrap());
+    let db = Connection::open(dir.path().join("pinkcollab.db")).unwrap();
+    assert_eq!(
+        db.query_row(
+            "SELECT generation,linux_boot_id,linux_process_group
+             FROM runtime_leases WHERE session_id='linux-session'",
+            [],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i32>(2)?,
+            )),
+        )
+        .unwrap(),
+        ("linux-generation".into(), "recorded-boot".into(), 12345)
+    );
+    assert!(!store.reserve_runtime("session", "replacement").unwrap());
+}
+
+#[test]
 fn upgrading_preserves_unverified_runtime_leases() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
