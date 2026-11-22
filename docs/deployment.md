@@ -121,7 +121,9 @@ pinkcollab update
 pinkcollab doctor
 ```
 
-For a specific APK release, use `pinkcollab@X.Y.Z` instead of `@latest`. `update` requires an existing configuration and installed background startup. It does not change workspaces, the public URL, transport, or pairings, and it does not prompt. A changed running Gateway restarts and ends active OMP runtimes. An identical installation does not restart. A stopped Gateway is updated on disk and left stopped unless the installer is completing an interrupted restart or reloading a still-loaded macOS launchd agent. Whenever the installer starts the Gateway, `update` waits for local health before reporting success. Otherwise, start it with `pinkcollab service start`.
+For a specific APK release, use `pinkcollab@X.Y.Z` instead of `@latest`. `update` requires an existing configuration and installed background startup. It updates the installation on disk without changing workspaces, the public URL, transport, or pairings.
+
+After a successful update, even if the installation was already current, `update` asks whether to restart the Gateway (or start it if stopped). Answer `y` or `yes` to activate it and wait for local health. Restarting ends active OMP runtimes. Press Enter, answer `n`, or close stdin to leave the service as it is. To activate the update later, run `pinkcollab service restart`.
 
 Changing workspaces, transport, or the OMP launcher still uses `pinkcollab setup`. External HTTPS setup must keep `--transport external --public-url https://collab.example.com`. `service install` only registers startup that is not installed yet.
 

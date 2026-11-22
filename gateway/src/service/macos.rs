@@ -55,7 +55,7 @@ impl Manager<'_> {
     }
 }
 impl ServiceManager for Manager<'_> {
-    fn install(&self) -> Result<InstallReport> {
+    fn install_with(&self, activation: Activation) -> Result<InstallReport> {
         let i = self.installation;
         let fresh = !i.definition.try_exists()?;
         i.check_owner()?;
@@ -70,7 +70,9 @@ impl ServiceManager for Manager<'_> {
                 resumed: false,
             });
         }
-        update.resume |= self.loaded()?;
+        if activation == Activation::Automatic {
+            update.resume |= self.loaded()?;
+        }
         let outcome = if fresh {
             InstallOutcome::Installed
         } else {
@@ -80,11 +82,11 @@ impl ServiceManager for Manager<'_> {
         update.begin()?;
         update.stage_binary()?;
         i.write_definition(&definition)?;
-        if update.resume {
+        let resumed = update.resume && activation == Activation::Automatic;
+        if resumed {
             self.stop()?;
             self.start()?;
         }
-        let resumed = update.resume;
         update.commit()?;
         Ok(InstallReport { outcome, resumed })
     }
@@ -160,10 +162,10 @@ mod tests {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod manager_tests {
     use super::*;
-    use std::{cell::RefCell, os::unix::process::ExitStatusExt};
+    use std::cell::RefCell;
     #[derive(Default)]
     struct Mock {
         calls: RefCell<Vec<String>>,
@@ -179,7 +181,7 @@ mod manager_tests {
                 anyhow::bail!("injected bootout failure");
             }
             Ok(Output {
-                status: std::process::ExitStatus::from_raw(0),
+                status: std::process::ExitStatus::default(),
                 stdout: if program == "id" {
                     b"501\n".to_vec()
                 } else if self.stopped.get() {
@@ -269,5 +271,10 @@ mod manager_tests {
             report.resumed,
             "loaded job was activated despite its stopped snapshot"
         );
+        runner.calls.borrow_mut().clear();
+        std::fs::write(&installation.definition, "old definition").unwrap();
+        let report = manager.install_with(Activation::Deferred).unwrap();
+        assert_eq!(report.outcome, InstallOutcome::Updated);
+        assert!(runner.calls.borrow().is_empty());
     }
 }

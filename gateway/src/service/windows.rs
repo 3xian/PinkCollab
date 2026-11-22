@@ -19,6 +19,41 @@ enum Backend {
     Missing,
 }
 
+pub(super) fn replace_binary(staged: &Path, installed: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+    match std::fs::rename(staged, installed) {
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {}
+        result => return result,
+    }
+    // A mapped executable cannot be unlinked. Keep its image at a bounded backup
+    // path while publishing the replacement at the stable startup path.
+    let wide = |p: &Path| {
+        p.as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>()
+    };
+    let backup = wide(&installed.with_extension("previous"));
+    let installed = wide(installed);
+    let staged = wide(staged);
+    let ok = unsafe {
+        ReplaceFileW(
+            installed.as_ptr(),
+            staged.as_ptr(),
+            backup.as_ptr(),
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
+    };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 fn environment(path: &str) -> Result<String> {
     let values = ["HOME", "APPDATA", "LOCALAPPDATA"]
         .into_iter()
@@ -119,15 +154,23 @@ impl ServiceManager for Manager<'_> {
         println!("Windows background Gateway: starts at user login; no password required.");
         Ok(())
     }
-    fn install(&self) -> Result<InstallReport> {
+    fn install_with(&self, activation: Activation) -> Result<InstallReport> {
         let i = self.installation;
-        self.preflight(false)?;
+        if activation == Activation::Automatic {
+            self.preflight(false)?;
+        } else {
+            i.check_owner()?;
+            ensure!(
+                self.legacy(ServiceAccess::empty())?.is_none(),
+                "Run pinkcollab setup once in an Administrator terminal to migrate the old Windows service."
+            );
+        }
         let state = self.status()?;
         let environment = environment(&i.path)?;
         let definition = self.definition();
         let update = i.update(
             &format!("{definition}\n{environment}"),
-            state == ServiceStatus::Running,
+            activation == Activation::Automatic && state == ServiceStatus::Running,
         )?;
         let definition_bytes = windows_ux::startup_bytes(&definition);
         let definition_same =
@@ -137,7 +180,8 @@ impl ServiceManager for Manager<'_> {
         if !update.changed
             && definition_same
             && environment_same
-            && self.legacy(ServiceAccess::empty())?.is_none()
+            && (activation == Activation::Deferred
+                || self.legacy(ServiceAccess::empty())?.is_none())
         {
             return Ok(InstallReport {
                 outcome: InstallOutcome::Unchanged,
@@ -151,8 +195,10 @@ impl ServiceManager for Manager<'_> {
         };
         outcome.progress();
         update.begin()?;
-        self.migrate()?;
-        self.stop()?;
+        if activation == Activation::Automatic {
+            self.migrate()?;
+            self.stop()?;
+        }
         update.stage_binary()?;
         storage::replace_private_file(
             &i.dir.join("service-environment.json"),
@@ -162,10 +208,10 @@ impl ServiceManager for Manager<'_> {
         if !definition_same {
             storage::replace_private_file(&i.definition, &definition_bytes)?;
         }
-        if update.resume {
+        let resumed = update.resume && activation == Activation::Automatic;
+        if resumed {
             self.start()?;
         }
-        let resumed = update.resume;
         update.commit()?;
         Ok(InstallReport { outcome, resumed })
     }
@@ -222,7 +268,12 @@ impl ServiceManager for Manager<'_> {
             Backend::Desktop => crate::windows::stop(&self.installation.dir),
             Backend::Legacy(service) => stop_legacy(&service),
             Backend::Missing => Ok(()),
+        }?;
+        if self.installation.binary.is_file() {
+            // Another CLI may still have the old image open; cleanup can wait.
+            let _ = std::fs::remove_file(self.installation.binary.with_extension("previous"));
         }
+        Ok(())
     }
     fn status(&self) -> Result<ServiceStatus> {
         Ok(match self.backend(ServiceAccess::empty())? {

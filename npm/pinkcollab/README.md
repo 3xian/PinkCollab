@@ -44,6 +44,6 @@ pinkcollab update
 pinkcollab doctor
 ```
 
-`update` applies this CLI to the installed background Gateway without changing configuration. A changed running Gateway restarts, ending active OMP runtimes while preserving sessions and pairings. A stopped Gateway stays stopped unless completing an interrupted restart or reloading a still-loaded macOS agent. Use `pinkcollab service start` when needed. If an update fails, fix the error and rerun it; pending updates are retried.
+`update` applies this CLI to the installed background Gateway without changing configuration, then asks whether to restart it (or start it if stopped). Answer `y` to proceed; restarting ends active OMP runtimes but preserves stored sessions and pairings. Press Enter to leave the service as it is. To activate the update later, run `pinkcollab service restart`.
 
 `doctor` should show matching CLI and installed-binary hashes. Use `pinkcollab status` for operational status and `pinkcollab pair` to pair another phone.

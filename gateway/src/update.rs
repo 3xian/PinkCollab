@@ -1,9 +1,12 @@
 //! Apply the current CLI without running configuration or pairing setup.
 use anyhow::{Context, Result, ensure};
 use pinkcollab_gateway::config::Config;
-use std::path::Path;
+use std::{
+    io::{self, Write},
+    path::Path,
+};
 
-use crate::service::{self, InstallOutcome, ServiceStatus};
+use crate::service::{self, Activation, ServiceStatus};
 
 pub async fn run(dir: &Path) -> Result<()> {
     if !dir.join("config.yaml").try_exists()? {
@@ -14,30 +17,31 @@ pub async fn run(dir: &Path) -> Result<()> {
     let installation = service::Installation::new(dir)?;
     installation.check_owner()?;
     let manager = service::manager(&installation);
-    let before = manager.status().context(
+    let status = manager.status().context(
         "The background service needs attention. Run pinkcollab service status for details.",
     )?;
     ensure!(
-        before != ServiceStatus::NotInstalled,
+        status != ServiceStatus::NotInstalled,
         "Background startup is not installed. Run pinkcollab service install, then pinkcollab service start."
     );
-    let report = manager.install()?;
+    let report = manager.install_with(Activation::Deferred)?;
+    debug_assert!(!report.resumed);
     println!("{}", report.outcome.message());
-    if report.resumed {
-        if before == ServiceStatus::Running {
-            println!(
-                "Restarted the Gateway. Active OMP runtimes were stopped; stored sessions and pairings remain."
-            );
-        } else {
-            println!("Started the Gateway.");
-        }
-        crate::health::wait(config.listen).await?;
-        println!("✓ Gateway running");
-    } else if report.outcome != InstallOutcome::Unchanged {
+    println!("Restarting stops active OMP runtimes. A stopped Gateway will start.");
+    print!("Restart the Gateway service now? [y/N] ");
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    let answer = answer.trim();
+    if !answer.eq_ignore_ascii_case("y") && !answer.eq_ignore_ascii_case("yes") {
         println!(
-            "Updated the installed binary without starting the Gateway. Run pinkcollab service start to use it."
+            "Skipped. To activate the installed Gateway later, run pinkcollab service restart."
         );
+        return Ok(());
     }
+    manager.restart()?;
+    crate::health::wait(config.listen).await?;
+    println!("✓ Gateway running");
     Ok(())
 }
 

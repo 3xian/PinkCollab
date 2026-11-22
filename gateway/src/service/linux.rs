@@ -25,11 +25,12 @@ fn render(i: &Installation) -> String {
     )
 }
 impl ServiceManager for Manager<'_> {
-    fn install(&self) -> Result<InstallReport> {
+    fn install_with(&self, activation: Activation) -> Result<InstallReport> {
         let i = self.installation;
         let fresh = !i.definition.try_exists()?;
         i.check_owner()?;
-        let running = self.status()? == ServiceStatus::Running;
+        let running =
+            activation == Activation::Automatic && self.status()? == ServiceStatus::Running;
         let definition = render(i);
         let update = i.update(&definition, running)?;
         if !update.changed
@@ -55,10 +56,10 @@ impl ServiceManager for Manager<'_> {
             "systemctl",
             &["--user", "enable", "pinkcollab"],
         )?;
-        if update.resume {
+        let resumed = update.resume && activation == Activation::Automatic;
+        if resumed {
             self.restart()?;
         }
-        let resumed = update.resume;
         update.commit()?;
         Ok(InstallReport { outcome, resumed })
     }
@@ -122,10 +123,10 @@ mod tests {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod manager_tests {
     use super::*;
-    use std::{cell::RefCell, os::unix::process::ExitStatusExt};
+    use std::cell::RefCell;
     #[derive(Default)]
     struct Mock {
         calls: RefCell<Vec<String>>,
@@ -137,7 +138,7 @@ mod manager_tests {
                 .borrow_mut()
                 .push(format!("{program} {}", args.join(" ")));
             Ok(Output {
-                status: std::process::ExitStatus::from_raw(0),
+                status: std::process::ExitStatus::default(),
                 stdout: if self.stopped.get() {
                     b"inactive\n".to_vec()
                 } else {
@@ -181,8 +182,17 @@ mod manager_tests {
         let report = manager.install().unwrap();
         assert_eq!(report.outcome, InstallOutcome::Updated);
         assert!(report.resumed);
+        runner.calls.borrow_mut().clear();
         std::fs::write(&installation.definition, "changed definition").unwrap();
-        assert_eq!(manager.install().unwrap().outcome, InstallOutcome::Updated);
+        let report = manager.install_with(Activation::Deferred).unwrap();
+        assert_eq!(report.outcome, InstallOutcome::Updated);
+        assert!(
+            runner
+                .calls
+                .borrow()
+                .iter()
+                .all(|c| !c.contains("stop") && !c.contains("start"))
+        );
         assert_eq!(manager.status().unwrap(), ServiceStatus::Running);
     }
     #[test]

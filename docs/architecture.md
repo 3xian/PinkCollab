@@ -15,7 +15,7 @@ flowchart LR
 
 Windows runs the Gateway as a detached process under the logged-in desktop user. Installation copies the executable to a stable user directory and writes a hidden Startup-folder launcher; no service account credentials are stored. Login starts it, closing the terminal or locking the screen leaves it running, and logout ends it. A named event prevents duplicate instances for the same data directory and signals graceful shutdown. The process record includes its creation time so a reused PID cannot identify an unrelated process. Existing Windows services are removed during an ownership-checked migration. macOS uses a launchd user agent; Linux uses a systemd user service. See [deployment](deployment.md#run-as-a-background-service) for management and migration.
 
-The platform installer owns activation and reports whether it started the Gateway. The `update` command uses that result to wait for local readiness; it does not infer activation from before/after service-status snapshots. A durable pending record retains activation intent across interrupted updates. Configuration and pairing remain in `setup`, not the update flow.
+Setup lets the platform installer resume the Gateway, with a durable pending record for interrupted installations. `update` stages the binary and startup definition without changing the running process. Only after staging succeeds does it ask whether to restart the service. On confirmation it restarts and waits for local readiness; otherwise the installed changes take effect on a later start. Configuration and pairing remain in `setup`.
 
 ## Three lifecycles
 

@@ -53,7 +53,7 @@ enum Commands {
         #[arg(long)]
         omp: Option<String>,
     },
-    /// Apply this CLI to an installed background Gateway without changing configuration.
+    /// Apply this CLI without changing configuration, then ask whether to restart the Gateway.
     #[command(display_order = 0)]
     Update,
     /// Manage the background Gateway.

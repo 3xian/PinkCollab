@@ -2,8 +2,9 @@
 //! Exercise desktop lifecycle without registering startup or touching any real Windows service.
 use pinkcollab_gateway::config::Config;
 use std::{
-    path::PathBuf,
-    process::Command,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
@@ -73,7 +74,10 @@ impl Desktop {
         }
     }
     fn command(&self) -> Command {
-        let mut command = Command::new(&self.executable);
+        self.command_from(&self.executable)
+    }
+    fn command_from(&self, executable: &Path) -> Command {
+        let mut command = Command::new(executable);
         command
             .current_dir(self.root.path())
             .arg("--data-dir")
@@ -185,6 +189,64 @@ async fn login_launcher_starts_once_and_graceful_stop_preserves_data() {
         process,
         std::fs::read(desktop.data.join("gateway-process.json")).unwrap()
     );
+}
+
+#[tokio::test]
+async fn update_stages_running_binary_and_restarts_only_on_yes() {
+    let desktop = Desktop::new();
+    let release = Path::new(env!("CARGO_BIN_EXE_gateway-fixture"));
+    let release_len = std::fs::metadata(release).unwrap().len();
+    // A PE overlay changes the installed bytes without changing how the fixture runs.
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&desktop.executable)
+        .unwrap()
+        .write_all(b"old fixture release")
+        .unwrap();
+    let started = desktop.service("start");
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let marker = desktop.data.join("gateway-process.json");
+    let original = std::fs::read(&marker).unwrap();
+    let update = |answer: &[u8]| {
+        let mut child = desktop
+            .command_from(release)
+            .arg("update")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(answer).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+
+    update(b"n\n");
+    assert_eq!(
+        std::fs::metadata(&desktop.executable).unwrap().len(),
+        release_len
+    );
+    assert_eq!(std::fs::read(&marker).unwrap(), original);
+    assert!(desktop.healthy().await);
+
+    // The release is now unchanged; consent must still restart the old process.
+    update(b"yes\n");
+    assert_ne!(std::fs::read(&marker).unwrap(), original);
+    assert!(desktop.healthy().await);
+
+    assert!(desktop.service("stop").status.success());
+    update(b"");
+    assert!(!marker.exists());
+    assert!(!desktop.healthy().await);
 }
 
 #[tokio::test]

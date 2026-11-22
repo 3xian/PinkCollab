@@ -82,7 +82,7 @@ If connection or prompts fail, run `pinkcollab doctor` and see [setup troublesho
 | Update the Gateway | `pinkcollab update` |
 | Add project roots | `pinkcollab setup --workspace /path/to/code --workspace /path/to/work` |
 
-To upgrade, finish active work, install the APK and CLI from the same release, then run `pinkcollab update`. A required restart ends active OMP runtimes; configuration, stored sessions, and pairings remain. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations) for version verification and stopped-service behavior.
+To upgrade, install the APK and CLI from the same release, then run `pinkcollab update`. It asks before restarting the Gateway. Wait until active work finishes before answering `y`: restarting ends active OMP runtimes but preserves configuration, stored sessions, and pairings. See [upgrade checks](docs/deployment.md#upgrade-checks-and-duplicate-installations).
 
 ## Keep in mind
 

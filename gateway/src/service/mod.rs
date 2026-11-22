@@ -91,12 +91,21 @@ fn ensure_fresh_install(status: &ServiceStatus) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Activation {
+    Automatic,
+    Deferred,
+}
+
 pub trait ServiceManager {
     fn preflight(&self, _non_interactive: bool) -> Result<()> {
         Ok(())
     }
 
-    fn install(&self) -> Result<InstallReport>;
+    fn install(&self) -> Result<InstallReport> {
+        self.install_with(Activation::Automatic)
+    }
+    fn install_with(&self, activation: Activation) -> Result<InstallReport>;
     fn uninstall(&self) -> Result<()>;
     fn start(&self) -> Result<()>;
     fn stop(&self) -> Result<()>;
@@ -255,8 +264,11 @@ impl Installation {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o700))?;
         }
-        std::fs::rename(&temporary, &self.binary)
-            .context("cannot update stable Gateway binary; stop the service and retry")?;
+        #[cfg(windows)]
+        let replaced = windows::replace_binary(&temporary, &self.binary);
+        #[cfg(not(windows))]
+        let replaced = std::fs::rename(&temporary, &self.binary);
+        replaced.context("cannot update stable Gateway binary; stop the service and retry")?;
         Ok(())
     }
     #[cfg(any(unix, test))]
