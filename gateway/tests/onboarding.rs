@@ -1,5 +1,8 @@
 //! CLI regressions use temporary homes and fake tools, never the user's service manager.
 #![cfg(unix)]
+#[path = "support/update_confirmation.rs"]
+mod update_confirmation;
+
 use pinkcollab_gateway::{config::Config, storage::Store};
 use std::{
     io::{Read, Write},
@@ -648,6 +651,30 @@ fn bare_fresh_is_read_only_and_version_is_branded() {
     );
 }
 
+// Seed the ownership record and service definition without registering a user service.
+fn managed_service(home: &Path, data: &Path) -> (PathBuf, PathBuf) {
+    #[cfg(target_os = "macos")]
+    let (base, definition) = (
+        home.join("Library/Application Support/PinkCollab"),
+        home.join("Library/LaunchAgents/dev.pinkcollab.gateway.plist"),
+    );
+    #[cfg(target_os = "linux")]
+    let (base, definition) = (
+        home.join(".local/share/pinkcollab"),
+        home.join(".config/systemd/user/pinkcollab.service"),
+    );
+    std::fs::create_dir_all(base.join("bin")).unwrap();
+    std::fs::create_dir_all(definition.parent().unwrap()).unwrap();
+    std::fs::write(&definition, "fake old definition").unwrap();
+    std::fs::write(
+        base.join("bin/data-dir"),
+        data.canonicalize().unwrap().to_string_lossy().as_bytes(),
+    )
+    .unwrap();
+    executable(&home.join("bin/id"), "echo 501");
+    (base, definition)
+}
+
 #[test]
 fn bare_and_status_share_healthy_output() {
     let home = tempfile::tempdir().unwrap();
@@ -667,26 +694,7 @@ fn bare_and_status_share_healthy_output() {
         serde_yaml::to_string(&config).unwrap(),
     )
     .unwrap();
-    #[cfg(target_os = "macos")]
-    let (base, definition) = (
-        home.path().join("Library/Application Support/PinkCollab"),
-        home.path()
-            .join("Library/LaunchAgents/dev.pinkcollab.gateway.plist"),
-    );
-    #[cfg(target_os = "linux")]
-    let (base, definition) = (
-        home.path().join(".local/share/pinkcollab"),
-        home.path().join(".config/systemd/user/pinkcollab.service"),
-    );
-    std::fs::create_dir_all(base.join("bin")).unwrap();
-    std::fs::create_dir_all(definition.parent().unwrap()).unwrap();
-    std::fs::write(&definition, "fake definition").unwrap();
-    std::fs::write(
-        base.join("bin/data-dir"),
-        data.canonicalize().unwrap().to_string_lossy().as_bytes(),
-    )
-    .unwrap();
-    executable(&home.path().join("bin/id"), "echo 501");
+    let (base, _) = managed_service(home.path(), &data);
     executable(&home.path().join("bin/launchctl"), "echo 'state = running'");
     executable(&home.path().join("bin/systemctl"), "echo active");
     let server = std::thread::spawn(move || {
@@ -721,6 +729,38 @@ fn bare_and_status_share_healthy_output() {
     assert!(status.status.success());
     assert_eq!(bare.stdout, status.stdout);
     assert!(String::from_utf8_lossy(&bare.stdout).contains("Service       Running"));
+}
+
+#[tokio::test]
+async fn update_refuses_restart_when_owner_changes_at_confirmation() {
+    let home = tempfile::tempdir().unwrap();
+    tools(home.path());
+    let data = home.path().join("data");
+    saved_omp_config(home.path(), &data, &home.path().join("bin/omp"));
+    let (base, _) = managed_service(home.path(), &data);
+    for tool in ["systemctl", "launchctl"] {
+        executable(
+            &home.path().join("bin").join(tool),
+            r#"if [ -d "$HOME/other-data" ]; then
+ printf '%s\n' "$*" >> "$HOME/commands-after-transfer"
+ exit 99
+fi
+case "$1 $2" in
+ "--user show") echo active ;;
+ "--user daemon-reload"|"--user enable") exit 0 ;;
+ "print "*) echo 'state = running' ;;
+ *) exit 99 ;;
+esac"#,
+        );
+    }
+
+    update_confirmation::assert_owner_change_refuses_restart(
+        cli(home.path(), &data),
+        &base.join("bin/data-dir"),
+        &home.path().join("other-data"),
+    )
+    .await;
+    assert!(!home.path().join("commands-after-transfer").exists());
 }
 
 /// The listener stays owned by this fixture, not a real Gateway or user service.
@@ -835,28 +875,7 @@ exit 99"#,
     )
     .unwrap();
     std::fs::write(data.join("funnel-url"), &expected.public_url).unwrap();
-    #[cfg(target_os = "macos")]
-    let (base, definition) = (
-        home.path().join("Library/Application Support/PinkCollab"),
-        home.path()
-            .join("Library/LaunchAgents/dev.pinkcollab.gateway.plist"),
-    );
-    #[cfg(target_os = "linux")]
-    let (base, definition) = (
-        home.path().join(".local/share/pinkcollab"),
-        home.path().join(".config/systemd/user/pinkcollab.service"),
-    );
-    // A managed running fixture allows the reserved health port through preflight.
-    // Installation still replaces the fake definition and stages the actual binary.
-    std::fs::create_dir_all(base.join("bin")).unwrap();
-    std::fs::create_dir_all(definition.parent().unwrap()).unwrap();
-    std::fs::write(&definition, "fake old definition").unwrap();
-    std::fs::write(
-        base.join("bin/data-dir"),
-        data.canonicalize().unwrap().to_string_lossy().as_bytes(),
-    )
-    .unwrap();
-    executable(&home.path().join("bin/id"), "echo 501");
+    let (base, definition) = managed_service(home.path(), &data);
     executable(
         &home.path().join("bin/systemctl"),
         r#"printf '%s\n' "systemctl $*" >> "$HOME/service-commands"

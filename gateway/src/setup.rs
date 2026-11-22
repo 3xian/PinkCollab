@@ -271,13 +271,13 @@ pub async fn run(
         Transport::External => println!("✓ Externally managed HTTPS access configured"),
     }
     let install = installation.clone();
-    let report = control
+    let outcome = control
         .blocking(
             move || crate::service::manager(&install).install(),
             Some(Phase::Installed),
         )
         .await?;
-    println!("{}", report.outcome.message());
+    println!("{}", outcome.message());
     println!("Starting Gateway...");
     let start = installation.clone();
     control

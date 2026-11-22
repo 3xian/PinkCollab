@@ -24,9 +24,8 @@ pub async fn run(dir: &Path) -> Result<()> {
         status != ServiceStatus::NotInstalled,
         "Background startup is not installed. Run pinkcollab service install, then pinkcollab service start."
     );
-    let report = manager.install_with(Activation::Deferred)?;
-    debug_assert!(!report.resumed);
-    println!("{}", report.outcome.message());
+    let outcome = manager.install_with(Activation::Deferred)?;
+    println!("{}", outcome.message());
     println!("Restarting stops active OMP runtimes. A stopped Gateway will start.");
     print!("Restart the Gateway service now? [y/N] ");
     io::stdout().flush()?;
@@ -39,7 +38,7 @@ pub async fn run(dir: &Path) -> Result<()> {
         );
         return Ok(());
     }
-    manager.restart()?;
+    service::execute(dir, service::Action::Restart)?;
     crate::health::wait(config.listen).await?;
     println!("✓ Gateway running");
     Ok(())

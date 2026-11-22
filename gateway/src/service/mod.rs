@@ -48,12 +48,6 @@ impl InstallOutcome {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct InstallReport {
-    pub outcome: InstallOutcome,
-    /// The installer started the Gateway; readiness must still be checked.
-    pub resumed: bool,
-}
 /// Missing is distinct from an unreadable/corrupt installation.
 fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
     match std::fs::read(path) {
@@ -102,10 +96,10 @@ pub trait ServiceManager {
         Ok(())
     }
 
-    fn install(&self) -> Result<InstallReport> {
+    fn install(&self) -> Result<InstallOutcome> {
         self.install_with(Activation::Automatic)
     }
-    fn install_with(&self, activation: Activation) -> Result<InstallReport>;
+    fn install_with(&self, activation: Activation) -> Result<InstallOutcome>;
     fn uninstall(&self) -> Result<()>;
     fn start(&self) -> Result<()>;
     fn stop(&self) -> Result<()>;

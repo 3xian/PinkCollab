@@ -127,7 +127,7 @@ After a successful update, even if the installation was already current, `update
 
 Changing workspaces, transport, or the OMP launcher still uses `pinkcollab setup`. External HTTPS setup must keep `--transport external --public-url https://collab.example.com`. `service install` only registers startup that is not installed yet.
 
-`doctor` should show matching CLI and installed-binary hashes and a healthy Gateway. If an update fails, fix the reported error and rerun `pinkcollab update`; do not delete configuration or pairings.
+`doctor` should show matching CLI and installed-binary hashes and a healthy Gateway. If an update fails, fix the reported error and rerun `pinkcollab update`; do not delete configuration or pairings. On Windows, if the updater reports that it could not restore the old executable, rename the backup to the startup path shown in the error before retrying.
 
 If `pinkcollab --version` disagrees with `npm list -g pinkcollab --depth=0`, another installation may be ahead on PATH. Locate it with `Get-Command pinkcollab -All` in PowerShell or `type -a pinkcollab` on macOS/Linux. Avoid running update from the obsolete copy; invoke the current npm package directly:
 

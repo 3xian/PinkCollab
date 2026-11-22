@@ -35,23 +35,46 @@ pub(super) fn replace_binary(staged: &Path, installed: &Path) -> std::io::Result
             .chain(Some(0))
             .collect::<Vec<_>>()
     };
-    let backup = wide(&installed.with_extension("previous"));
-    let installed = wide(installed);
-    let staged = wide(staged);
+    let backup = installed.with_extension("previous");
+    let backup_wide = wide(&backup);
+    let installed_wide = wide(installed);
+    let staged_wide = wide(staged);
     let ok = unsafe {
         ReplaceFileW(
-            installed.as_ptr(),
-            staged.as_ptr(),
-            backup.as_ptr(),
+            installed_wide.as_ptr(),
+            staged_wide.as_ptr(),
+            backup_wide.as_ptr(),
             0,
             std::ptr::null(),
             std::ptr::null(),
         )
     };
     if ok == 0 {
-        return Err(std::io::Error::last_os_error());
+        let error = std::io::Error::last_os_error();
+        return Err(recover_replace_error(error, installed, &backup));
     }
     Ok(())
+}
+
+fn recover_replace_error(error: std::io::Error, installed: &Path, backup: &Path) -> std::io::Error {
+    use windows_sys::Win32::Foundation::ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
+
+    // Only 1177 means ReplaceFileW already moved the old image to the backup
+    // without publishing the new one. Other errors may leave a stale backup.
+    if error.raw_os_error() == Some(ERROR_UNABLE_TO_MOVE_REPLACEMENT_2 as i32)
+        && let Err(rollback) = std::fs::rename(backup, installed)
+    {
+        return std::io::Error::new(
+            rollback.kind(),
+            format!(
+                "ReplaceFileW failed ({error}) and restoring the old Gateway failed ({rollback}). \
+                 Before retrying, close any processes using the Gateway binary and manually rename '{}' to '{}'.",
+                backup.display(),
+                installed.display()
+            ),
+        );
+    }
+    error
 }
 
 fn environment(path: &str) -> Result<String> {
@@ -154,7 +177,7 @@ impl ServiceManager for Manager<'_> {
         println!("Windows background Gateway: starts at user login; no password required.");
         Ok(())
     }
-    fn install_with(&self, activation: Activation) -> Result<InstallReport> {
+    fn install_with(&self, activation: Activation) -> Result<InstallOutcome> {
         let i = self.installation;
         if activation == Activation::Automatic {
             self.preflight(false)?;
@@ -183,10 +206,7 @@ impl ServiceManager for Manager<'_> {
             && (activation == Activation::Deferred
                 || self.legacy(ServiceAccess::empty())?.is_none())
         {
-            return Ok(InstallReport {
-                outcome: InstallOutcome::Unchanged,
-                resumed: false,
-            });
+            return Ok(InstallOutcome::Unchanged);
         }
         let outcome = if state == ServiceStatus::NotInstalled {
             InstallOutcome::Installed
@@ -208,12 +228,11 @@ impl ServiceManager for Manager<'_> {
         if !definition_same {
             storage::replace_private_file(&i.definition, &definition_bytes)?;
         }
-        let resumed = update.resume && activation == Activation::Automatic;
-        if resumed {
+        if update.resume && activation == Activation::Automatic {
             self.start()?;
         }
         update.commit()?;
-        Ok(InstallReport { outcome, resumed })
+        Ok(outcome)
     }
     fn uninstall(&self) -> Result<()> {
         self.installation.check_owner()?;
@@ -293,5 +312,55 @@ impl ServiceManager for Manager<'_> {
             }
             Backend::Missing => ServiceStatus::NotInstalled,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn partial_replacement_restores_old_image_and_returns_staging_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join("gateway.exe");
+        let backup = installed.with_extension("previous");
+        let staged = installed.with_extension("new");
+        fs::write(&backup, b"old").unwrap();
+        fs::write(&staged, b"new").unwrap();
+
+        let error =
+            recover_replace_error(std::io::Error::from_raw_os_error(1177), &installed, &backup);
+        assert_eq!(error.raw_os_error(), Some(1177));
+        assert_eq!(fs::read(&installed).unwrap(), b"old");
+        assert!(!backup.exists());
+        assert_eq!(fs::read(&staged).unwrap(), b"new");
+    }
+
+    #[test]
+    fn failed_restore_preserves_backup_and_names_manual_recovery_paths() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join("gateway.exe");
+        let backup = installed.with_extension("previous");
+        fs::write(&backup, b"old").unwrap();
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&backup)
+            .unwrap();
+
+        let error =
+            recover_replace_error(std::io::Error::from_raw_os_error(1177), &installed, &backup);
+        let message = error.to_string();
+        assert!(message.contains(&format!(
+            "manually rename '{}' to '{}'",
+            backup.display(),
+            installed.display()
+        )));
+        drop(lock);
+        assert!(!installed.exists());
+        assert_eq!(fs::read(&backup).unwrap(), b"old");
     }
 }

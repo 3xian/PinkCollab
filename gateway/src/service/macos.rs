@@ -55,7 +55,7 @@ impl Manager<'_> {
     }
 }
 impl ServiceManager for Manager<'_> {
-    fn install_with(&self, activation: Activation) -> Result<InstallReport> {
+    fn install_with(&self, activation: Activation) -> Result<InstallOutcome> {
         let i = self.installation;
         let fresh = !i.definition.try_exists()?;
         i.check_owner()?;
@@ -65,10 +65,7 @@ impl ServiceManager for Manager<'_> {
         if !update.changed
             && read_optional(&i.definition)?.as_deref() == Some(definition.as_bytes())
         {
-            return Ok(InstallReport {
-                outcome: InstallOutcome::Unchanged,
-                resumed: false,
-            });
+            return Ok(InstallOutcome::Unchanged);
         }
         if activation == Activation::Automatic {
             update.resume |= self.loaded()?;
@@ -82,13 +79,12 @@ impl ServiceManager for Manager<'_> {
         update.begin()?;
         update.stage_binary()?;
         i.write_definition(&definition)?;
-        let resumed = update.resume && activation == Activation::Automatic;
-        if resumed {
+        if activation == Activation::Automatic && update.resume {
             self.stop()?;
             self.start()?;
         }
         update.commit()?;
-        Ok(InstallReport { outcome, resumed })
+        Ok(outcome)
     }
     fn uninstall(&self) -> Result<()> {
         self.stop()?;
@@ -209,18 +205,13 @@ mod manager_tests {
             installation: &installation,
             runner: &runner,
         };
-        assert_eq!(
-            manager.install().unwrap().outcome,
-            InstallOutcome::Installed
-        );
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Installed);
         assert!(runner.calls.borrow().iter().any(|c| c.contains("bootout")));
         runner.calls.borrow_mut().clear();
-        let report = manager.install().unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Unchanged);
-        assert!(!report.resumed);
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Unchanged);
         assert!(runner.calls.borrow().is_empty());
         std::fs::write(installation.dir.join("config.yaml"), "changed config").unwrap();
-        assert_eq!(manager.install().unwrap().outcome, InstallOutcome::Updated);
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
         assert!(runner.calls.borrow().iter().any(|c| c.contains("bootout")));
         // Stage a binary update, then fail before the old process stops.
         std::fs::write(
@@ -236,9 +227,7 @@ mod manager_tests {
         runner.fail_stop.set(true);
         assert!(manager.install().is_err());
         runner.calls.borrow_mut().clear();
-        let report = manager.install().unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Updated);
-        assert!(report.resumed);
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
         assert!(runner.calls.borrow().iter().any(|c| c.contains("bootout")));
         assert_eq!(manager.status().unwrap(), ServiceStatus::Running);
     }
@@ -261,20 +250,25 @@ mod manager_tests {
         };
         manager.install().unwrap();
         let before = manager.status().unwrap();
+        runner.calls.borrow_mut().clear();
         std::fs::write(installation.dir.join("config.yaml"), "changed config").unwrap();
-        let report = manager.install().unwrap();
+        let outcome = manager.install().unwrap();
         let after = manager.status().unwrap();
         assert_eq!(before, ServiceStatus::Stopped);
         assert_eq!(after, ServiceStatus::Stopped);
-        assert_eq!(report.outcome, InstallOutcome::Updated);
+        assert_eq!(outcome, InstallOutcome::Updated);
         assert!(
-            report.resumed,
-            "loaded job was activated despite its stopped snapshot"
+            runner
+                .calls
+                .borrow()
+                .iter()
+                .any(|c| c.contains("kickstart")),
+            "the loaded job must be started even when its status is waiting"
         );
         runner.calls.borrow_mut().clear();
         std::fs::write(&installation.definition, "old definition").unwrap();
-        let report = manager.install_with(Activation::Deferred).unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Updated);
+        let outcome = manager.install_with(Activation::Deferred).unwrap();
+        assert_eq!(outcome, InstallOutcome::Updated);
         assert!(runner.calls.borrow().is_empty());
     }
 }

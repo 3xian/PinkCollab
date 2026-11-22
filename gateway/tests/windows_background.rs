@@ -1,5 +1,8 @@
 #![cfg(all(windows, feature = "test-fixtures"))]
 //! Exercise desktop lifecycle without registering startup or touching any real Windows service.
+#[path = "support/update_confirmation.rs"]
+mod update_confirmation;
+
 use pinkcollab_gateway::config::Config;
 use std::{
     io::Write,
@@ -247,6 +250,18 @@ async fn update_stages_running_binary_and_restarts_only_on_yes() {
     update(b"");
     assert!(!marker.exists());
     assert!(!desktop.healthy().await);
+}
+
+#[tokio::test]
+async fn update_refuses_restart_when_owner_changes_at_confirmation() {
+    let desktop = Desktop::new();
+    update_confirmation::assert_owner_change_refuses_restart(
+        desktop.command_from(Path::new(env!("CARGO_BIN_EXE_gateway-fixture"))),
+        &desktop.executable.with_file_name("data-dir"),
+        &desktop.root.path().join("other-data"),
+    )
+    .await;
+    assert!(!desktop.data.join("gateway-process.json").exists());
 }
 
 #[tokio::test]

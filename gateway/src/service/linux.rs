@@ -25,7 +25,7 @@ fn render(i: &Installation) -> String {
     )
 }
 impl ServiceManager for Manager<'_> {
-    fn install_with(&self, activation: Activation) -> Result<InstallReport> {
+    fn install_with(&self, activation: Activation) -> Result<InstallOutcome> {
         let i = self.installation;
         let fresh = !i.definition.try_exists()?;
         i.check_owner()?;
@@ -36,10 +36,7 @@ impl ServiceManager for Manager<'_> {
         if !update.changed
             && read_optional(&i.definition)?.as_deref() == Some(definition.as_bytes())
         {
-            return Ok(InstallReport {
-                outcome: InstallOutcome::Unchanged,
-                resumed: false,
-            });
+            return Ok(InstallOutcome::Unchanged);
         }
         let outcome = if fresh {
             InstallOutcome::Installed
@@ -56,12 +53,11 @@ impl ServiceManager for Manager<'_> {
             "systemctl",
             &["--user", "enable", "pinkcollab"],
         )?;
-        let resumed = update.resume && activation == Activation::Automatic;
-        if resumed {
+        if activation == Activation::Automatic && update.resume {
             self.restart()?;
         }
         update.commit()?;
-        Ok(InstallReport { outcome, resumed })
+        Ok(outcome)
     }
     fn uninstall(&self) -> Result<()> {
         if self.installation.definition.exists() {
@@ -132,6 +128,17 @@ mod manager_tests {
         calls: RefCell<Vec<String>>,
         stopped: std::cell::Cell<bool>,
     }
+    impl Mock {
+        fn assert_activation(&self, expected: &[&str]) {
+            let calls = self.calls.take();
+            let actions: Vec<_> = calls
+                .iter()
+                .filter_map(|call| call.strip_prefix("systemctl --user "))
+                .filter(|action| matches!(*action, "stop pinkcollab" | "start pinkcollab"))
+                .collect();
+            assert_eq!(actions, expected);
+        }
+    }
     impl Runner for Mock {
         fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
             self.calls
@@ -164,35 +171,17 @@ mod manager_tests {
             installation: &installation,
             runner: &runner,
         };
-        let report = manager.install().unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Installed);
-        assert!(!report.resumed);
-        runner.calls.borrow_mut().clear();
-        let report = manager.install().unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Unchanged);
-        assert!(!report.resumed);
-        assert!(
-            runner
-                .calls
-                .borrow()
-                .iter()
-                .all(|c| !c.contains("stop") && !c.contains("start"))
-        );
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Installed);
+        runner.assert_activation(&[]);
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Unchanged);
+        runner.assert_activation(&[]);
         std::fs::write(installation.dir.join("config.yaml"), "updated config").unwrap();
-        let report = manager.install().unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Updated);
-        assert!(report.resumed);
-        runner.calls.borrow_mut().clear();
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
+        runner.assert_activation(&["stop pinkcollab", "start pinkcollab"]);
         std::fs::write(&installation.definition, "changed definition").unwrap();
-        let report = manager.install_with(Activation::Deferred).unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Updated);
-        assert!(
-            runner
-                .calls
-                .borrow()
-                .iter()
-                .all(|c| !c.contains("stop") && !c.contains("start"))
-        );
+        let outcome = manager.install_with(Activation::Deferred).unwrap();
+        assert_eq!(outcome, InstallOutcome::Updated);
+        runner.assert_activation(&[]);
         assert_eq!(manager.status().unwrap(), ServiceStatus::Running);
     }
     #[test]
@@ -214,17 +203,15 @@ mod manager_tests {
         };
         manager.install().unwrap();
         std::fs::write(installation.dir.join("config.yaml"), "changed config").unwrap();
-        let report = manager.install().unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Updated);
-        assert!(!report.resumed);
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
+        runner.assert_activation(&[]);
         std::fs::write(
             installation.binary.parent().unwrap().join("update-pending"),
             "running",
         )
         .unwrap();
-        let report = manager.install().unwrap();
-        assert_eq!(report.outcome, InstallOutcome::Updated);
-        assert!(report.resumed);
+        assert_eq!(manager.install().unwrap(), InstallOutcome::Updated);
+        runner.assert_activation(&["stop pinkcollab", "start pinkcollab"]);
         assert_eq!(manager.status().unwrap(), ServiceStatus::Stopped);
     }
 }
