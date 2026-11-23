@@ -296,6 +296,69 @@ pub async fn validate_mapping(
     .await?
 }
 
+/// `session lease` first shipped in 18.14.1. For a prerelease at the boundary,
+/// attempt the probe rather than treating a possibly held session as unowned.
+fn supports_session_lease(version: &str) -> Option<bool> {
+    let version = version.strip_prefix("omp/").unwrap_or(version);
+    let core = version.split(['-', '+']).next()?;
+    let (major, rest) = core.split_once('.')?;
+    let (minor, patch) = rest.split_once('.')?;
+    let release: (u32, u32, u32) = (
+        major.parse().ok()?,
+        minor.parse().ok()?,
+        patch.parse().ok()?,
+    );
+    Some(release >= (18, 14, 1))
+}
+
+/// A quiet transcript can still be owned by an idle OMP. Check before both adoption
+/// and resume: a host process can reopen a previously adopted conversation.
+pub(crate) async fn ensure_resumable(
+    source: &OmpDiscoveredSession,
+    executable: &str,
+    args: &[String],
+) -> Result<()> {
+    ensure_quiet(&source.path).await?;
+    let version = crate::omp::version(executable).await;
+    if !supports_session_lease(&version)
+        .context("history_unavailable: cannot identify OMP for the session lease check")?
+    {
+        return Ok(()); // Older CLIs need not recognize `session lease` as a command.
+    }
+    let mut command = std::process::Command::new(executable);
+    if let Some(profile) = crate::omp::configured_profile(args) {
+        command.args(["--profile", &profile]);
+    }
+    use std::process::Stdio;
+    command
+        .args(["session", "lease", "--json", "--", &source.omp_id])
+        .current_dir(&source.cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let output = tokio::task::spawn_blocking(move || {
+        crate::omp::finite_output(&mut command, Duration::from_secs(5), 8192)
+    })
+    .await?
+    .context("history_unavailable: cannot check OMP session lease")?;
+    #[derive(serde::Deserialize)]
+    struct Leases {
+        held: Vec<String>,
+        unknown: Vec<String>,
+    }
+    let leases: Leases =
+        serde_json::from_slice(&output).context("history_unavailable: invalid OMP lease report")?;
+    ensure!(
+        !leases.held.contains(&source.omp_id),
+        "external_session_busy: close the external OMP session and retry"
+    );
+    ensure!(
+        leases.unknown.is_empty(),
+        "history_unavailable: OMP session ownership could not be confirmed"
+    );
+    Ok(())
+}
+
 /// OMP's publish lock is transient, not proof that an idle external runtime is absent.
 /// Refuse observable writers; OMP itself enforces freshness under its publish lock.
 pub fn check_writer(path: &Path) -> Result<()> {
@@ -333,6 +396,14 @@ pub async fn ensure_quiet(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn lease_probe_distinguishes_the_first_supported_patch_and_fails_closed_on_unknown_versions() {
+        assert_eq!(supports_session_lease("omp/18.14.0"), Some(false));
+        assert_eq!(supports_session_lease("omp/18.14.1"), Some(true));
+        assert_eq!(supports_session_lease("19.0.0-beta.1"), Some(true));
+        assert_eq!(supports_session_lease("unavailable"), None);
+    }
+
     #[test]
     fn refresh_expires_without_gateway_restart_and_filters_removed_workspaces() {
         let workspace = tempfile::tempdir().unwrap();

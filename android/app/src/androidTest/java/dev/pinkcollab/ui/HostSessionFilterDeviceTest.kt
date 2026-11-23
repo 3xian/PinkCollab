@@ -52,7 +52,7 @@ class HostSessionFilterDeviceTest {
                     sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("office", session.id),
                 ),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         val filter = compose.onNodeWithTag("hostFilter")
@@ -80,7 +80,7 @@ class HostSessionFilterDeviceTest {
                     sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected,
                 ),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.onNodeWithTag("hostFilter").assertIsDisplayed()
@@ -125,7 +125,7 @@ class HostSessionFilterDeviceTest {
                     sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected,
                 ),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.onNodeWithTag("hostFilter").performClick()
@@ -154,7 +154,7 @@ class HostSessionFilterDeviceTest {
                     sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected,
                 ),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true },
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> },
                     loadMoreSessions = { pagedHosts += it }),
             )
         }
@@ -189,7 +189,7 @@ class HostSessionFilterDeviceTest {
                     sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("online", onlineSession.id),
                 ),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.onNodeWithTag("hostFilter").performClick()
@@ -218,7 +218,7 @@ class HostSessionFilterDeviceTest {
                     sessionListState(AppState(hosts = hosts)), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("office", listed.id),
                 ),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.onNodeWithTag("hostFilter").performClick()
@@ -253,7 +253,7 @@ class HostSessionFilterDeviceTest {
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), null,
                     refreshBatch = batch,
                 ),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true },
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> },
                     refreshHosts = { ids ->
                         batch = HostRefreshBatch(1, ids.size)
                     }),

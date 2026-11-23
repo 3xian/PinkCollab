@@ -4,6 +4,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.runBlocking
@@ -26,10 +27,11 @@ class GatewayRepositorySafetyTest {
     private class RecordingTransport(private val post: (JSONObject) -> JSONObject) : GatewayTransport {
         override val client = OkHttpClient()
         val posts = mutableListOf<JSONObject>()
+        var lookup: (String) -> JSONObject = { throw GatewayHttpException(404, "operation_not_found", "missing") }
         override fun validateURL(value: String) = value
         override suspend fun request(url: String, credential: String?, path: String, method: String,
             body: JSONObject?, query: Pair<String, String>?): String {
-            if (method == "GET") throw GatewayHttpException(404, "operation_not_found", "missing")
+            if (method == "GET") return lookup(path.substringAfterLast('/')).toString()
             check(path.endsWith("/commands"))
             val command = JSONObject(body.toString())
             posts += command
@@ -215,25 +217,136 @@ class GatewayRepositorySafetyTest {
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    @Test fun detached_fast_switch_waits_for_started_runtime_and_uses_its_generation() = runTest {
+    @Test fun detached_apply_submits_one_intent_and_waits_for_its_own_receipt() = runTest {
         val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
         val detached = Session("session", "host", "/tmp", "Work", SessionStatus.Idle, "", false, null,
             "2026-01-01", "2026-01-01", false, null)
         val state = MutableStateFlow(AppState(hosts = mapOf("host" to HostState(host, sessions = listOf(detached)))))
-        val transport = RecordingTransport(::accepted)
-        val dispatcher = CommandDispatcher(state, { host }, transport, MemoryOutbox(), HostCommandGate())
-        val toggle = async { dispatcher.setFastMode("host", "session", true) }
+        val storage = MemoryOutbox()
+        var lookups = 0
+        val requests = mutableListOf<JSONObject>()
+        val transport = object : GatewayTransport by RecordingTransport(::accepted) {
+            override suspend fun request(url: String, credential: String?, path: String, method: String,
+                body: JSONObject?, query: Pair<String, String>?): String {
+                if (body != null) {
+                    requests += body
+                    return accepted(body).toString()
+                }
+                val id = requests.single().getString("commandId")
+                assertTrue(path.endsWith("/operations/$id"))
+                return receipt(id, if (lookups++ == 0) "pending" else "succeeded").toString()
+            }
+        }
+        val dispatcher = CommandDispatcher(state, { host }, transport, storage, HostCommandGate())
+        val toggle = async { dispatcher.applyModelSettings(detached, ModelInfo("provider", "model", "Model"), "high", null) }
         runCurrent()
-        assertEquals(listOf("start_runtime"), transport.posts.map { it.getString("type") })
+        assertEquals(listOf("apply_model_settings"), requests.map { it.getString("type") })
         assertFalse(toggle.isCompleted)
 
-        state.value = runtimeState(host, "started-generation")
+        assertFalse(requests.single().has("generation"))
         toggle.await()
-        val fast = transport.posts.last()
-        assertEquals("set_fast_mode", fast.getString("type"))
-        assertEquals("started-generation", fast.getString("generation"))
-        assertTrue(fast.getBoolean("enabled"))
+        assertEquals("model", requests.single().getJSONObject("model").getString("id"))
+        assertEquals("high", requests.single().getString("thinkingLevel"))
+        assertTrue(storage.records().isEmpty())
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun new_apply_after_closing_does_not_settle_against_an_old_success() = runTest {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        val state = MutableStateFlow(runtimeState(host, "run"))
+        val session = state.value.hosts.getValue("host").sessions.single()
+        val storage = MemoryOutbox()
+        var first = true
+        val transport = RecordingTransport { body ->
+            if (first) accepted(body) else JSONObject().put("operation", receipt(body.getString("commandId"), "succeeded"))
+        }
+        val dispatcher = CommandDispatcher(state, { host }, transport, storage, HostCommandGate())
+        suspend fun applyModel(id: String) = dispatcher.applyModelSettings(session, ModelInfo("provider", id, id), null, null)
+
+        val applyingA = async { applyModel("A") }
+        runCurrent()
+        val original = storage.records().single()
+        assertEquals(CommandState.POSTED, original.state)
+        applyingA.cancelAndJoin()
+        first = false
+        transport.lookup = { id -> assertEquals(original.id, id); receipt(id, "succeeded") }
+
+        applyModel("B")
+        applyModel("A")
+        assertEquals(listOf("A", "B", "A"), transport.posts.map { it.getJSONObject("model").getString("id") })
+        assertEquals(3, transport.posts.map { it.getString("commandId") }.distinct().size)
+        dispatcher.recoverPendingCommands()
+        assertEquals(3, transport.posts.size)
+        assertTrue(storage.records().isEmpty())
+    }
+
+    @Test fun recovering_model_changes_never_posts_even_after_host_becomes_available() = runBlocking {
+        val storage = MemoryOutbox()
+        val outbox = DurableCommandOutbox(storage)
+        for (state in listOf(CommandState.PREPARED, CommandState.POSTED)) {
+            val pending = PendingCommand("pick-$state", "host", "client", "session", "apply-$state",
+                "apply_model_settings", "{}", state)
+            storage.insertIfAbsent(pending)
+            outbox.recover(pending, CommandTransport(
+                post = { error("An explicit Apply is required") }, lookup = { missing() },
+            ))
+            assertEquals(if (state == CommandState.POSTED) pending else null, storage.find(pending.key))
+        }
+    }
+
+    @Test fun unconfirmed_legacy_picker_start_does_not_intercept_an_explicit_start() = runBlocking {
+        val host = PairedHost(Host("host", "Host", "", "", ""), "https://host", "credential", "client")
+        val oldRequest = CommandRequest("host", "client", "session", "start:{}", "start_runtime") { JSONObject() }
+        val old = PendingCommand(oldRequest.key, "host", "client", "session", "old-start", "start_runtime", "{}", CommandState.LOOKUP_ONLY)
+        val storage = MemoryOutbox()
+        storage.insertIfAbsent(old)
+        val transport = RecordingTransport(::accepted)
+        val dispatcher = CommandDispatcher(MutableStateFlow(runtimeState(host, "run")), { host }, transport, storage, HostCommandGate())
+
+        dispatcher.command("host", "session", "start")
+
+        assertEquals("start_runtime", transport.posts.single().getString("type"))
+        assertNotEquals(old.id, transport.posts.single().getString("commandId"))
+        assertEquals(old, storage.find(oldRequest.key))
+    }
+
+    @Test fun history_rejection_before_admission_needs_no_receipt_and_preserves_gateway_message() = runBlocking {
+        val storage = MemoryOutbox()
+        val request = CommandRequest("host", "client", "session", "apply:intent", "apply_model_settings") { JSONObject() }
+        val rejection = GatewayHttpException(503, "history_unavailable", "OMP history cannot be continued; refresh and retry")
+        val failure = runCatching {
+            DurableCommandOutbox(storage).submit(request, CommandTransport(
+                post = { throw rejection },
+                lookup = { error("No operation was admitted") },
+            ))
+        }.exceptionOrNull()
+        assertEquals(rejection, failure)
+        assertTrue(storage.records().isEmpty())
+    }
+
+    @Test fun ambiguous_post_or_lookup_failure_preserves_apply_for_receipt_recovery() = runBlocking {
+        for (postFailure in listOf(IOException("response lost"), GatewayHttpException(503, "persistence_unavailable", "unavailable"))) {
+            val storage = MemoryOutbox()
+            val request = CommandRequest("host", "client", "session", "apply:intent", "apply_model_settings") { JSONObject() }
+            var posts = 0
+            val outbox = DurableCommandOutbox(storage)
+            val failure = runCatching {
+                outbox.submit(request, CommandTransport(
+                    post = { posts++; throw postFailure },
+                    lookup = { throw GatewayHttpException(503, "history_unavailable", "lookup unavailable") },
+                ))
+            }.exceptionOrNull()
+            assertTrue(failure is IOException)
+            val pending = storage.records().single()
+            assertEquals(CommandState.POSTED, pending.state)
+            outbox.recover(pending, CommandTransport(
+                post = { error("Recovery is lookup-only") }, lookup = { receipt(it, "succeeded") },
+            ))
+            assertEquals(1, posts)
+            assertTrue(storage.records().isEmpty())
+        }
+    }
+
 
     @Test fun lookup_authentication_failure_never_posts_or_discards_a_command() = runBlocking {
         val storage = MemoryOutbox()
@@ -374,9 +487,6 @@ class GatewayRepositorySafetyTest {
 
         checkScoped { it.command("host", "session", "interrupt") }
         checkScoped { it.respond("host", "session", AttentionResponse.Value("input-1", "answer")) }
-        checkScoped { it.selectModel("host", "session", ModelInfo("provider", "model", "Model")) }
-        checkScoped { it.setThinkingLevel("host", "session", "high") }
-        checkScoped { it.setFastMode("host", "session", true) }
     }
 
     @Test fun runtime_commands_use_the_same_host_summary_fallback() = runBlocking {
@@ -385,11 +495,10 @@ class GatewayRepositorySafetyTest {
         val transport = RecordingTransport(::accepted)
         val dispatcher = CommandDispatcher(state, { host }, transport, MemoryOutbox(), HostCommandGate())
 
-        dispatcher.selectModel("host", "session", ModelInfo("provider", "model", "Model"))
-        dispatcher.setThinkingLevel("host", "session", "high")
+        dispatcher.command("host", "session", "interrupt")
         dispatcher.command("host", "session", "stop")
 
-        assertEquals(listOf("run-a", "run-a", "run-a"), transport.posts.map { it.getString("generation") })
+        assertEquals(listOf("run-a", "run-a"), transport.posts.map { it.getString("generation") })
     }
 
     @Test fun stop_key_and_payload_capture_the_same_generation() = runBlocking {

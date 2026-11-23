@@ -252,6 +252,60 @@ fn save_tool(log: &std::path::Path, parent: &mut String, call_id: &str) {
 }
 fn main() {
     let args = std::env::args().collect::<Vec<_>>();
+    if args.get(1).is_some_and(|arg| arg == "--version") {
+        println!("omp/18.14.1");
+        return;
+    }
+    if let Some(index) = args.iter().position(|arg| arg == "session")
+        && args.get(index + 1).is_some_and(|arg| arg == "lease")
+    {
+        let held = std::fs::read_to_string("held-session")
+            .ok()
+            .filter(|id| Some(id) == args.last());
+        emit(json!({"held":held.into_iter().collect::<Vec<_>>(),"unknown":[]}));
+        return;
+    }
+    let subcommand = if args.get(1).is_some_and(|arg| arg == "--profile") {
+        3
+    } else {
+        1
+    };
+    // Tests opt in to command tracing without changing discovery behavior.
+    if let Ok(mut trace) = std::fs::OpenOptions::new()
+        .append(true)
+        .open("fixture-catalog-probes.jsonl")
+    {
+        writeln!(trace, "{}", json!(&args[1..])).unwrap();
+    }
+    if args.get(subcommand).map(String::as_str) == Some("config")
+        && args.get(subcommand + 1).map(String::as_str) == Some("get")
+    {
+        assert_eq!(&args[subcommand + 2..], ["enabledModels", "--json"]);
+        let value = match std::fs::read(".omp/config.yml") {
+            Ok(bytes) => serde_yaml::from_slice::<Value>(&bytes)
+                .unwrap()
+                .get("enabledModels")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => json!([]),
+            Err(e) => panic!("cannot read fixture settings: {e}"),
+        };
+        emit(json!({"key":"enabledModels","value":value,"type":"array","description":""}));
+        return;
+    }
+    if args.get(subcommand).is_some_and(|arg| arg == "models") {
+        assert_eq!(args.get(subcommand + 1).map(String::as_str), Some("--json"));
+        // Project-specific catalogs exercise the actual subprocess cwd and CLI wire format.
+        match std::fs::read_to_string("fixture-model-catalog.json") {
+            Ok(body) => print!("{body}"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => emit(json!({"models":[
+                {"provider":"fixture","id":"fast","name":"Fixture Fast","kind":"chat","reasoning":true,"thinking":["low","high"]},
+                {"provider":"fixture","id":"smart","name":"Fixture Smart","kind":"chat","reasoning":true,"thinking":["medium","high"]}
+            ]})),
+            Err(e) => panic!("cannot read fixture catalog: {e}"),
+        }
+        return;
+    }
     if args.get(1).map(String::as_str) == Some("usage") {
         emit(
             json!({"generatedAt":1000,"reports":[{"provider":"fixture", "fetchedAt":900,

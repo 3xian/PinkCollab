@@ -1,5 +1,8 @@
 package dev.pinkcollab.ui
 
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
@@ -18,7 +21,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertValueEquals
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -36,6 +39,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.ui.theme.PinkCollabTheme
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -45,7 +49,7 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class ModelPickerDeviceTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     private val models = (0 until 120).map { index ->
         ModelInfo("provider${index / 30}", "model-$index", "Model $index",
@@ -59,7 +63,7 @@ class ModelPickerDeviceTest {
             PinkCollabTheme {
                 CompositionLocalProvider(LocalDensity provides Density(density.density, 1.5f)) {
                     Box(Modifier.width(320.dp)) {
-                        ModelPickerHeader({}, {}, showRefresh = true, canRefresh = true)
+                        ModelPickerHeader({}, {}, canUseHost = true, canRefresh = true)
                     }
                 }
             }
@@ -75,69 +79,108 @@ class ModelPickerDeviceTest {
         }
     }
 
-    @Test fun runtime_start_stays_pending_until_snapshot_or_failure_arrives() {
-        var starting by mutableStateOf(false)
-        var attached by mutableStateOf(false)
-        var requests = 0
-        var attempt by mutableStateOf<RuntimeStartAttempt?>(null)
-        compose.setContent {
-            ModelPickerSheet(state = if (attached) LoadState.Ready(catalog) else null,
-                current = null, enabled = attached, runtimeAttached = attached,
-                runtimeStarting = starting, canStartRuntime = !starting && !attached,
-                startRuntime = { requests++; attempt = RuntimeStartAttempt.Pending(null) },
-                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartAttempt = attempt)
+    @Test fun recreating_during_apply_and_after_conflict_preserves_the_wait_and_retryable_draft() {
+        val release = CompletableDeferred<Unit>()
+        val busy = "This session is open on your computer. Close it there, then tap Apply."
+        var current by mutableStateOf<ModelInfo?>(null)
+        var dismissed = 0
+        val attempts = mutableListOf<ModelSettingsChanges>()
+        val picker: @Composable () -> Unit = {
+            ModelPickerSheet(state = LoadState.Ready(catalog), current = current, enabled = true,
+                dismiss = { dismissed++ }, refresh = {}, apply = {
+                    attempts += it
+                    if (attempts.size == 1) {
+                        release.await()
+                        throw IllegalStateException(busy)
+                    }
+                })
         }
-        compose.runOnIdle { assertEquals(1, requests) }
-        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
-        compose.runOnIdle { starting = true }
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
-        compose.runOnIdle { starting = false }
-        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
-        compose.onNodeWithText("Retry").assertDoesNotExist()
-        compose.runOnIdle { attached = true }
-        compose.onNodeWithTag("modelList").assertIsDisplayed()
-        compose.runOnIdle { assertEquals(1, requests) }
+        val scenario = compose.activityRule.scenario
+        fun mount() { scenario.onActivity { it.setContent(content = picker) } }
+        mount()
+        compose.onNodeWithContentDescription("Search models").performTextInput("Model 113")
+        val row = compose.onNodeWithContentDescription("Model 113, provider3")
+        row.assertIsNotSelected().performClick().assertIsSelected()
+        compose.onNodeWithText("Current", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("thinkingLevel:high").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.runOnIdle { assertEquals(emptyList<ModelSettingsChanges>(), attempts) }
+        compose.onNodeWithText("Apply").performClick()
+        compose.onNodeWithText("Applying model settings…").assertIsDisplayed()
+        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        scenario.recreate()
+        mount()
+        compose.onNodeWithText("Applying model settings…").assertIsDisplayed()
+        row.assertIsSelected()
+        compose.runOnIdle { assertEquals(1, attempts.size) }
+        compose.runOnIdle { assertEquals(0, dismissed); release.complete(Unit) }
+        compose.onNodeWithText(busy).assertIsDisplayed()
+        scenario.recreate()
+        mount()
+        compose.onNodeWithText(busy).assertIsDisplayed()
+        // A new attached snapshot is not a retry. The search and edits still belong to the user.
+        compose.runOnIdle { current = models.first() }
+        row.assertIsSelected()
+        compose.onNodeWithContentDescription("Model 0, provider0").assertDoesNotExist()
+        compose.onNodeWithTag("thinkingSlider").assertValueEquals("high")
+        val expected = ModelSettingsChanges(models[113], "high")
+        compose.runOnIdle { assertEquals(listOf(expected), attempts); assertEquals(0, dismissed) }
+        compose.onNodeWithText("Apply").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(listOf(expected, expected), attempts); assertEquals(1, dismissed) }
     }
 
-    @Test fun failed_runtime_start_keeps_picker_open_and_shows_error() {
-        var starting by mutableStateOf(false)
-        var attempt by mutableStateOf<RuntimeStartAttempt?>(null)
+    @Test fun catalog_replacement_blocks_missing_draft_until_a_supported_replacement_is_selected() {
+        val original = models[1]
+        val replacement = original.copy(id = "replacement", name = "Model 1 replacement")
+        var catalog by mutableStateOf(ModelCatalog(listOf(original), emptyList()))
+        val attempts = mutableListOf<ModelSettingsChanges>()
         compose.setContent {
-            ModelPickerSheet(state = null, current = null, enabled = false, runtimeAttached = false,
-                runtimeStarting = starting, canStartRuntime = !starting,
-                startRuntime = { attempt = RuntimeStartAttempt.Pending(null) },
-                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartAttempt = attempt)
+            ModelPickerSheet(LoadState.Ready(catalog), current = null, enabled = true,
+                dismiss = {}, refresh = {}, apply = { attempts += it })
         }
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
-        compose.runOnIdle { attempt = RuntimeStartAttempt.Failed("previous runtime exit is not confirmed") }
-        compose.onNodeWithText("Could not start OMP\nprevious runtime exit is not confirmed").assertIsDisplayed()
-        compose.onNodeWithText("Retry").assertIsEnabled().performClick()
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Search models").performTextInput("Model 1")
+        compose.onNodeWithContentDescription("Model 1, provider0").performClick()
+        compose.onNodeWithTag("thinkingLevel:high").performClick()
+        compose.runOnIdle { catalog = ModelCatalog(listOf(replacement), emptyList()) }
+        compose.onNodeWithText("Model 1 is no longer available.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Model 1 replacement, provider0").performClick()
+        compose.onNodeWithText("Apply").assertIsEnabled()
+
+        val reduced = replacement.copy(thinkingLevels = listOf("low"))
+        compose.runOnIdle { catalog = ModelCatalog(listOf(reduced), emptyList()) }
+        compose.onNodeWithText("Thinking level high is no longer available.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(emptyList<ModelSettingsChanges>(), attempts) }
+        compose.onNodeWithTag("thinkingSingleLevel").performClick()
+        compose.onNodeWithText("Apply").performClick()
+        compose.runOnIdle { assertEquals(listOf(ModelSettingsChanges(reduced, "low")), attempts) }
     }
 
-    @Test fun attached_runtime_failing_during_initialization_keeps_start_error() {
-        var starting by mutableStateOf(false)
-        var attached by mutableStateOf(false)
-        var attempt by mutableStateOf<RuntimeStartAttempt?>(null)
+    @Test fun closing_during_apply_stops_waiting_and_reopening_has_no_stale_draft() {
+        var open by mutableStateOf(true)
+        val ready = CompletableDeferred<Unit>()
+        var completed = 0
+        var cancelled = 0
         compose.setContent {
-            ModelPickerSheet(state = null, current = null, enabled = false,
-                runtimeAttached = attached, runtimeStarting = starting,
-                canStartRuntime = !starting,
-                startRuntime = { attempt = RuntimeStartAttempt.Pending(null); starting = true },
-                dismiss = {}, retry = {}, refresh = {}, apply = {}, runtimeStartAttempt = attempt)
+            if (open) ModelPickerSheet(state = LoadState.Ready(catalog), current = null, enabled = true,
+                dismiss = { open = false }, refresh = {}, apply = {
+                    try {
+                        ready.await()
+                        completed++
+                    } finally {
+                        cancelled++
+                    }
+                })
         }
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
-        compose.runOnIdle { attached = true }
-        compose.waitForIdle()
-        compose.runOnIdle {
-            attached = false
-            starting = false
-            attempt = RuntimeStartAttempt.Failed("OMP did not load stored session")
-        }
-        compose.onNodeWithText("Could not start OMP\nOMP did not load stored session").assertIsDisplayed()
-        compose.onNodeWithText("Retry").assertIsEnabled().performClick()
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.onNodeWithTag("provider:provider0").performClick()
+        compose.onNodeWithContentDescription("Model 0, provider0").performClick()
+        compose.onNodeWithText("Apply").performClick()
+        compose.onNodeWithText("Applying model settings…").assertIsDisplayed()
+        compose.onNodeWithText("Close").performClick()
+        compose.onNodeWithText("Models").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, cancelled); open = true; ready.complete(Unit) }
+        compose.onNodeWithText("Done").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(0, completed) }
     }
 
     @Test fun unchanged_settings_can_close_without_applying_and_current_survives_draft_selection() {
@@ -146,8 +189,7 @@ class ModelPickerDeviceTest {
         compose.setContent {
             ModelPickerSheet(
                 state = LoadState.Ready(catalog), current = models.first().copy(thinkingLevel = "high"),
-                enabled = true, runtimeAttached = true, runtimeStarting = false,
-                canStartRuntime = false, startRuntime = {}, dismiss = { dismissed++ }, retry = {}, refresh = {},
+                enabled = true, dismiss = { dismissed++ }, refresh = {},
                 apply = { applied = it },
             )
         }
@@ -164,21 +206,20 @@ class ModelPickerDeviceTest {
         assertNull(applied)
     }
 
-    @Test fun single_thinking_level_can_be_selected_and_applied_when_unset() {
+    @Test fun attached_thinking_only_change_can_be_applied_without_a_current_model_descriptor() {
         var applied: ModelSettingsChanges? = null
         compose.setContent {
             ModelPickerSheet(
                 state = LoadState.Ready(ModelCatalog(emptyList(), listOf("high"))),
-                current = ModelInfo("provider", "model", "Model"),
-                enabled = true, runtimeAttached = true, runtimeStarting = false,
-                canStartRuntime = false, startRuntime = {}, dismiss = {}, retry = {}, refresh = {},
+                current = null,
+                enabled = true, dismiss = {}, refresh = {},
                 apply = { applied = it },
             )
         }
         compose.onNodeWithText("Thinking Not set").assertIsDisplayed()
         compose.onNodeWithTag("thinkingSingleLevel").performClick()
         compose.onNodeWithText("Apply").performClick()
-        assertEquals(ModelSettingsChanges(null, "high"), applied)
+        compose.runOnIdle { assertEquals(ModelSettingsChanges(null, "high"), applied) }
     }
 
     @Test fun first_thinking_level_can_be_selected_accessibly_and_applied_when_unset() {
@@ -187,8 +228,7 @@ class ModelPickerDeviceTest {
             ModelPickerSheet(
                 state = LoadState.Ready(catalog),
                 current = models.first(),
-                enabled = true, runtimeAttached = true, runtimeStarting = false,
-                canStartRuntime = false, startRuntime = {}, dismiss = {}, retry = {}, refresh = {},
+                enabled = true, dismiss = {}, refresh = {},
                 apply = { applied = it },
             )
         }
@@ -198,7 +238,7 @@ class ModelPickerDeviceTest {
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("thinkingSlider").assertValueEquals("off")
         compose.onNodeWithText("Apply").performClick()
-        assertEquals(ModelSettingsChanges(null, "off"), applied)
+        compose.runOnIdle { assertEquals(ModelSettingsChanges(null, "off"), applied) }
     }
 
     @Test fun model_switch_with_unsupported_thinking_allows_selecting_first_level() {
@@ -207,8 +247,7 @@ class ModelPickerDeviceTest {
             ModelPickerSheet(
                 state = LoadState.Ready(catalog),
                 current = models.first().copy(thinkingLevel = "low"),
-                enabled = true, runtimeAttached = true, runtimeStarting = false,
-                canStartRuntime = false, startRuntime = {}, dismiss = {}, retry = {}, refresh = {},
+                enabled = true, dismiss = {}, refresh = {},
                 apply = { applied = it },
             )
         }
@@ -219,7 +258,7 @@ class ModelPickerDeviceTest {
             .performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("thinkingSlider").assertValueEquals("off")
         compose.onNodeWithText("Apply").performClick()
-        assertEquals(ModelSettingsChanges(models[1], "off"), applied)
+        compose.runOnIdle { assertEquals(ModelSettingsChanges(models[1], "off"), applied) }
     }
 
     @Test fun supported_selection_keeps_slider_level_mapping() {
@@ -228,8 +267,7 @@ class ModelPickerDeviceTest {
             ModelPickerSheet(
                 state = LoadState.Ready(catalog),
                 current = models.first().copy(thinkingLevel = "low"),
-                enabled = true, runtimeAttached = true, runtimeStarting = false,
-                canStartRuntime = false, startRuntime = {}, dismiss = {}, retry = {}, refresh = {},
+                enabled = true, dismiss = {}, refresh = {},
                 apply = { applied = it },
             )
         }
@@ -245,7 +283,7 @@ class ModelPickerDeviceTest {
         compose.onNodeWithText("Done").assertIsEnabled()
         slider.performSemanticsAction(SemanticsActions.SetProgress) { it(0f) }
         compose.onNodeWithText("Apply").performClick()
-        assertEquals(ModelSettingsChanges(null, "off"), applied)
+        compose.runOnIdle { assertEquals(ModelSettingsChanges(null, "off"), applied) }
     }
 
     @Test fun large_catalog_scroll_search_and_pending_apply() {
@@ -258,12 +296,7 @@ class ModelPickerDeviceTest {
                 state = load,
                 current = models.first().copy(thinkingLevel = "low"),
                 enabled = true,
-                runtimeAttached = true,
-                runtimeStarting = false,
-                canStartRuntime = false,
-                startRuntime = {},
                 dismiss = { dismissed++ },
-                retry = {},
                 refresh = {
                     refreshes++
                     load = LoadState.Ready(catalog, refreshing = true)
@@ -304,7 +337,7 @@ class ModelPickerDeviceTest {
         compose.onNodeWithContentDescription("Model 119, provider3").assertDoesNotExist()
         compose.onNodeWithContentDescription("Model 113, provider3").performClick()
         compose.onNodeWithText("Apply").performClick()
-        assertEquals(ModelSettingsChanges(models[113], "high"), applied)
+        compose.runOnIdle { assertEquals(ModelSettingsChanges(models[113], "high"), applied) }
     }
 
     @Test fun thinking_remains_available_with_empty_catalog() {
@@ -314,12 +347,7 @@ class ModelPickerDeviceTest {
                 state = LoadState.Ready(ModelCatalog(emptyList(), listOf("low", "high"))),
                 current = ModelInfo("provider", "old", "Old", "low"),
                 enabled = true,
-                runtimeAttached = true,
-                runtimeStarting = false,
-                canStartRuntime = false,
-                startRuntime = {},
                 dismiss = {},
-                retry = {},
                 refresh = {},
                 apply = { applied = it },
             )
@@ -328,6 +356,6 @@ class ModelPickerDeviceTest {
         compose.onNodeWithText("No models are available from OMP.").assertExists()
         compose.onNodeWithTag("thinkingSlider").performSemanticsAction(SemanticsActions.SetProgress) { it(1f) }
         compose.onNodeWithText("Apply").performClick()
-        assertEquals(ModelSettingsChanges(null, "high"), applied)
+        compose.runOnIdle { assertEquals(ModelSettingsChanges(null, "high"), applied) }
     }
 }

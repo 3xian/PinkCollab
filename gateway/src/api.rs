@@ -1,3 +1,4 @@
+mod model_catalog;
 mod sessions;
 mod stream;
 use crate::{
@@ -61,6 +62,10 @@ pub fn router(app: App) -> Router {
             get(api_operation),
         )
         .route("/api/v4/sessions/{id}/models", get(api_models))
+        .route(
+            "/api/v4/sessions/{id}/model-catalog",
+            model_catalog::route(),
+        )
         .route("/api/v4/sessions/{id}/history", get(api_history))
         .route("/api/v4/sessions/{id}/history/sync", post(api_history_sync))
         .route(

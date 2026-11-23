@@ -46,8 +46,8 @@ internal interface CommandOutboxStorage {
 }
 
 /** Each claim is one durable, conditional SQLite update. A deleted draft cannot be posted later. */
-internal class SqliteCommandOutboxStorage(context: Context) : CommandOutboxStorage {
-    private val helper = object : SQLiteOpenHelper(context.applicationContext, "command-outbox.db", null, 2) {
+internal class SqliteCommandOutboxStorage(context: Context, databaseName: String = "command-outbox.db") : CommandOutboxStorage, AutoCloseable {
+    private val helper = object : SQLiteOpenHelper(context.applicationContext, databaseName, null, 3) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE commands (
                 key TEXT PRIMARY KEY NOT NULL, host_id TEXT NOT NULL, client_id TEXT NOT NULL,
@@ -58,11 +58,21 @@ internal class SqliteCommandOutboxStorage(context: Context) : CommandOutboxStora
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // Protocol upgrade: unsent intents have no side effect; sent commands may only be looked up.
-            db.execSQL("DELETE FROM commands WHERE state='PREPARED'")
-            db.execSQL("UPDATE commands SET state='LOOKUP_ONLY'")
+            if (oldVersion < 2) {
+                // Protocol upgrade: no v1 payload can be sent to the current Gateway.
+                db.execSQL("DELETE FROM commands WHERE state='PREPARED'")
+                db.execSQL("UPDATE commands SET state='LOOKUP_ONLY'")
+            } else if (oldVersion == 2) {
+                // A v2 picker could enqueue a runtime start just by opening. Only
+                // observe receipts for these old rows; new explicit starts still recover.
+                val oldPicker = "type IN ('select_model','set_fast_mode','set_thinking_level','start_runtime')"
+                db.execSQL("DELETE FROM commands WHERE state='PREPARED' AND $oldPicker")
+                db.execSQL("UPDATE commands SET state='LOOKUP_ONLY' WHERE state='POSTED' AND $oldPicker")
+            }
         }
     }
+
+    override fun close() = helper.close()
     // Retain the existing keystore identity to decrypt receipts left by the upgrade.
     private val alias = "pinkcollab.command-outbox.v2"
 
@@ -179,7 +189,11 @@ internal class DurableCommandOutbox(private val storage: CommandOutboxStorage) {
     suspend fun removeHost(hostId: String) = storage.removeHost(hostId)
     suspend fun records(): List<PendingCommand> = storage.records()
 
-    suspend fun submit(request: CommandRequest, transport: CommandTransport) {
+    suspend fun submit(
+        request: CommandRequest,
+        transport: CommandTransport,
+        awaitTerminal: (suspend (String) -> JSONObject)? = null,
+    ) {
         val key = request.key
         if (request.type == "prompt") {
             require(!request.intentId.isNullOrBlank()) { "Prompt intent ID required" }
@@ -196,19 +210,42 @@ internal class DurableCommandOutbox(private val storage: CommandOutboxStorage) {
             payload = JSONObject(request.fields().toString()).put("type", request.type)
                 .put("commandId", commandId).toString(),
         ))
-        execute(pending, transport)
+        execute(pending, transport, awaitTerminal)
     }
 
     suspend fun recover(pending: PendingCommand, transport: CommandTransport) {
+        // Model picks are explicit user intents. Recovery can observe an accepted
+        // Apply, but must never take ownership or change settings after the sheet closes.
+        if (pending.type == "apply_model_settings") {
+            if (pending.state == CommandState.PREPARED) {
+                storage.removeIfState(pending.key, pending.id, CommandState.PREPARED)
+            } else {
+                lookupReceipt(transport.lookup, pending.id)?.let { settle(pending, it) }
+            }
+            return
+        }
         execute(pending, transport)
     }
 
-    private suspend fun execute(snapshot: PendingCommand, transport: CommandTransport) {
-        var pending = storage.find(snapshot.key)?.takeIf { it.id == snapshot.id } ?: return
+    private suspend fun execute(
+        snapshot: PendingCommand,
+        transport: CommandTransport,
+        awaitTerminal: (suspend (String) -> JSONObject)? = null,
+    ) {
+        suspend fun finish(receipt: JSONObject) {
+            require(receipt.getString("id") == snapshot.id) { "Gateway returned a different command ID" }
+            val final = if (awaitTerminal != null && receipt.getString("state") == "pending")
+                awaitTerminal(snapshot.id) else receipt
+            settle(snapshot, final)
+        }
+        suspend fun alreadySettled() {
+            if (awaitTerminal != null) finish(transport.lookup(snapshot.id))
+        }
+        var pending = storage.find(snapshot.key)?.takeIf { it.id == snapshot.id } ?: return alreadySettled()
         if (pending.state != CommandState.PREPARED) {
             val known = lookupReceipt(transport.lookup, pending.id)
             if (known != null) {
-                settle(pending, known)
+                finish(known)
                 return
             }
             if (pending.state == CommandState.LOOKUP_ONLY) {
@@ -218,18 +255,25 @@ internal class DurableCommandOutbox(private val storage: CommandOutboxStorage) {
             val claimed = storage.transition(pending.key, pending.id, CommandState.PREPARED,
                 if (pending.type == "stop_runtime") CommandState.LOOKUP_ONLY else CommandState.POSTED)
             if (!claimed) {
-                storage.find(pending.key)?.takeIf { it.id == pending.id }?.let { execute(it, transport) }
+                storage.find(pending.key)?.takeIf { it.id == pending.id }?.let { execute(it, transport, awaitTerminal) }
+                    ?: alreadySettled()
                 return
             }
         }
         // The conditional claim above is the last possible point at which an unsent row can be deleted.
-        pending = storage.find(pending.key)?.takeIf { it.id == pending.id } ?: return
+        pending = storage.find(pending.key)?.takeIf { it.id == pending.id } ?: return alreadySettled()
         val response = try {
             transport.post(JSONObject(pending.payload))
         } catch (failure: IOException) {
+            // These typed POST rejections happen before the Gateway admits the command.
+            if (failure is GatewayHttpException &&
+                (failure.errorCode == "external_session_busy" || failure.errorCode == "history_unavailable")) {
+                storage.remove(pending.key, pending.id)
+                throw failure
+            }
             val known = lookupReceipt(transport.lookup, pending.id)
             if (known != null) {
-                settle(pending, known)
+                finish(known)
                 return
             }
             if (failure is GatewayHttpException && failure.statusCode in 400..499 &&
@@ -240,7 +284,7 @@ internal class DurableCommandOutbox(private val storage: CommandOutboxStorage) {
             storage.transition(pending.key, pending.id, CommandState.POSTED, CommandState.LOOKUP_ONLY)
             throw IOException("Stop sent, but its receipt could not be saved; verify the runtime state")
         }
-        settle(pending, response.getJSONObject("operation"))
+        finish(response.getJSONObject("operation"))
     }
 
     private suspend fun settleEarlierPrompts(request: CommandRequest, lookup: suspend (String) -> JSONObject) {

@@ -160,11 +160,10 @@ internal class GatewayRepository(
     suspend fun detail(hostId: String, id: String) = sessions.detail(hostId, id)
     suspend fun loadEarlierHistory(hostId: String, id: String) = sessions.loadEarlierHistory(hostId, id)
     suspend fun usage(hostId: String) = sessions.usage(hostId)
-    suspend fun models(hostId: String, id: String) = sessions.models(hostId, id)
+    suspend fun models(session: Session) = sessions.models(session)
     suspend fun commands(hostId: String, id: String) = sessions.commands(hostId, id)
-    suspend fun selectModel(hostId: String, id: String, model: ModelInfo) = commandDispatcher.selectModel(hostId, id, model)
-    suspend fun setThinkingLevel(hostId: String, id: String, level: String) = commandDispatcher.setThinkingLevel(hostId, id, level)
-    suspend fun setFastMode(hostId: String, id: String, enabled: Boolean) = commandDispatcher.setFastMode(hostId, id, enabled)
+    suspend fun applyModelSettings(session: Session, model: ModelInfo?, level: String?, fast: Boolean?) =
+        commandDispatcher.applyModelSettings(session, model, level, fast)
     suspend fun prompt(hostId: String, id: String, message: String, fileIds: List<String>, intentId: String) =
         commandDispatcher.prompt(hostId, id, message, fileIds, intentId)
     suspend fun respond(hostId: String, id: String, response: AttentionResponse) = commandDispatcher.respond(hostId, id, response)

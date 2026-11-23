@@ -6,7 +6,7 @@ import dev.pinkcollab.data.ModelCatalog
 internal fun isSelectedModel(current: ModelInfo?, candidate: ModelInfo): Boolean =
     current != null && current.provider == candidate.provider && current.id == candidate.id
 
-/** A picker draft is created once on open; backend snapshots must not replace it mid-edit. */
+/** Once edited, the target survives catalog replacement; its old capabilities do not. */
 internal data class ModelSettingsDraft(
     val model: ModelInfo?,
     val thinkingLevel: String?,
@@ -30,12 +30,41 @@ internal fun modelSettingsChanges(current: ModelInfo?, pending: ModelSettingsDra
         thinkingLevel = pending.thinkingLevel?.takeUnless { it == current?.thinkingLevel },
     )
 
-/** OMP reports the global list for the active model; catalog entries carry each candidate's own list. */
-internal fun thinkingLevelsForModel(catalog: ModelCatalog, model: ModelInfo?, current: ModelInfo?): List<String> {
-    val listed = model?.let { selected -> catalog.models.firstOrNull { isSelectedModel(selected, it) } }
-    return listed?.thinkingLevels ?: model?.thinkingLevels
-        ?: catalog.thinkingLevels.takeIf { model == null || isSelectedModel(current, model) }
-        ?: emptyList()
+internal data class ModelDraftResolution(
+    val changes: ModelSettingsChanges,
+    val thinkingLevels: List<String>,
+    val unavailable: String?,
+)
+
+private fun ModelCatalog.listedModel(model: ModelInfo?): ModelInfo? =
+    model?.let { target -> models.firstOrNull { isSelectedModel(target, it) } }
+
+/** Only the latest catalog describes candidate capabilities. Its global list is for the active model. */
+internal fun thinkingLevelsForModel(
+    catalog: ModelCatalog,
+    model: ModelInfo?,
+    current: ModelInfo?,
+    listed: ModelInfo? = catalog.listedModel(model ?: current),
+): List<String> = listed?.thinkingLevels
+    ?: if (model == null || isSelectedModel(current, model)) catalog.thinkingLevels else emptyList()
+
+internal fun resolveModelDraft(
+    catalog: ModelCatalog,
+    current: ModelInfo?,
+    pending: ModelSettingsDraft,
+): ModelDraftResolution {
+    val target = pending.model
+    val listed = catalog.listedModel(target ?: current)
+    val levels = thinkingLevelsForModel(catalog, target, current, listed)
+    val changes = modelSettingsChanges(current, pending.copy(model = listed ?: target))
+    val unavailable = when {
+        changes.model != null && listed == null ->
+            "${changes.model.name} is no longer available. Choose another model."
+        !changes.isEmpty && pending.thinkingLevel != null && pending.thinkingLevel !in levels ->
+            "Thinking level ${pending.thinkingLevel} is no longer available. Choose a supported level or reselect a model."
+        else -> null
+    }
+    return ModelDraftResolution(changes, levels, unavailable)
 }
 
 internal fun selectModelDraft(
@@ -44,7 +73,7 @@ internal fun selectModelDraft(
     pending: ModelSettingsDraft,
     selected: ModelInfo,
 ): ModelSettingsDraft {
-    val levels = thinkingLevelsForModel(catalog, selected, current)
+    val levels = thinkingLevelsForModel(catalog, selected, current, listed = selected)
     val level = pending.thinkingLevel?.takeIf(levels::contains)
         ?: current?.thinkingLevel?.takeIf(levels::contains)
     return pending.copy(model = selected, thinkingLevel = level)

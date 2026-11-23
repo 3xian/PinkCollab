@@ -4,10 +4,8 @@ import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionStatus
 import dev.pinkcollab.data.AttentionResponse
-import dev.pinkcollab.data.SessionDetail
-import dev.pinkcollab.data.OperationReceipt
-import dev.pinkcollab.data.OperationStatus
 import java.io.IOException
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
@@ -49,7 +47,7 @@ class SessionOperationsTest {
         private val onPrompt: suspend () -> Unit = {},
         private val uncancellableUpload: Boolean = false,
         private val onUpload: (suspend (SelectedFile) -> Unit)? = null,
-        private val onSelectModel: (suspend () -> Unit)? = null,
+        private val onApply: suspend (ModelSettingsChanges) -> Unit = {},
         private val onCommand: suspend (SessionUserCommand) -> Unit = {},
     ) : SessionActions {
         val uploadStarted = CompletableDeferred<Unit>()
@@ -76,76 +74,13 @@ class SessionOperationsTest {
         }
         override suspend fun respond(session: Session, response: AttentionResponse) { commands += "respond" }
 
-        override suspend fun selectModel(session: Session, model: ModelInfo) {
-            commands += "select:${model.provider}/${model.id}"
-            onSelectModel?.invoke()
-        }
-        override suspend fun setThinkingLevel(session: Session, level: String) {
-            commands += "thinking:$level"
-        }
-        override suspend fun setFastMode(session: Session, enabled: Boolean) {
-            commands += "fast:$enabled"
+        override suspend fun applyModelSettings(session: Session, changes: ModelSettingsChanges) {
+            commands += "apply"
+            onApply(changes)
         }
         override suspend fun loadEarlierHistory(session: Session) {
             historyStarted.complete(Unit)
             finishHistory.await()
-        }
-    }
-
-    @Test fun startup_transport_failure_remains_retryable_without_a_receipt() = runTest {
-        val detached = session.copy(runtimeAttached = false, generation = null, status = SessionStatus.Idle)
-        val drafts = SessionDraftStore()
-        var fail = true
-        val actions = FakeActions(onCommand = { if (fail) throw IOException("Start outcome was not confirmed") })
-        val errors = mutableListOf<String>()
-        val coordinator = SessionOperations(backgroundScope, actions, drafts, drafts::clearIfVersion, errors::add)
-        coordinator.updateDetails(mapOf(key to SessionDetail(detached, snapshotToken = "subscription")))
-
-        coordinator.command(detached, SessionUserCommand.Start)
-        runCurrent()
-        assertEquals(RuntimeStartAttempt.Failed("Start outcome was not confirmed"), coordinator.runtimeStarts.value[key])
-        assertTrue(!coordinator.operations.value.activity(key).action)
-        assertEquals(listOf("Start outcome was not confirmed"), errors)
-
-        fail = false
-        coordinator.command(detached, SessionUserCommand.Start)
-        runCurrent()
-        assertTrue(coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Pending)
-        assertTrue(!coordinator.operations.value.activity(key).action)
-        coordinator.updateDetails(mapOf(key to SessionDetail(session, snapshotToken = "ready")))
-        assertTrue(key !in coordinator.runtimeStarts.value)
-    }
-
-    @Test fun startup_waits_for_ready_snapshot_and_ignores_the_previous_failure() = runTest {
-        val old = OperationReceipt("old", OperationStatus.Failed, "start_runtime", errorMessage = "Old failure")
-        val detached = session.copy(runtimeAttached = false, generation = null, status = SessionStatus.Idle)
-        val initial = SessionDetail(detached, snapshotToken = "subscription", operations = listOf(old))
-        val coordinator = SessionOperations(backgroundScope, FakeActions(), SessionDraftStore(), { _, _ -> }) {}
-        coordinator.updateDetails(mapOf(key to initial))
-        coordinator.command(detached, SessionUserCommand.Start)
-        runCurrent()
-        coordinator.updateDetails(mapOf(key to initial))
-        assertEquals(RuntimeStartAttempt.Pending("old"), coordinator.runtimeStarts.value[key])
-
-        coordinator.updateDetails(mapOf(key to initial.copy(session = session.copy(status = SessionStatus.Starting))))
-        assertTrue(coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Pending)
-        coordinator.updateDetails(mapOf(key to initial.copy(session = session, snapshotToken = null)))
-        assertTrue(coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Pending)
-        coordinator.updateDetails(mapOf(key to initial.copy(session = session)))
-        assertTrue(key !in coordinator.runtimeStarts.value)
-    }
-
-    @Test fun terminal_start_receipts_without_messages_resolve_pending_attempts() = runTest {
-        for (status in listOf(OperationStatus.Failed, OperationStatus.Cancelled, OperationStatus.OutcomeUnknown)) {
-            val detached = session.copy(runtimeAttached = false, generation = null, status = SessionStatus.Idle)
-            val initial = SessionDetail(detached, snapshotToken = "subscription")
-            val coordinator = SessionOperations(backgroundScope, FakeActions(), SessionDraftStore(), { _, _ -> }) {}
-            coordinator.updateDetails(mapOf(key to initial))
-            coordinator.command(detached, SessionUserCommand.Start)
-            runCurrent()
-            coordinator.updateDetails(mapOf(key to initial.copy(operations =
-                listOf(OperationReceipt("start", status, "start_runtime")))))
-            assertTrue("$status must resolve startup", coordinator.runtimeStarts.value[key] is RuntimeStartAttempt.Failed)
         }
     }
 
@@ -316,62 +251,30 @@ class SessionOperationsTest {
         assertEquals("send me", drafts.state.value.getValue(key).text)
     }
 
-    @Test fun apply_model_settings_sends_only_changed_commands() = runTest {
-        val current = ModelInfo("openai", "sol", "Sol", "low")
-        val next = ModelInfo("anthropic", "sonnet", "Sonnet")
-        val actions = FakeActions()
+    @Test fun failed_apply_releases_the_action_lane_for_an_explicit_retry() = runTest {
+        val finish = CompletableDeferred<Unit>()
+        val choices = mutableListOf<ModelSettingsChanges>()
+        val actions = FakeActions(onApply = {
+            choices += it
+            if (choices.size == 1) {
+                finish.await()
+                throw IOException("Close OMP on the host")
+            }
+        })
         val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }) {}
-
-        assertTrue(!coordinator.applyModelSettings(session, modelSettingsChanges(current, ModelSettingsDraft.from(current))))
+        val draft = ModelSettingsChanges(ModelInfo("anthropic", "sonnet", "Sonnet"), "high")
+        val first = launch {
+            val failure = runCatching { coordinator.applyModelSettings(session, draft) }.exceptionOrNull()
+            assertEquals("Close OMP on the host", failure?.message)
+        }
         runCurrent()
-        assertTrue(actions.commands.isEmpty())
-
-        coordinator.applyModelSettings(session, modelSettingsChanges(current, ModelSettingsDraft(next, "low")))
-        runCurrent()
-        assertEquals(listOf("select:anthropic/sonnet"), actions.commands)
-
-        coordinator.applyModelSettings(session, modelSettingsChanges(current, ModelSettingsDraft(current, "high")))
-        runCurrent()
-        assertEquals(listOf("select:anthropic/sonnet", "thinking:high"), actions.commands)
-    }
-
-    @Test fun fast_switch_submits_both_on_and_off_without_changing_model() = runTest {
-        val actions = FakeActions()
-        val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }) {}
-        assertTrue(coordinator.applyModelSettings(session, ModelSettingsChanges(null, null, true)))
-        runCurrent()
-        assertTrue(coordinator.applyModelSettings(session, ModelSettingsChanges(null, null, false)))
-        runCurrent()
-        assertEquals(listOf("fast:true", "fast:false"), actions.commands)
-    }
-
-    @Test fun apply_model_and_thinking_shares_one_action_job_in_order() = runTest {
-        val firstFinished = CompletableDeferred<Unit>()
-        val actions = FakeActions(onSelectModel = { firstFinished.await() })
-        val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }) {}
-        val next = ModelInfo("anthropic", "sonnet", "Sonnet")
-
-        assertTrue(coordinator.applyModelSettings(session, ModelSettingsChanges(next, "high")))
-        runCurrent()
-        assertEquals(listOf("select:anthropic/sonnet"), actions.commands)
         assertTrue(coordinator.operations.value.activity(key).action)
-        assertTrue(!coordinator.applyModelSettings(session, ModelSettingsChanges(next, "medium")))
-
-        firstFinished.complete(Unit)
-        runCurrent()
-        assertEquals(listOf("select:anthropic/sonnet", "thinking:high"), actions.commands)
+        assertTrue(runCatching { coordinator.applyModelSettings(session, draft) }.isFailure)
+        finish.complete(Unit)
+        first.join()
         assertTrue(!coordinator.operations.value.activity(key).action)
-    }
-
-    @Test fun failed_model_selection_does_not_send_thinking_level() = runTest {
-        val actions = FakeActions(onSelectModel = { throw IllegalStateException("Model failed") })
-        val errors = mutableListOf<String>()
-        val coordinator = SessionOperations(backgroundScope, actions, SessionDraftStore(), { _, _ -> }, errors::add)
-
-        coordinator.applyModelSettings(session, ModelSettingsChanges(ModelInfo("anthropic", "sonnet", "Sonnet"), "high"))
-        runCurrent()
-
-        assertEquals(listOf("select:anthropic/sonnet"), actions.commands)
-        assertEquals(listOf("Model failed"), errors)
+        assertEquals(listOf(draft), choices)
+        coordinator.applyModelSettings(session, draft)
+        assertEquals(listOf(draft, draft), choices)
     }
 }

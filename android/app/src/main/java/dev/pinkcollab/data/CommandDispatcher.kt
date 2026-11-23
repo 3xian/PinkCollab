@@ -2,8 +2,12 @@ package dev.pinkcollab.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 /** Builds Gateway commands and owns durable submission and recovery. */
 internal class CommandDispatcher(
@@ -21,32 +25,37 @@ internal class CommandDispatcher(
 
     suspend fun removeHost(hostId: String) = pendingCommands.removeHost(hostId)
 
-    suspend fun selectModel(hostId: String, id: String, model: ModelInfo) {
-        val target = runtimeTarget(hostId, id)
-        sendCommand(hostId, id, target.action("select_model:${model.provider}:${model.id}"), "select_model") {
-            target.fields().put("provider", model.provider).put("modelId", model.id)
+    suspend fun applyModelSettings(session: Session, model: ModelInfo?, level: String?, fast: Boolean?) {
+        val fields = JSONObject().apply {
+            session.generation?.let { put("generation", it) }
+            model?.let { put("model", JSONObject().put("provider", it.provider).put("id", it.id)) }
+            level?.let { put("thinkingLevel", it) }
+            fast?.let { put("fastModeEnabled", it) }
         }
-    }
-
-    suspend fun setThinkingLevel(hostId: String, id: String, level: String) {
-        val target = runtimeTarget(hostId, id)
-        sendCommand(hostId, id, target.action("set_thinking_level:$level"), "set_thinking_level") {
-            target.fields().put("level", level)
-        }
-    }
-
-    suspend fun setFastMode(hostId: String, id: String, enabled: Boolean) {
-        if (currentSession(hostId, id)?.runtimeAttached != true) {
-            command(hostId, id, "start")
-            awaitSnapshot(state, "OMP did not become ready for Fast mode") {
-                currentSession(hostId, id)?.let { session ->
-                    session.runtimeAttached && session.generation != null && session.status != SessionStatus.Starting
-                } == true
+        val type = "apply_model_settings"
+        val key = SessionKey(session.hostId, session.id)
+        hostGate.withHost(session.hostId) {
+            val host = paired(session.hostId)
+            val transport = commandTransport(host, session.id)
+            // Identical settings can be requested again after an intervening change.
+            val intentId = UUID.randomUUID().toString()
+            val request = CommandRequest(session.hostId, host.clientId, session.id, "$type:intent:$intentId", type, intentId) { fields }
+            pendingCommands.submit(request, transport) { commandId ->
+                // WS normally wakes us immediately. The receipt endpoint also works
+                // if a reconnect or subscription switch dropped the operation event.
+                withTimeoutOrNull(60_000) {
+                    var receipt: JSONObject
+                    do {
+                        withTimeoutOrNull(2_000) {
+                            state.first { app -> app.details[key]?.operations?.any {
+                                it.commandId == commandId && it.status != OperationStatus.Pending
+                            } == true }
+                        }
+                        receipt = transport.lookup(commandId)
+                    } while (receipt.getString("state") == "pending")
+                    receipt
+                } ?: throw IOException("Could not confirm the model settings. Check the session before retrying.")
             }
-        }
-        val target = runtimeTarget(hostId, id)
-        sendCommand(hostId, id, target.action("set_fast_mode:$enabled"), "set_fast_mode") {
-            target.fields().put("enabled", enabled)
         }
     }
 
@@ -60,7 +69,12 @@ internal class CommandDispatcher(
         if (command == "prompt") require(!intentId.isNullOrBlank()) { "Prompt intent ID required" }
         val requested = body.toString()
         val target = if (command == "interrupt" || command == "stop" || command == "respond") runtimeTarget(hostId, id) else null
-        val action = intentId?.let { "$command:intent:$it" } ?: "$command:$requested"
+        val action = when {
+            intentId != null -> "$command:intent:$intentId"
+            // A lookup-only legacy picker start must not swallow a new explicit Start.
+            command == "start" -> "start:explicit"
+            else -> "$command:$requested"
+        }
         sendCommand(hostId, id, target?.action(action) ?: action, when (command) {
             "stop" -> "stop_runtime"
             "start" -> "start_runtime"

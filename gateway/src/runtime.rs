@@ -66,6 +66,18 @@ pub enum Command {
         generation: String,
         enabled: bool,
     },
+    ApplyModelSettings {
+        generation: Option<String>,
+        model: Option<ModelChoice>,
+        thinking_level: Option<String>,
+        fast_mode_enabled: Option<bool>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelChoice {
+    provider: String,
+    id: String,
 }
 
 impl Command {
@@ -79,6 +91,7 @@ impl Command {
             Self::SelectModel { .. } => "select_model",
             Self::SetThinkingLevel { .. } => "set_thinking_level",
             Self::SetFastMode { .. } => "set_fast_mode",
+            Self::ApplyModelSettings { .. } => "apply_model_settings",
         }
     }
     fn validate(&self) -> Result<()> {
@@ -128,6 +141,25 @@ impl Command {
                 !generation.is_empty() && !level.is_empty(),
                 "generation and level required"
             ),
+            Self::ApplyModelSettings {
+                generation,
+                model,
+                thinking_level,
+                fast_mode_enabled,
+            } => {
+                ensure!(
+                    model.is_some() || thinking_level.is_some() || fast_mode_enabled.is_some(),
+                    "No model settings selected"
+                );
+                ensure!(
+                    generation.as_ref().is_none_or(|g| !g.is_empty())
+                        && thinking_level.as_ref().is_none_or(|l| !l.is_empty())
+                        && model
+                            .as_ref()
+                            .is_none_or(|m| !m.id.is_empty() && !m.provider.is_empty()),
+                    "Invalid model settings"
+                );
+            }
             Self::StartRuntime => {}
         }
         Ok(())
@@ -582,15 +614,42 @@ impl SessionController {
                 )
                 .await
             }
+            Command::ApplyModelSettings {
+                generation,
+                model,
+                thinking_level,
+                fast_mode_enabled,
+            } => {
+                let generation = match generation {
+                    Some(generation) => generation,
+                    None if self.state.lock().await.runtime.is_some() => {
+                        return Err(CommandFailure::failed(
+                            "generation_mismatch",
+                            "Runtime generation changed",
+                        ));
+                    }
+                    None => self.ensure_runtime().await.map_err(start_failure)?.0,
+                };
+                let changes = [
+                    model.map(|m| settings::ModelSetting::Model {
+                        provider: m.provider,
+                        model_id: m.id,
+                    }),
+                    thinking_level.map(settings::ModelSetting::ThinkingLevel),
+                    fast_mode_enabled.map(settings::ModelSetting::FastMode),
+                ];
+                self.apply_model_settings(receipt, &generation, changes.into_iter().flatten())
+                    .await
+            }
             Command::SelectModel {
                 generation,
                 provider,
                 model_id,
             } => {
-                self.apply_model_setting(
+                self.apply_model_settings(
                     receipt,
                     &generation,
-                    settings::ModelSetting::Model { provider, model_id },
+                    [settings::ModelSetting::Model { provider, model_id }],
                 )
                 .await
             }
@@ -598,18 +657,18 @@ impl SessionController {
                 generation,
                 enabled,
             } => {
-                self.apply_model_setting(
+                self.apply_model_settings(
                     receipt,
                     &generation,
-                    settings::ModelSetting::FastMode(enabled),
+                    [settings::ModelSetting::FastMode(enabled)],
                 )
                 .await
             }
             Command::SetThinkingLevel { generation, level } => {
-                self.apply_model_setting(
+                self.apply_model_settings(
                     receipt,
                     &generation,
-                    settings::ModelSetting::ThinkingLevel(level),
+                    [settings::ModelSetting::ThinkingLevel(level)],
                 )
                 .await
             }

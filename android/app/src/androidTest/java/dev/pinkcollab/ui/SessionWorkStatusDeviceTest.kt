@@ -37,7 +37,7 @@ class SessionWorkStatusDeviceTest {
         compose.setContent {
             PinkCollabTheme {
                 SessionPage(SessionPageState(LoadState.Ready(detail.value), currentHost.value, SessionDraft(), 0,
-                    SessionActivity(), null, null), { actions += it }, { true })
+                    SessionActivity(), null, null), { actions += it }, {})
             }
         }
         compose.mainClock.advanceTimeBy(500)

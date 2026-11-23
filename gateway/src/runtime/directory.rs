@@ -279,7 +279,7 @@ impl SessionDirectory {
         let Some(discovered) = self.discovered(id).await? else {
             return Ok(());
         };
-        crate::discovery::ensure_quiet(&discovered.path).await?;
+        crate::discovery::ensure_resumable(&discovered, &self.executable, &self.args).await?;
         // Strict history validation precedes ownership. It neither copies nor changes history.
         crate::history::history_page(&discovered.path, id, None, 1).await?;
         let Some(current) = self.discovered(id).await? else {
@@ -361,6 +361,10 @@ impl SessionDirectory {
         if matches!(
             command,
             Command::StartRuntime
+                | Command::ApplyModelSettings {
+                    generation: None,
+                    ..
+                }
                 | Command::Prompt {
                     generation: None,
                     ..

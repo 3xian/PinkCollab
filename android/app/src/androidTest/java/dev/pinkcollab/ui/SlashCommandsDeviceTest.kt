@@ -8,6 +8,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.pinkcollab.data.AppState
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
@@ -50,7 +51,7 @@ class SlashCommandsDeviceTest {
                     SessionAction.Send -> sent += page.draft.text
                     else -> Unit
                 }
-            }, onApplyModelSettings = { true })
+            }, onApplyModelSettings = {})
         }
         compose.onNodeWithTag("sessionInput").performClick().performTextInput("/SuM")
         compose.onNodeWithTag("slashCommand:compact").assertIsDisplayed()
@@ -73,6 +74,28 @@ class SlashCommandsDeviceTest {
         compose.runOnIdle { assertEquals(listOf("/compact "), sent) }
     }
 
+    @Test fun pager_uses_new_summary_generation_for_slash_commands_before_detail_catches_up() {
+        val next = session.copy(generation = "next")
+        val key = SessionKey(session.hostId, session.id)
+        val list = sessionListState(AppState(hosts = mapOf(session.hostId to host.copy(sessions = listOf(next)))))
+        var detail by mutableStateOf(SessionDetail(session, snapshotToken = "old"))
+        var catalog by mutableStateOf<Map<SessionKey, LoadState<SessionCommands>>>(emptyMap())
+        compose.setContent {
+            TasksScreen(
+                TasksScreenState(list, mapOf(key to detail), emptyMap(), emptyMap(), emptySet(), emptyMap(),
+                    mapOf(key to SessionDraft(text = "/")), emptyMap(), key, commandLoads = catalog),
+                TasksScreenActions({}, {}, {}, {}, {}, { target, action ->
+                    if (action is SessionAction.LoadCommands) {
+                        catalog = mapOf(key to LoadState.Ready(SessionCommands(target.generation,
+                            listOf(SlashCommand("next-command", "builtin")))))
+                    }
+                }, { _, _ -> }),
+            )
+        }
+        compose.runOnIdle { detail = SessionDetail(next, snapshotToken = "new") }
+        compose.onNodeWithTag("slashCommand:next-command").assertIsDisplayed()
+    }
+
     @Test fun error_retry_empty_unknown_and_runtime_restart_never_disable_send_or_keep_old_names() {
         var page by mutableStateOf(SessionPageState(
             LoadState.Ready(SessionDetail(session, snapshotToken = "ready")), host,
@@ -83,7 +106,7 @@ class SlashCommandsDeviceTest {
             SessionPage(page, onAction = {
                 if (it is SessionAction.LoadCommands) loads += it
                 if (it is SessionAction.DraftChanged) page = page.copy(draft = SessionDraft(text = it.text))
-            }, onApplyModelSettings = { true })
+            }, onApplyModelSettings = {})
         }
         compose.onNodeWithText("Loading commands…").assertIsDisplayed()
         compose.onNodeWithText("Send").assertIsEnabled()

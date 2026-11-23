@@ -173,7 +173,7 @@ pub(super) async fn api_command(
             SubmitError::ExternalBusy => ApiError(
                 StatusCode::CONFLICT,
                 "external_session_busy",
-                "Close the external OMP session and retry".into(),
+                crate::protocol::EXTERNAL_SESSION_BUSY.into(),
             ),
             SubmitError::NotFound => ApiError(
                 StatusCode::NOT_FOUND,

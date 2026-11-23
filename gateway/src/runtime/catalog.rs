@@ -9,6 +9,20 @@ pub struct SessionCatalogPage {
 }
 
 impl SessionDirectory {
+    /// Only resolve the workspace. Browsing models must not adopt the session, touch its
+    /// runtime, or wait for the transcript's writer/lease to become available.
+    pub(crate) async fn model_catalog_cwd(&self, id: &str) -> Result<Option<String>> {
+        let lookup = id.to_owned();
+        if let Some(record) = self
+            .store
+            .run(move |store| store.v2_session(&lookup))
+            .await?
+        {
+            return Ok(Some(record.cwd));
+        }
+        Ok(self.discovered(id).await?.map(|session| session.cwd))
+    }
+
     pub async fn catalog_ledger(&self) -> Result<crate::wire::Catalog> {
         let sources = self.discoveries().await?;
         self.store

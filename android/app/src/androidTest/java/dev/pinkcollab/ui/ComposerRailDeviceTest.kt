@@ -4,15 +4,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.compose.ui.semantics.SemanticsActions
@@ -22,7 +20,6 @@ import androidx.compose.ui.text.TextLayoutResult
 import dev.pinkcollab.data.SavedHistory
 import dev.pinkcollab.data.TimelineItem
 import dev.pinkcollab.data.ConnectionState
-import dev.pinkcollab.data.AttentionResponse
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
 import dev.pinkcollab.data.ModelCatalog
@@ -37,7 +34,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.atomic.AtomicInteger
-import java.io.IOException
 
 @RunWith(AndroidJUnit4::class)
 class ComposerRailDeviceTest {
@@ -59,7 +55,7 @@ class ComposerRailDeviceTest {
         compose.setContent {
             SessionPage(page, onAction = { action ->
                 if (action is SessionAction.DraftChanged) page = page.copy(draft = SessionDraft(text = action.text))
-            }, onApplyModelSettings = { true })
+            }, onApplyModelSettings = {})
         }
         // The same text also appears in the timeline; query within the composer.
         fun composerText(text: String) = compose.onAllNodes(
@@ -103,9 +99,13 @@ class ComposerRailDeviceTest {
             SessionDraft(), 0, SessionActivity(), null, null))
         val applied = mutableListOf<ModelSettingsChanges>()
         compose.setContent {
-            SessionPage(page, onAction = {}, onApplyModelSettings = { applied += it; true })
+            SessionPage(page, onAction = {}, onApplyModelSettings = {
+                applied += it
+                if (applied.size == 1) error("Fast mode change was not confirmed.")
+            })
         }
         compose.onNodeWithContentDescription("Fast mode").assertIsEnabled().performClick()
+        compose.onNodeWithText("Fast mode change was not confirmed.").assertIsDisplayed()
         compose.runOnIdle {
             page = page.copy(detail = LoadState.Ready(SessionDetail(
                 detached.copy(runtimeAttached = true, generation = "started"),
@@ -142,59 +142,39 @@ class ComposerRailDeviceTest {
         compose.runOnIdle { assertEquals(1, sent.get()) }
     }
 
-    @Test fun transport_start_failure_without_receipt_is_retryable_and_pending_survives_reopening() {
+    @Test fun detached_picker_reloads_catalog_without_start_and_disables_apply_while_resyncing() {
         val host = HostState(
             PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client"),
             connection = ConnectionState.Online(1L),
         )
         val session = Session("session", "host", "/work", "Work", SessionStatus.Idle, "", false, null,
             "", "", false, null)
-        val initial = SessionDetail(session, snapshotToken = "subscription")
-        val page = SessionPageState(LoadState.Ready(initial), host,
-            SessionDraft(), 0, SessionActivity(), null, null)
-        val key = SessionKey(session.hostId, session.id)
-        var requests = 0
-        val actions = object : SessionActions {
-            override suspend fun command(session: Session, command: SessionUserCommand) {
-                check(command == SessionUserCommand.Start)
-                requests++
-                if (requests == 1) throw IOException("Start outcome was not confirmed")
-            }
-            override suspend fun upload(session: Session, file: SelectedFile) = error("Unexpected upload")
-            override suspend fun prompt(session: Session, message: String, fileIds: List<String>, intentId: String) = error("Unexpected prompt")
-            override suspend fun respond(session: Session, response: AttentionResponse) = error("Unexpected response")
-            override suspend fun selectModel(session: Session, model: ModelInfo) = error("Unexpected model selection")
-            override suspend fun setThinkingLevel(session: Session, level: String) = error("Unexpected thinking change")
-            override suspend fun setFastMode(session: Session, enabled: Boolean) = error("Unexpected fast change")
-            override suspend fun loadEarlierHistory(session: Session) = error("Unexpected history load")
-        }
+        val model = ModelInfo("provider", "model", "Saved model")
+        val initial = SessionDetail(session, model = model, snapshotToken = "subscription")
+        var page by mutableStateOf(SessionPageState(LoadState.Ready(initial), host,
+            SessionDraft(), 0, SessionActivity(), null, LoadState.Ready(ModelCatalog(listOf(model), emptyList()))))
+        val actions = mutableListOf<SessionAction>()
         compose.setContent {
-            val scope = rememberCoroutineScope()
-            val coordinator = remember {
-                SessionOperations(scope, actions, SessionDraftStore(), { _, _ -> }, {}).also {
-                    it.updateDetails(mapOf(key to initial))
-                }
-            }
-            val starts by coordinator.runtimeStarts.collectAsState()
-            val operations by coordinator.operations.collectAsState()
-            SessionPage(page.copy(runtimeStart = starts[key], activity = operations.activity(key)),
-                onAction = { action ->
-                    if (action is SessionAction.Command) coordinator.command(session, action.command)
-                }, onApplyModelSettings = { true })
+            SessionPage(page, onAction = { actions += it }, onApplyModelSettings = { error("Unexpected apply") })
         }
         compose.onNodeWithContentDescription("Choose model: model").performClick()
-        compose.onNodeWithText("Could not start OMP\nStart outcome was not confirmed").assertIsDisplayed()
-        compose.onNodeWithText("Retry").assertIsEnabled().performClick()
-        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
-        compose.runOnIdle { assertEquals(2, requests) }
-        compose.onNodeWithText("Close").performClick()
-        compose.onNodeWithContentDescription("Choose model: model").performClick()
-        compose.onNodeWithText("Could not start OMP", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
-        compose.runOnIdle { assertEquals(2, requests) }
+        compose.onNodeWithText("Reload").assertIsEnabled().performClick()
+        compose.onNodeWithTag("provider:provider").performClick()
+        compose.onNodeWithText("Current", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Saved model, provider").performClick()
+        compose.onNodeWithText("Apply").assertIsEnabled()
+        compose.runOnIdle {
+            assertEquals(listOf(SessionAction.LoadModels(false), SessionAction.LoadModels(true)), actions)
+            page = page.copy(detail = LoadState.Ready(initial.copy(snapshotToken = null)))
+        }
+        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.onNodeWithText("Reload").assertIsNotEnabled()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithContentDescription("Choose model: model").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(2, actions.size) }
     }
 
-    @Test fun exited_session_can_start_choose_model_then_send() {
+    @Test fun detached_session_browses_before_apply_and_can_send_after_success() {
         val host = HostState(
             PairedHost(Host("host", "Desktop", "", "", ""), "https://host", "credential", "client"),
             connection = ConnectionState.Online(1L),
@@ -210,27 +190,14 @@ class ComposerRailDeviceTest {
         compose.setContent {
             SessionPage(page, onAction = { actions += it }, onApplyModelSettings = {
                 applied = it
-                true
+                page = page.copy(detail = LoadState.Ready(initialDetail.copy(
+                    session = exited.copy(runtimeAttached = true, generation = "next"), model = selected)))
             })
         }
 
         compose.onNodeWithContentDescription("Choose model: model").performClick()
-        compose.onNodeWithText("Choose another model").assertDoesNotExist()
-        compose.onNodeWithText("Keep default").assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(listOf(SessionAction.Command(SessionUserCommand.Start)), actions)
-            page = page.copy(detail = LoadState.Ready(initialDetail.copy(session = exited.copy(status = SessionStatus.Starting))),
-                activity = SessionActivity(action = true))
-        }
-        compose.onNodeWithText("Starting OMP…").assertExists()
-        compose.runOnIdle {
-            page = page.copy(detail = LoadState.Ready(initialDetail.copy(session = exited.copy(status = SessionStatus.Idle,
-                runtimeAttached = true, generation = "next"))),
-                activity = SessionActivity())
-        }
-        compose.waitForIdle()
-        compose.runOnIdle {
-            assertTrue(actions.contains(SessionAction.LoadModels(false)))
+            assertEquals(listOf(SessionAction.LoadModels(false)), actions)
             page = page.copy(model = LoadState.Ready(ModelCatalog(listOf(selected), emptyList())))
         }
         compose.onNodeWithTag("provider:provider").performClick()
@@ -238,8 +205,7 @@ class ComposerRailDeviceTest {
         compose.onNodeWithText("Apply").performClick()
         compose.runOnIdle {
             assertEquals(ModelSettingsChanges(selected, null), applied)
-            val detail = (page.detail as LoadState.Ready).value
-            page = page.copy(detail = LoadState.Ready(detail.copy(model = selected)))
+            assertTrue(actions.none { it is SessionAction.Command })
         }
         compose.onNodeWithContentDescription("Choose model: Test model").assertExists()
         compose.onNodeWithText("Send").performClick()

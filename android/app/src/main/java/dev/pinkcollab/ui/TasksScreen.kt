@@ -73,7 +73,6 @@ internal data class TasksScreenState(
     val fileSelections: Map<SessionKey, Int>,
     val selectedSession: SessionKey?,
     val usageLoads: Map<String, LoadState<UsageSnapshot>> = emptyMap(),
-    val runtimeStarts: Map<SessionKey, RuntimeStartAttempt> = emptyMap(),
     val hostOperations: Set<OperationKey> = emptySet(),
     val refreshBatch: HostRefreshBatch? = null,
     val commandLoads: Map<SessionKey, LoadState<SessionCommands>> = emptyMap(),
@@ -86,7 +85,7 @@ internal data class TasksScreenActions(
     val checkForUpdates: () -> Unit,
     val showVersion: () -> Unit,
     val session: (Session, SessionAction) -> Unit,
-    val applyModelSettings: (Session, ModelSettingsChanges) -> Boolean,
+    val applyModelSettings: suspend (Session, ModelSettingsChanges) -> Unit,
     val retryHost: (String) -> Unit = {},
     val loadMoreSessions: (String) -> Unit = {},
     val ensureSessionListed: (SessionKey) -> Unit = {},
@@ -269,13 +268,17 @@ internal fun TasksScreen(
                                 model = modelLoads[key],
                                 commands = state.commandLoads[key],
                                 usage = state.usageLoads[session.hostId],
-                                runtimeStart = state.runtimeStarts[key],
                                 historyItems = displayed?.historyItems,
                                 refreshError = if (host?.connected == true && detailLoads[key] is LoadState.Failed)
                                     "Could not refresh this conversation" else null,
                             ),
-                            onAction = { action -> actions.session(session, action) },
-                            onApplyModelSettings = { changes -> actions.applyModelSettings(session, changes) },
+                            onAction = { action ->
+                                val target = if (action is SessionAction.LoadModels) displayed?.detail?.session ?: session else session
+                                actions.session(target, action)
+                            },
+                            onApplyModelSettings = { changes ->
+                                actions.applyModelSettings(checkNotNull(detail).session, changes)
+                            },
                             loadToolDetails = { callId, cursor -> actions.loadToolDetails(session, callId, cursor) },
                             topScrim = { TasksPagerBackground(cardStripHeight) },
                             recoveryAction = host?.takeIf { !it.connected }?.let {

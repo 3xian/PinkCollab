@@ -53,7 +53,7 @@ class ActivityTimelineSessionDeviceTest {
             PinkCollabTheme {
                 Box(Modifier.fillMaxSize().background(Base0).systemBarsPadding()) {
                     SessionPage(SessionPageState(LoadState.Ready(state.value), host, SessionDraft(), 0,
-                        SessionActivity(), null, null), {}, { true })
+                        SessionActivity(), null, null), {}, {})
                 }
             }
         }
@@ -87,7 +87,7 @@ class ActivityTimelineSessionDeviceTest {
             PinkCollabTheme {
                 Box(Modifier.fillMaxSize().background(Base0).systemBarsPadding()) {
                     SessionPage(SessionPageState(LoadState.Ready(state.value), currentHost.value, SessionDraft(), 0,
-                        SessionActivity(), null, null), {}, { true })
+                        SessionActivity(), null, null), {}, {})
                 }
             }
         }
@@ -106,7 +106,7 @@ class ActivityTimelineSessionDeviceTest {
             PinkCollabTheme {
                 Box(Modifier.fillMaxSize().background(Base0).systemBarsPadding()) {
                     SessionPage(SessionPageState(LoadState.Ready(state.value), host, SessionDraft(), 0,
-                        SessionActivity(), null, null), {}, { true })
+                        SessionActivity(), null, null), {}, {})
                 }
             }
         }
@@ -154,7 +154,7 @@ class ActivityTimelineSessionDeviceTest {
             PinkCollabTheme {
                 Box(Modifier.fillMaxSize().background(Base0).systemBarsPadding()) {
                     SessionPage(SessionPageState(LoadState.Ready(state.value), host, SessionDraft(), 0,
-                        SessionActivity(), null, null), {}, { true })
+                        SessionActivity(), null, null), {}, {})
                 }
             }
         }

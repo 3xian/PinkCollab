@@ -208,23 +208,23 @@ pub(crate) fn finite_output(
     let started = Instant::now();
     let output = rx
         .recv_timeout(timeout)
-        .context("OMP usage timed out")
-        .and_then(|result| result.context("cannot read OMP usage"));
+        .context("OMP command timed out")
+        .and_then(|result| result.context("cannot read OMP command output"));
     let output = output.and_then(|output| {
-        ensure!(output.len() as u64 <= limit, "OMP usage output too large");
+        ensure!(output.len() as u64 <= limit, "OMP command output too large");
         loop {
             if let Some(status) = process.child.lock().try_wait()? {
-                ensure!(status.success(), "OMP usage command failed");
+                ensure!(status.success(), "OMP command failed: {status}");
                 return Ok(output);
             }
-            ensure!(started.elapsed() < timeout, "OMP usage timed out");
+            ensure!(started.elapsed() < timeout, "OMP command timed out");
             std::thread::sleep(Duration::from_millis(20));
         }
     });
     let cleanup = process.terminate(Duration::ZERO);
     reader
         .join()
-        .map_err(|_| anyhow::anyhow!("OMP usage reader panicked"))?;
+        .map_err(|_| anyhow::anyhow!("OMP command reader panicked"))?;
     cleanup?;
     output
 }

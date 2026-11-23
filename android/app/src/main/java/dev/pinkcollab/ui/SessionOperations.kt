@@ -4,16 +4,14 @@ import android.app.Application
 import android.net.Uri
 import dev.pinkcollab.data.GatewayRepository
 import dev.pinkcollab.data.AttentionResponse
-import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.TerminalCommandFailure
-import dev.pinkcollab.data.OperationStatus
-import dev.pinkcollab.data.SessionDetail
-import dev.pinkcollab.data.SessionStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,9 +24,7 @@ internal interface SessionActions {
     suspend fun prompt(session: Session, message: String, fileIds: List<String>, intentId: String)
     suspend fun command(session: Session, command: SessionUserCommand)
     suspend fun respond(session: Session, response: AttentionResponse)
-    suspend fun selectModel(session: Session, model: ModelInfo)
-    suspend fun setThinkingLevel(session: Session, level: String)
-    suspend fun setFastMode(session: Session, enabled: Boolean)
+    suspend fun applyModelSettings(session: Session, changes: ModelSettingsChanges)
     suspend fun loadEarlierHistory(session: Session)
 }
 
@@ -50,14 +46,8 @@ internal class RepositorySessionActions(
     override suspend fun respond(session: Session, response: AttentionResponse) =
         repository.respond(session.hostId, session.id, response)
 
-    override suspend fun selectModel(session: Session, model: ModelInfo) =
-        repository.selectModel(session.hostId, session.id, model)
-
-    override suspend fun setThinkingLevel(session: Session, level: String) =
-        repository.setThinkingLevel(session.hostId, session.id, level)
-
-    override suspend fun setFastMode(session: Session, enabled: Boolean) =
-        repository.setFastMode(session.hostId, session.id, enabled)
+    override suspend fun applyModelSettings(session: Session, changes: ModelSettingsChanges) =
+        repository.applyModelSettings(session, changes.model, changes.thinkingLevel, changes.fastModeEnabled)
 
     override suspend fun loadEarlierHistory(session: Session) = repository.loadEarlierHistory(session.hostId, session.id)
 }
@@ -77,11 +67,6 @@ internal sealed interface SendProgress {
 }
 
 internal data class SessionOperationKey(val session: SessionKey, val lane: SessionLane)
-
-internal sealed interface RuntimeStartAttempt {
-    data class Pending(val previousReceiptId: String?) : RuntimeStartAttempt
-    data class Failed(val message: String) : RuntimeStartAttempt
-}
 
 internal data class SessionActivity(
     val send: Boolean = false,
@@ -113,40 +98,6 @@ internal class SessionOperations(
     val operations = mutableOperations.asStateFlow()
     private val mutableSendProgress = MutableStateFlow<Map<SessionKey, SendProgress>>(emptyMap())
     val sendProgress = mutableSendProgress.asStateFlow()
-    private var details: Map<SessionKey, SessionDetail> = emptyMap()
-    private val mutableRuntimeStarts = MutableStateFlow<Map<SessionKey, RuntimeStartAttempt>>(emptyMap())
-    val runtimeStarts = mutableRuntimeStarts.asStateFlow()
-
-    /** A command acknowledgement can precede its runtime snapshot or terminal receipt. */
-    fun updateDetails(current: Map<SessionKey, SessionDetail>) = synchronized(lock) {
-        details = current
-        mutableRuntimeStarts.update { attempts ->
-            var updated: MutableMap<SessionKey, RuntimeStartAttempt>? = null
-            for ((key, attempt) in attempts) {
-                val detail = current[key]
-                val receipt = detail?.operations?.lastOrNull { it.commandType == "start_runtime" }
-                val resolved = when {
-                    detail?.snapshotToken != null && detail.session.runtimeAttached &&
-                        detail.session.status != SessionStatus.Starting &&
-                        detail.session.status != SessionStatus.Stopping -> null
-                    attempt is RuntimeStartAttempt.Pending && receipt != null &&
-                        receipt.commandId != attempt.previousReceiptId -> when (receipt.status) {
-                        OperationStatus.Failed, OperationStatus.Cancelled, OperationStatus.OutcomeUnknown,
-                        is OperationStatus.Unknown -> RuntimeStartAttempt.Failed(
-                            receipt.errorMessage ?: operationStatusText(receipt) ?: "Runtime start was cancelled.")
-                        else -> attempt
-                    }
-                    else -> attempt
-                }
-                if (resolved != attempt) {
-                    val changed = updated ?: attempts.toMutableMap().also { updated = it }
-                    if (resolved == null) changed.remove(key) else changed[key] = resolved
-                }
-            }
-            updated ?: attempts
-        }
-    }
-
     fun send(session: Session) {
         val key = SessionKey(session.hostId, session.id)
         val draft = drafts.state.value[key] ?: return
@@ -179,46 +130,39 @@ internal class SessionOperations(
         val key = SessionKey(session.hostId, session.id)
         if (command.lane == SessionLane.Control) cancelSend(key)
         launch(key, command.lane) {
-            if (command == SessionUserCommand.Start) synchronized(lock) {
-                val baseline = details[key]?.operations?.lastOrNull { it.commandType == "start_runtime" }?.commandId
-                mutableRuntimeStarts.update { it + (key to RuntimeStartAttempt.Pending(baseline)) }
-            }
             // Gateway orders accepted prompts before Interrupt and fences Stop by runtime generation.
             // Cancellation cannot prove an in-flight POST was not delivered; its durable outbox
             // row remains for receipt reconciliation before the next prompt.
             // Waiting for the local Send job could strand Stop behind a blocked content provider.
-            try {
-                actions.command(session, command)
-                if (command == SessionUserCommand.Delete) onDeleted(key)
-            } catch (failure: Exception) {
-                if (command == SessionUserCommand.Start) synchronized(lock) {
-                    mutableRuntimeStarts.update { attempts ->
-                        if (attempts[key] is RuntimeStartAttempt.Pending)
-                            attempts + (key to RuntimeStartAttempt.Failed(failure.message ?: "Could not start OMP"))
-                        else attempts
-                    }
-                }
-                throw failure
-            }
+            actions.command(session, command)
+            if (command == SessionUserCommand.Delete) onDeleted(key)
         }
     }
 
     fun removeSession(key: SessionKey) {
         cancelSend(key)
-        mutableRuntimeStarts.update { it - key }
     }
 
     fun respond(session: Session, response: AttentionResponse) = launch(session.key(), SessionLane.Action) {
         actions.respond(session, response)
     }
 
-    /** One Action job keeps both commands ordered and prevents lane de-duplication dropping either. */
-    fun applyModelSettings(session: Session, changes: ModelSettingsChanges): Boolean {
-        if (changes.isEmpty) return false
-        return launch(session.key(), SessionLane.Action) {
-            changes.model?.let { actions.selectModel(session, it) }
-            changes.thinkingLevel?.let { actions.setThinkingLevel(session, it) }
-            changes.fastModeEnabled?.let { actions.setFastMode(session, it) }
+    /** The sheet owns its wait; an admitted command is still fenced and settled by Gateway. */
+    suspend fun applyModelSettings(session: Session, changes: ModelSettingsChanges): Unit = coroutineScope {
+        if (changes.isEmpty) return@coroutineScope
+        val operation = SessionOperationKey(session.key(), SessionLane.Action)
+        synchronized(lock) {
+            check(operation !in jobs) { "Another session action is in progress." }
+            jobs[operation] = coroutineContext.job
+            mutableOperations.value += operation
+        }
+        try {
+            actions.applyModelSettings(session, changes)
+        } finally {
+            synchronized(lock) {
+                jobs.remove(operation)
+                mutableOperations.value -= operation
+            }
         }
     }
 
@@ -229,9 +173,6 @@ internal class SessionOperations(
     fun cancelHost(hostId: String) {
         val active = synchronized(lock) { jobs.filterKeys { it.session.hostId == hostId }.values.toList() }
         active.forEach(Job::cancel)
-        synchronized(lock) {
-            mutableRuntimeStarts.update { it.filterKeys { key -> key.hostId != hostId } }
-        }
     }
 
     private fun cancelSend(key: SessionKey) {

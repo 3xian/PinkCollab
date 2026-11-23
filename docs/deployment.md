@@ -339,4 +339,8 @@ Each refresh visits at most 8,192 entries, one level below standard storage or o
 
 ### External writers
 
-An OMP publish lock or a file changing during the quiet check causes `external_session_busy`. This does not detect an idle external process or prevent later writes. Keep external OMP instances closed while PinkCollab owns the runtime. Stale locks are not deleted automatically; other OMP writer versions and non-file storage have not been validated.
+You can browse Models on Android while a conversation remains open in host OMP. To change its model, select one and tap **Apply**. If the host still owns the conversation, close that conversation on the host and tap **Apply** again. Android retains the selection; no new conversation is needed.
+
+Detached browsing uses the selected profile and workspace settings. For exact `enabledModels` selections, only matching provider/model IDs appear. Use the live picker after attaching if the host requires `--trusted-extension`, a runtime-only `--api-key`, a `--cwd` override, or model selectors that require the runtime resolver. If `omp_args` uses `--config`, configure the overlays through `PI_CONFIG_FILES` instead to make them visible to the read-only settings command. Gateway does not relax these settings to generate a list.
+
+Before adopting or restarting a host conversation, Gateway checks for a publish lock or changes to the transcript. With OMP 18.14.1 and later it also queries `omp session lease --json -- <id>`: a held session returns `external_session_busy` even if idle, and an inconclusive probe blocks startup. Older versions rely on the transcript checks alone. These checks do not reserve ownership against later opens; keep external OMP closed while Gateway uses the conversation. Stale locks are not deleted automatically.

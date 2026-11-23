@@ -106,7 +106,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         ::showError,
     )
     internal val sessionOperations = sessionCoordinator.operations
-    internal val runtimeStarts = sessionCoordinator.runtimeStarts
     internal val sendProgress = sessionCoordinator.sendProgress
     private val mutableFileSelections = MutableStateFlow<Map<SessionKey, Int>>(emptyMap())
     internal val fileSelections = mutableFileSelections.asStateFlow()
@@ -114,7 +113,7 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
     private val resourceLoader = SessionResourceLoader(viewModelScope, object : SessionResourceActions {
         override fun hasDetail(key: SessionKey) = repository.state.value.details[key]?.snapshotToken != null
         override suspend fun detail(session: Session) = repository.detail(session.hostId, session.id)
-        override suspend fun models(session: Session) = repository.models(session.hostId, session.id)
+        override suspend fun models(session: Session) = repository.models(session)
     }, ::showError)
     internal val detailLoads = resourceLoader.detailLoads
     internal val modelLoads = resourceLoader.modelLoads
@@ -132,7 +131,6 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         connectivity.registerDefaultNetworkCallback(networkCallback)
         viewModelScope.launch { repository.errors.collect(::showError) }
         viewModelScope.launch { repository.state.collect { app ->
-            sessionCoordinator.updateDetails(app.details)
             commandLoader.updateSessions(app.hosts.values.flatMap { it.sessions })
             app.hosts.forEach { (hostId, host) ->
                 host.removedSessionIds.forEach { id ->
@@ -209,11 +207,10 @@ class CollabViewModel(application: Application, savedStateHandle: SavedStateHand
         sessionCoordinator.send(session)
     }
     internal fun sessionCommand(session: Session, command: SessionUserCommand) {
-        sessionCoordinator.updateDetails(repository.state.value.details)
         sessionCoordinator.command(session, command, ::removeSession)
     }
     internal fun respond(session: Session, response: AttentionResponse) = sessionCoordinator.respond(session, response)
-    internal fun applyModelSettings(session: Session, changes: ModelSettingsChanges) =
+    internal suspend fun applyModelSettings(session: Session, changes: ModelSettingsChanges) =
         sessionCoordinator.applyModelSettings(session, changes)
     internal fun loadEarlierHistory(session: Session) = sessionCoordinator.loadEarlierHistory(session)
     internal suspend fun loadToolDetails(session: Session, callId: String, cursor: String?) = repository.toolDetails(session, callId, cursor)

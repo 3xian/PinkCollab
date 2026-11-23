@@ -15,10 +15,68 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.IOException
 import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
 class CommandOutboxStorageDeviceTest {
+    @Test fun upgrade_fences_old_picker_commands_but_not_new_explicit_starts() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val types = listOf("select_model", "set_thinking_level", "set_fast_mode", "start_runtime", "prompt")
+        fun command(id: String, type: String, state: CommandState) = PendingCommand(
+            id, "host", "client", "session", id, type,
+            JSONObject().put("type", type).put("commandId", id).toString(), state,
+        )
+        val rows = types.flatMap { type ->
+            listOf(CommandState.PREPARED, CommandState.POSTED).map { command("$type-$it", type, it) }
+        }
+        for (oldVersion in listOf(1, 2)) {
+            val name = "outbox-upgrade-$oldVersion-${UUID.randomUUID()}.db"
+            try {
+                // v1 and v2 have the same table layout and encryption key. Seed
+                // real encrypted rows, then reopen through SQLiteOpenHelper's upgrade.
+                SqliteCommandOutboxStorage(context, name).use { seed ->
+                    for (row in rows) seed.insertIfAbsent(row)
+                }
+                context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).use { it.version = oldVersion }
+                SqliteCommandOutboxStorage(context, name).use { storage ->
+                    val outbox = DurableCommandOutbox(storage)
+                    val missingReceipt = CommandTransport(
+                        post = { error("Legacy command must not be posted") },
+                        lookup = { throw GatewayHttpException(404, "operation_not_found", "missing") },
+                    )
+                    for (row in rows) {
+                        val stored = storage.find(row.key)
+                        if (oldVersion == 2 && row.type == "prompt") {
+                            assertEquals(row, stored)
+                        } else if (row.state == CommandState.PREPARED) {
+                            assertNull(stored)
+                        } else {
+                            val fenced = checkNotNull(stored)
+                            assertEquals(row.copy(state = CommandState.LOOKUP_ONLY), fenced)
+                            assertTrue(runCatching { outbox.recover(fenced, missingReceipt) }.exceptionOrNull() is IOException)
+                            assertEquals(fenced, storage.find(row.key))
+                        }
+                    }
+                    val start = storage.insertIfAbsent(command("explicit-start", "start_runtime", CommandState.PREPARED))
+                    var posts = 0
+                    outbox.recover(start, CommandTransport(
+                        post = { body ->
+                            posts++
+                            assertEquals(start.id, body.getString("commandId"))
+                            JSONObject().put("operation", JSONObject().put("id", start.id).put("state", "succeeded"))
+                        },
+                        lookup = { error("A newly prepared start has not yet been sent") },
+                    ))
+                    assertEquals(1, posts)
+                    assertNull(storage.find(start.key))
+                }
+            } finally {
+                context.deleteDatabase(name)
+            }
+        }
+    }
+
     @Test fun encrypted_row_survives_a_new_storage_instance_and_only_one_claim_wins() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val hostId = "device-test-${UUID.randomUUID()}"

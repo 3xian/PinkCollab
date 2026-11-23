@@ -87,6 +87,10 @@ pub struct OperationErrorDto {
     pub code: String,
     pub message: &'static str,
 }
+
+pub(crate) const EXTERNAL_SESSION_BUSY: &str =
+    "This session is open in OMP on the host. Close it there, then try again.";
+
 impl From<&OperationRecord> for OperationDto {
     fn from(o: &OperationRecord) -> Self {
         Self {
@@ -104,7 +108,7 @@ impl From<&OperationRecord> for OperationDto {
                 OperationErrorDto {
                     code: code.into(),
                     message: match code {
-                        "external_session_busy" => "Close the external OMP session and retry",
+                        "external_session_busy" => EXTERNAL_SESSION_BUSY,
                         "history_unavailable" => "OMP history is unavailable; refresh and retry",
                         "generation_mismatch" => "Runtime generation changed",
                         "input_pending" => "Answer the pending input first",
@@ -116,6 +120,12 @@ impl From<&OperationRecord> for OperationDto {
                             "Command output could not be saved; outcome is unknown"
                         }
                         "invalid_file" => "Prompt attachment is unavailable or invalid",
+                        "settings_partially_applied" => {
+                            "Some settings changed. Review your selection and apply again."
+                        }
+                        "unsupported_capability" => {
+                            "This setting is not available for the selected model"
+                        }
                         _ => "Command did not complete successfully",
                     },
                 }

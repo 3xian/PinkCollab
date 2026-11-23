@@ -1,5 +1,6 @@
 package dev.pinkcollab.ui
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,6 +19,8 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +30,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -34,19 +38,52 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.withResumed
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.pinkcollab.data.ModelCatalog
 import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.ui.theme.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.ensureActive
+import java.util.UUID
 
 private enum class ModelPickerAvailability(val message: String? = null) {
     Available,
-    RuntimeDetached("Connecting to OMP…"),
-    RuntimeStarting("Starting runtime…"),
+    Applying("Applying model settings…"),
     LoadFailed("Models could not be loaded. Retry to continue."),
     Loading("Loading models…"),
     Refreshing("Refreshing models…"),
     Busy("Model settings are temporarily unavailable."),
 }
+
+// Save only the user's choice. Capabilities and the descriptor sent to Gateway come from the current catalog.
+private val EditedDraftSaver = Saver<ModelSettingsDraft?, Array<String?>>(
+    save = { it?.let { draft -> arrayOf(draft.model?.provider, draft.model?.id, draft.model?.name, draft.thinkingLevel) } },
+    restore = { (provider, id, name, level) ->
+        ModelSettingsDraft(if (provider != null && id != null && name != null) ModelInfo(provider, id, name) else null, level)
+    },
+)
+
+/** A restored sheet may await its original receipt, never start a new request from saved state. */
+private class ModelPickerAttempts : ViewModel() {
+    private val pending = mutableMapOf<String, Deferred<Unit>>()
+
+    fun start(action: suspend () -> Unit): String {
+        val id = UUID.randomUUID().toString()
+        pending[id] = viewModelScope.async { action() }
+        return id
+    }
+
+    operator fun get(id: String) = pending[id]
+    fun release(id: String) { pending.remove(id)?.cancel() }
+}
+
+private const val InterruptedApply = "The previous wait was interrupted. Check the current settings before retrying."
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,45 +91,72 @@ internal fun ModelPickerSheet(
     state: LoadState<ModelCatalog>?,
     current: ModelInfo?,
     enabled: Boolean,
-    runtimeAttached: Boolean,
-    runtimeStarting: Boolean,
-    canStartRuntime: Boolean,
-    startRuntime: () -> Unit,
     dismiss: () -> Unit,
-    retry: () -> Unit,
     refresh: () -> Unit,
-    apply: (ModelSettingsChanges) -> Unit,
+    apply: suspend (ModelSettingsChanges) -> Unit,
     usageState: LoadState<dev.pinkcollab.data.UsageSnapshot>? = null,
     loadUsage: () -> Unit = {},
-    runtimeStartAttempt: RuntimeStartAttempt? = null,
 ) {
-    LaunchedEffect(Unit) {
-        if (!runtimeAttached && !runtimeStarting && runtimeStartAttempt !is RuntimeStartAttempt.Pending && canStartRuntime)
-            startRuntime()
-    }
-    var showUsage by remember { mutableStateOf(false) }
+    var showUsage by rememberSaveable { mutableStateOf(false) }
     if (showUsage) UsageSheet(usageState, loadUsage) { showUsage = false }
-    var pending by remember { mutableStateOf(ModelSettingsDraft.from(current)) }
-    LaunchedEffect(current) {
-        if (pending.model == null && current != null) pending = ModelSettingsDraft.from(current)
+    val attempts = viewModel { ModelPickerAttempts() }
+    var attemptId by rememberSaveable { mutableStateOf<String?>(null) }
+    var applyError by rememberSaveable { mutableStateOf<String?>(null) }
+    val applying = attemptId != null
+    val currentDismiss by rememberUpdatedState(dismiss)
+    val activity = LocalActivity.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(attempts, activity) {
+        onDispose {
+            if (activity?.isChangingConfigurations != true) attemptId?.let(attempts::release)
+        }
     }
-    var query by remember { mutableStateOf("") }
-    var expandedProviders by remember { mutableStateOf<Set<String>?>(null) }
-    var searchCollapsedProviders by remember(query) { mutableStateOf(emptySet<String>()) }
-    val changes = modelSettingsChanges(current, pending)
+    LaunchedEffect(attemptId, lifecycle) {
+        val id = attemptId ?: return@LaunchedEffect
+        val receipt = attempts[id]
+        val error = if (receipt == null) InterruptedApply else try {
+            receipt.await()
+            null
+        } catch (e: CancellationException) {
+            ensureActive() // Observer disposal must not settle or cancel the retained request.
+            InterruptedApply
+        } catch (e: Exception) {
+            e.localizedMessage ?: "Could not apply model settings."
+        }
+        // Do not consume the result in a stopped activity whose saved state still contains this attempt ID.
+        lifecycle.withResumed {
+            if (attemptId == id) {
+                attempts.release(id)
+                attemptId = null
+                applyError = error
+                if (error == null) currentDismiss()
+            }
+        }
+    }
+    val close = {
+        attemptId?.let(attempts::release)
+        attemptId = null
+        dismiss()
+    }
+    var edited by rememberSaveable(stateSaver = EditedDraftSaver) { mutableStateOf<ModelSettingsDraft?>(null) }
+    val pending = edited ?: ModelSettingsDraft.from(current)
+    var query by rememberSaveable { mutableStateOf("") }
+    var expandedProviders by rememberSaveable { mutableStateOf<List<String>?>(null) }
+    var searchCollapsedProviders by rememberSaveable(query) { mutableStateOf(emptyList<String>()) }
     val ready = state as? LoadState.Ready
+    val catalog = ready?.value
+    val resolution = remember(catalog, current, pending) { catalog?.let { resolveModelDraft(it, current, pending) } }
     val availability = when {
-        !runtimeAttached -> if (runtimeStarting) ModelPickerAvailability.RuntimeStarting
-            else ModelPickerAvailability.RuntimeDetached
+        applying -> ModelPickerAvailability.Applying
+        !enabled -> ModelPickerAvailability.Busy
         state is LoadState.Failed -> ModelPickerAvailability.LoadFailed
         ready == null -> ModelPickerAvailability.Loading
         ready.refreshing -> ModelPickerAvailability.Refreshing
-        !enabled -> ModelPickerAvailability.Busy
         else -> ModelPickerAvailability.Available
     }
     val canEdit = availability == ModelPickerAvailability.Available
     if (!showUsage) Dialog(
-        onDismissRequest = dismiss,
+        onDismissRequest = close,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         Box(Modifier.fillMaxSize().imePadding()) {
@@ -100,28 +164,23 @@ internal fun ModelPickerSheet(
                 Modifier.matchParentSize().clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = dismiss,
+                    onClick = close,
                 ),
             )
             Surface(
                 modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .widthIn(max = BottomSheetDefaults.SheetMaxWidth)
-                    .then(if (runtimeAttached) Modifier.fillMaxHeight(0.93f) else Modifier)
+                    .fillMaxHeight(0.93f)
                     .semantics { paneTitle = "Model settings" },
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
             ) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
-                    ModelPickerHeader({ showUsage = true; loadUsage() }, refresh, runtimeAttached, runtimeAttached &&
-                        ((ready != null && !ready.refreshing) || state is LoadState.Failed))
-                    if (!runtimeAttached) {
-                        DefaultModelContent(
-                            runtimeStartAttempt !is RuntimeStartAttempt.Failed &&
-                                (runtimeStarting || runtimeStartAttempt is RuntimeStartAttempt.Pending),
-                            canStartRuntime, startRuntime, dismiss,
-                            (runtimeStartAttempt as? RuntimeStartAttempt.Failed)?.message)
-                    } else if (ready != null) {
-                        val catalog = ready.value
+                    val focus = LocalFocusManager.current
+                    ModelPickerHeader({ showUsage = true; loadUsage() }, refresh,
+                        canUseHost = enabled && !applying,
+                        canRefresh = (ready != null && !ready.refreshing) || state is LoadState.Failed)
+                    if (catalog != null) {
                         if (catalog.models.isNotEmpty()) ModelSearchField(query) { query = it }
                         else HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         val grouped = groupModelsByProvider(filterModels(catalog.models, query))
@@ -150,7 +209,9 @@ internal fun ModelPickerSheet(
                                         items(models, key = { "model:${it.provider}/${it.id}" }) { model ->
                                             CompactModelRow(model, isSelectedModel(pending.model, model),
                                                 isSelectedModel(current, model), canEdit) {
-                                                pending = selectModelDraft(catalog, current, pending, model)
+                                                edited = selectModelDraft(catalog, current, pending, model)
+                                                applyError = null
+                                                focus.clearFocus()
                                             }
                                         }
                                     }
@@ -167,25 +228,31 @@ internal fun ModelPickerSheet(
                                     modifier = Modifier.padding(24.dp),
                                 ) {
                                     Text(state.message, color = MaterialTheme.colorScheme.error)
-                                    OutlinedButton(onClick = rememberHapticOnClick(retry)) { Text("Retry") }
+                                    OutlinedButton(onClick = rememberHapticOnClick(refresh), enabled = enabled) { Text("Retry") }
                                 }
                                 else -> Text("No models are available from OMP.", color = TextMid)
                             }
                         }
                     }
-                    if (runtimeAttached && ready != null) {
-                        val thinkingLevels = thinkingLevelsForModel(ready.value, pending.model, current)
-                        if (thinkingLevels.isNotEmpty()) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            ThinkingLevelSlider(thinkingLevels, pending.thinkingLevel, canEdit) {
-                                pending = pending.copy(thinkingLevel = it)
-                            }
+                    resolution?.thinkingLevels?.takeIf { it.isNotEmpty() }?.let { thinkingLevels ->
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        ThinkingLevelSlider(thinkingLevels, pending.thinkingLevel, canEdit) {
+                            edited = pending.copy(thinkingLevel = it)
+                            applyError = null
                         }
                     }
-                    if (runtimeAttached) ModelPickerActions(
-                        dismiss = dismiss,
-                        apply = { apply(changes) },
-                        unchanged = changes.isEmpty,
+                    ModelPickerActions(
+                        dismiss = close,
+                        apply = {
+                            if (attemptId == null && canEdit && resolution != null &&
+                                resolution.unavailable == null && !resolution.changes.isEmpty) {
+                                applyError = null
+                                attemptId = attempts.start { apply(resolution.changes) }
+                            }
+                        },
+                        error = applyError,
+                        unavailable = resolution?.unavailable,
+                        unchanged = resolution?.changes?.isEmpty == true,
                         availability = availability,
                     )
                 }
@@ -195,7 +262,7 @@ internal fun ModelPickerSheet(
 }
 
 @Composable
-internal fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, showRefresh: Boolean, canRefresh: Boolean) {
+internal fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, canUseHost: Boolean, canRefresh: Boolean) {
     Row(
         Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -207,43 +274,16 @@ internal fun ModelPickerHeader(usage: () -> Unit, refresh: () -> Unit, showRefre
             horizontalArrangement = Arrangement.End,
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (showRefresh) TextButton(onClick = rememberHapticOnClick(refresh), enabled = canRefresh) {
+            TextButton(onClick = rememberHapticOnClick(refresh), enabled = canUseHost && canRefresh) {
                 Icon(Icons.Outlined.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Reload")
             }
-            TextButton(onClick = rememberHapticOnClick(usage)) {
+            TextButton(onClick = rememberHapticOnClick(usage), enabled = canUseHost) {
                 Icon(Icons.Outlined.DataUsage, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Usage")
             }
-        }
-    }
-}
-
-@Composable
-private fun DefaultModelContent(starting: Boolean, canStart: Boolean, start: () -> Unit, dismiss: () -> Unit, error: String?) {
-    Column(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(top = 8.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        if (starting) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MorphIndicator(Modifier.size(20.dp), Purple400)
-                Text("Starting OMP…", style = MaterialTheme.typography.bodyMedium, color = TextMid)
-            }
-        } else if (error != null) {
-            Text("Could not start OMP\n$error", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error)
-        } else {
-            Text("Waiting to connect to OMP.", style = MaterialTheme.typography.bodyMedium, color = TextMid)
-        }
-        if (!starting) Button(
-            onClick = rememberHapticOnClick(start), enabled = canStart,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-        ) { Text("Retry") }
-        TextButton(onClick = rememberHapticOnClick(dismiss), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Text("Close")
         }
     }
 }
@@ -347,10 +387,17 @@ private fun CompactModelRow(model: ModelInfo, selected: Boolean, current: Boolea
 }
 
 @Composable
-private fun ModelPickerActions(dismiss: () -> Unit, apply: () -> Unit, unchanged: Boolean, availability: ModelPickerAvailability) {
+private fun ModelPickerActions(
+    dismiss: () -> Unit, apply: () -> Unit, error: String?, unavailable: String?,
+    unchanged: Boolean, availability: ModelPickerAvailability,
+) {
     val available = availability == ModelPickerAvailability.Available
     val done = unchanged && available
     Column {
+        if (error != null) Text(error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        if (unavailable != null) Text(unavailable, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         availability.message?.let { message ->
             Text(message, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                 style = MaterialTheme.typography.bodySmall, color = TextMid)
@@ -365,10 +412,10 @@ private fun ModelPickerActions(dismiss: () -> Unit, apply: () -> Unit, unchanged
                     onClick = rememberHapticOnClick(dismiss),
                     modifier = Modifier.height(SmallButtonHeight),
                     contentPadding = SmallButtonPadding,
-                ) { Text("Cancel") }
+                ) { Text(if (availability == ModelPickerAvailability.Applying) "Close" else "Cancel") }
                 Button(
                     onClick = rememberHapticOnClick(if (done) dismiss else apply),
-                    enabled = available,
+                    enabled = available && unavailable == null,
                     modifier = Modifier.height(SmallButtonHeight),
                     contentPadding = SmallButtonPadding,
                 ) {

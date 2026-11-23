@@ -57,7 +57,7 @@ class FloatingTodoSessionDeviceTest {
         compose.setContent { PinkCollabTheme {
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
                 SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
-                    SessionActivity(), null, null), {}, { true })
+                    SessionActivity(), null, null), {}, {})
             }
         } }
         compose.mainClock.advanceTimeBy(500)
@@ -110,7 +110,7 @@ class FloatingTodoSessionDeviceTest {
         compose.setContent { PinkCollabTheme {
             Box(Modifier.fillMaxWidth().height(500.dp)) {
                 SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                    SessionActivity(), null, null), {}, { true }, contentTopInset = 64.dp)
+                    SessionActivity(), null, null), {}, {}, contentTopInset = 64.dp)
             }
         } }
         compose.mainClock.advanceTimeBy(1_000)
@@ -129,7 +129,7 @@ class FloatingTodoSessionDeviceTest {
         compose.mainClock.autoAdvance = false
         compose.setContent { PinkCollabTheme {
             SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
-                SessionActivity(), null, null), {}, { true })
+                SessionActivity(), null, null), {}, {})
         } }
         compose.onNodeWithTag("todoHeader").assertIsDisplayed()
         compose.runOnIdle { detail.value = detail.value.copy(liveItems = detail.value.liveItems + todo("clear", true)) }
@@ -147,7 +147,7 @@ class FloatingTodoSessionDeviceTest {
             CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
                 PinkCollabTheme {
                     SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                        SessionActivity(history = true), null, null), {}, { true })
+                        SessionActivity(history = true), null, null), {}, {})
                 }
             }
         }

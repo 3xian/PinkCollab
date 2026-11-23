@@ -131,7 +131,7 @@ class DirectoryBrowserDeviceTest {
                                 sessionListState(AppState()), emptyMap(), emptyMap(), emptyMap(),
                                 emptySet(), emptyMap(), emptyMap(), emptyMap(), null,
                             ),
-                            TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                            TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
                         )
                         AppRoute.Resources -> Text("Workspace directory")
                         is AppRoute.Browser -> DirectoryBrowserScreen(

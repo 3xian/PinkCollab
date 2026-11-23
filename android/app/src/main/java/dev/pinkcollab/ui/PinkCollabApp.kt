@@ -245,7 +245,6 @@ private fun TasksRoute(
     val sessions by vm.sessionListState.collectAsStateWithLifecycle()
     val details by vm.sessionDetails.collectAsStateWithLifecycle()
     val sessionOperations by vm.sessionOperations.collectAsStateWithLifecycle()
-    val runtimeStarts by vm.runtimeStarts.collectAsStateWithLifecycle()
     val sendProgress by vm.sendProgress.collectAsStateWithLifecycle()
     val detailLoads by vm.detailLoads.collectAsStateWithLifecycle()
     val modelLoads by vm.modelLoads.collectAsStateWithLifecycle()
@@ -256,7 +255,7 @@ private fun TasksRoute(
     val refreshBatch by vm.hostRefreshBatch.collectAsStateWithLifecycle()
     TasksScreen(
         state = TasksScreenState(sessions, details, detailLoads, modelLoads, sessionOperations,
-            sendProgress, drafts, fileSelections, selectedSession, usageLoads, runtimeStarts, hostOperations, refreshBatch,
+            sendProgress, drafts, fileSelections, selectedSession, usageLoads, hostOperations, refreshBatch,
             commandLoads),
         actions = actions,
         retainedDisplay = retainedDisplay,

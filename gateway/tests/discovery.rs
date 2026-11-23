@@ -12,6 +12,10 @@ use std::{path::Path, sync::Arc};
 use support::{Harness, wait_operation};
 
 fn transcript(path: &Path, cwd: &Path, id: &str) {
+    transcript_with_model(path, cwd, id, "fixture", "fast");
+}
+
+fn transcript_with_model(path: &Path, cwd: &Path, id: &str, provider: &str, model: &str) {
     let mut slot = json!({"type":"title","v":1,"title":"Existing conversation","updatedAt":"2026-01-01T00:00:00Z","pad":""});
     slot["pad"] = json!(" ".repeat(255 - slot.to_string().len()));
     assert_eq!(slot.to_string().len() + 1, 256);
@@ -19,7 +23,7 @@ fn transcript(path: &Path, cwd: &Path, id: &str) {
         slot,
         json!({"type":"session","version":3,"id":id,"cwd":workspace::display(&cwd.canonicalize().unwrap_or_else(|_| cwd.to_owned())),"timestamp":"2026-01-01T00:00:00Z"}),
         json!({"type":"message","id":"m1","parentId":null,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":[{"type":"text","text":"original question"}]}}),
-        json!({"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"original answer"}]}}),
+        json!({"type":"message","id":"m2","parentId":"m1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","provider":provider,"model":model,"content":[{"type":"text","text":"original answer"}]}}),
     ];
     std::fs::write(
         path,
@@ -574,6 +578,84 @@ async fn concurrent_store_adoption_and_managed_mapping_deduplication() {
 }
 
 #[tokio::test]
+async fn host_lease_allows_browsing_and_blocks_apply_until_explicit_retry() {
+    let files = tempfile::tempdir().unwrap();
+    let h = Harness::new(1, args(files.path())).await;
+    let cwd = h.cwd("model-picker");
+    let held = Path::new(&cwd).join("held-session");
+    transcript(&files.path().join("history.jsonl"), Path::new(&cwd), "host");
+    std::fs::write(&held, "host").unwrap();
+    let client = reqwest::Client::new();
+    let token = h.pair().await;
+    let sessions = format!("{}/api/v4/sessions", h.url);
+    let list = get(&client, &sessions, &token).await;
+    let id = list["sessions"][0]["session"]["id"].as_str().unwrap();
+    let session = format!("{sessions}/{id}");
+    let command = json!({"type":"apply_model_settings","model":{"provider":"fixture","id":"smart"},"thinkingLevel":"high"});
+    let apply = |command_id| {
+        let mut body = command.clone();
+        body["commandId"] = json!(command_id);
+        client
+            .post(format!("{session}/commands"))
+            .bearer_auth(&token)
+            .json(&body)
+    };
+    let catalog = get(&client, &format!("{session}/model-catalog"), &token).await;
+    assert!(
+        catalog["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["id"] == "smart")
+    );
+    assert!(get(&client, &session, &token).await["runtime"].is_null());
+    assert_api_error(
+        apply("apply"),
+        409,
+        "external_session_busy",
+        "This session is open in OMP on the host. Close it there, then try again.",
+    )
+    .await;
+    assert!(h.store.v2_sessions().unwrap().is_empty());
+    std::fs::remove_file(&held).unwrap();
+    support::command_succeeds(&client, &session, &token, "retry", command.clone()).await;
+    let detail = get(&client, &session, &token).await;
+    assert_eq!(detail["runtime"]["model"]["id"], "smart");
+    assert_eq!(detail["runtime"]["model"]["thinkingLevel"], "high");
+    // An Apply based on a detached snapshot cannot change an intervening generation.
+    assert_eq!(apply("stale").send().await.unwrap().status(), 202);
+    let stale = wait_operation(
+        &client,
+        &format!("{session}/operations/stale"),
+        &token,
+        "failed",
+    )
+    .await;
+    assert_eq!(stale["error"]["code"], "generation_mismatch");
+
+    let generation = support::runtime_generation(&client, &session, &token).await;
+    support::command_succeeds(
+        &client,
+        &session,
+        &token,
+        "stop",
+        json!({"type":"stop_runtime","generation":generation}),
+    )
+    .await;
+    std::fs::write(held, "host").unwrap();
+    assert_eq!(apply("reopen").send().await.unwrap().status(), 202);
+    let receipt = wait_operation(
+        &client,
+        &format!("{session}/operations/reopen"),
+        &token,
+        "failed",
+    )
+    .await;
+    assert_eq!(receipt["error"]["code"], "external_session_busy");
+    assert!(get(&client, &session, &token).await["runtime"].is_null());
+}
+
+#[tokio::test]
 async fn visible_writer_and_removed_workspace_block_adoption() {
     let root = tempfile::tempdir().unwrap();
     let files = tempfile::tempdir().unwrap();
@@ -627,7 +709,23 @@ async fn real_omp_resumes_discovered_history_without_prompt() {
     let executable = std::env::var("OMP_EXECUTABLE").unwrap_or_else(|_| "omp".into());
     let runtime_args = args(files.path());
     let path = files.path().join("external-smoke.jsonl");
-    transcript(&path, root.path(), "external-smoke");
+    // OMP restores the last assistant model on switch; use an installed model,
+    // not a fixture identity or an assistant record with no provider/model.
+    let (host, mut output) =
+        pinkcollab_gateway::omp::Runtime::spawn(&executable, &runtime_args, root.path()).unwrap();
+    let drain = tokio::spawn(async move { while output.recv().await.is_some() {} });
+    host.wait_ready().await.unwrap();
+    let state = host.request(json!({"type":"get_state"})).await.unwrap();
+    host.stop().await;
+    drain.await.unwrap();
+    let model = &state["data"]["model"];
+    transcript_with_model(
+        &path,
+        root.path(),
+        "external-smoke",
+        model["provider"].as_str().unwrap(),
+        model["id"].as_str().unwrap(),
+    );
     let reference = workspace::display(&path);
     let store = Arc::new(Store::open(data.path()).unwrap());
     let directory = SessionDirectory::new(
@@ -668,8 +766,14 @@ async fn real_omp_resumes_discovered_history_without_prompt() {
     })
     .await
     .unwrap();
-    directory.close().await;
     assert_eq!(receipt.status, "succeeded", "{:?}", receipt.error);
+    let (catalog, _) = directory.models(&id).await.unwrap();
+    assert!(
+        catalog
+            .iter()
+            .any(|m| m.id == model["id"] && m.provider == model["provider"])
+    );
+    directory.close().await;
     assert_eq!(
         Path::new(
             store

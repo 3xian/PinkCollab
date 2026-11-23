@@ -30,13 +30,14 @@ internal class SessionResourceLoader(
     private val detailVersions = mutableMapOf<SessionKey, Long>()
     private var nextDetailVersion = 0L
 
-    // Only available models are host-scoped. The fallback levels describe the
-    // requesting runtime's active model and must never be reused by a sibling.
+    // CLI discovery uses workspace configuration and may differ from a live RPC catalog.
+    private data class CatalogScope(val hostId: String, val cwd: String, val live: Boolean)
     private val mutableModelLoads = MutableStateFlow<Map<SessionKey, LoadState<ModelCatalog>>>(emptyMap())
     val modelLoads = mutableModelLoads.asStateFlow()
     private val modelLoadLock = Any()
-    private val hostModels = mutableMapOf<String, List<ModelInfo>>()
-    private val hostModelVersions = mutableMapOf<String, Long>()
+    private val catalogScopes = mutableMapOf<SessionKey, CatalogScope>()
+    private val catalogModels = mutableMapOf<CatalogScope, List<ModelInfo>>()
+    private val catalogVersions = mutableMapOf<CatalogScope, Long>()
     private val thinkingLoads = mutableMapOf<SessionKey, LoadState<List<String>>>()
     private val modelJobs = mutableMapOf<SessionKey, Job>()
     private val modelVersions = mutableMapOf<SessionKey, Long>()
@@ -88,15 +89,18 @@ internal class SessionResourceLoader(
     fun loadModels(session: Session, force: Boolean = false) {
         val hostId = session.hostId
         val key = SessionKey(hostId, session.id)
+        val catalogScope = CatalogScope(hostId, session.cwd, session.runtimeAttached)
         val request = synchronized(modelLoadLock) {
             val current = thinkingLoads[key]
-            val runtimeChanged = key in modelGenerations && modelGenerations[key] != session.generation
+            val runtimeChanged = key in modelGenerations &&
+                (modelGenerations[key] != session.generation || catalogScopes[key] != catalogScope)
             val inFlight = current == LoadState.Loading || (current is LoadState.Ready && current.refreshing)
             if ((inFlight && !runtimeChanged) || (!force && !runtimeChanged && current is LoadState.Ready)) {
                 null
             } else {
                 // A replaced runtime cannot use its predecessor's active-model fallback.
                 val previous = if (runtimeChanged) null else current as? LoadState.Ready
+                catalogScopes[key] = catalogScope
                 thinkingLoads[key] = previous?.copy(refreshing = true) ?: LoadState.Loading
                 publishModelLoads()
                 modelGenerations[key] = session.generation
@@ -112,10 +116,10 @@ internal class SessionResourceLoader(
                 synchronized(modelLoadLock) {
                     if (modelVersions[key] == version) {
                         // Concurrent sessions may finish out of order. Keep the newest
-                        // successful request's host list, but each runtime's own levels.
-                        if (version > (hostModelVersions[hostId] ?: 0L)) {
-                            hostModels[hostId] = models.models
-                            hostModelVersions[hostId] = version
+                        // successful list for this workspace and catalog source only.
+                        if (version > (catalogVersions[catalogScope] ?: 0L)) {
+                            catalogModels[catalogScope] = models.models
+                            catalogVersions[catalogScope] = version
                         }
                         thinkingLoads[key] = LoadState.Ready(models.thinkingLevels)
                         publishModelLoads()
@@ -142,12 +146,12 @@ internal class SessionResourceLoader(
         job.start()
     }
 
-    /** Called under modelLoadLock; ready catalogs share only the host's model list. */
+    /** Called under modelLoadLock; runtime thinking levels are never shared. */
     private fun publishModelLoads() {
         mutableModelLoads.value = thinkingLoads.mapValues { (key, state) ->
             when (state) {
                 is LoadState.Ready -> LoadState.Ready(
-                    ModelCatalog(hostModels.getValue(key.hostId), state.value), state.refreshing,
+                    ModelCatalog(catalogModels.getValue(catalogScopes.getValue(key)), state.value), state.refreshing,
                 )
                 is LoadState.Failed -> state
                 LoadState.Loading -> LoadState.Loading
@@ -164,6 +168,7 @@ internal class SessionResourceLoader(
         val modelJob = synchronized(modelLoadLock) {
             modelVersions.remove(key)
             modelGenerations.remove(key)
+            catalogScopes.remove(key)
             thinkingLoads.remove(key)
             publishModelLoads()
             modelJobs.remove(key)
@@ -181,8 +186,9 @@ internal class SessionResourceLoader(
             }
         }
         val modelToCancel = synchronized(modelLoadLock) {
-            hostModels.remove(hostId)
-            hostModelVersions.remove(hostId)
+            catalogScopes.keys.removeAll { it.hostId == hostId }
+            catalogModels.keys.removeAll { it.hostId == hostId }
+            catalogVersions.keys.removeAll { it.hostId == hostId }
             modelVersions.keys.removeAll { it.hostId == hostId }
             modelGenerations.keys.removeAll { it.hostId == hostId }
             thinkingLoads.keys.removeAll { it.hostId == hostId }

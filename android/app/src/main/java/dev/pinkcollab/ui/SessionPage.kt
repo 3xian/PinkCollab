@@ -59,13 +59,16 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import dev.pinkcollab.data.*
 import dev.pinkcollab.ui.theme.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun SessionPage(
     state: SessionPageState,
     onAction: (SessionAction) -> Unit,
-    onApplyModelSettings: (ModelSettingsChanges) -> Boolean,
+    onApplyModelSettings: suspend (ModelSettingsChanges) -> Unit,
     isActive: Boolean = true,
     contentTopInset: Dp = 0.dp,
     loadToolDetails: suspend (String, String?) -> ToolDetailPage = { _, _ -> error("Tool details unavailable") },
@@ -117,7 +120,10 @@ internal fun SessionPage(
             onFileSelected(uri)
         }
     }
-    var showModels by rememberSaveable(session.id) { mutableStateOf(false) }
+    var showModels by rememberSaveable(session.hostId, session.id) { mutableStateOf(false) }
+    val settingsScope = key(session.hostId, session.id) { rememberCoroutineScope() }
+    var fastJob by remember(session.hostId, session.id) { mutableStateOf<Job?>(null) }
+    var fastError by remember(session.hostId, session.id) { mutableStateOf<String?>(null) }
     var showQuickInputs by rememberSaveable(session.hostId, session.id) { mutableStateOf(false) }
     var showExitConfirmation by rememberSaveable(session.id) { mutableStateOf(false) }
     val controls = sessionControls(detail, host, draft, selectingFiles, activity)
@@ -193,6 +199,10 @@ internal fun SessionPage(
     val inputEnabled = controls.inputEnabled
     val commandSession = state.summary ?: session
     val commandQuery = slashCommandQuery(prompt)
+    val settingsSynced = host?.connected == true && session.runtimeAttached == commandSession.runtimeAttached &&
+        session.generation == commandSession.generation
+    val canChooseModel = settingsSynced && controls.canChooseModel && fastJob?.isActive != true
+    val currentModel = detail.model.takeIf { settingsSynced && attached }
     val commandsAvailable = attached && commandSession.runtimeAttached
     val commandState = currentCommands(state.commands, commandSession.generation)
     LaunchedEffect(isActive, commandQuery != null, commandsAvailable, commandSession.generation) {
@@ -488,11 +498,30 @@ internal fun SessionPage(
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
+                    fastError?.let { message ->
+                        Text(message, modifier = Modifier.padding(horizontal = ComposerContentInset),
+                            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
                     ComposerSettingsBar(
-                        model = detail.model,
-                        canChooseModel = controls.canChooseModel,
+                        model = currentModel,
+                        canChooseModel = canChooseModel,
                         onChooseModel = { showModels = true },
-                        onFastChange = { onApplyModelSettings(ModelSettingsChanges(null, null, it)) },
+                        onFastChange = { enabled ->
+                            if (fastJob?.isActive != true) {
+                                fastError = null
+                                fastJob = settingsScope.launch {
+                                    try {
+                                        onApplyModelSettings(ModelSettingsChanges(null, null, enabled))
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        fastError = e.localizedMessage ?: "Could not change Fast mode."
+                                    } finally {
+                                        fastJob = null
+                                    }
+                                }
+                            }
+                        },
                         onQuickInputs = { showQuickInputs = true },
                     )
                 }
@@ -523,27 +552,19 @@ internal fun SessionPage(
             }
         }
     }
-    LaunchedEffect(showModels, attached, session.generation) {
-        if (showModels && attached) onLoadModels(false)
-    }
-    if (showModels) {
+    if (showModels) key(session.hostId, session.id) {
+        LaunchedEffect(settingsSynced, attached, session.generation) {
+            if (settingsSynced) onLoadModels(false)
+        }
         ModelPickerSheet(
             state = modelState,
             usageState = state.usage,
             loadUsage = { onAction(SessionAction.LoadUsage) },
-            current = detail.model,
-            enabled = attached && !activity.inputBusy,
-            runtimeAttached = attached,
-            runtimeStarting = session.status == SessionStatus.Starting,
-            canStartRuntime = controls.canChooseModel,
-            startRuntime = { onCommand(SessionUserCommand.Start) },
-            runtimeStartAttempt = state.runtimeStart,
+            current = currentModel,
+            enabled = canChooseModel,
             dismiss = { showModels = false },
-            retry = { onLoadModels(true) },
             refresh = { onLoadModels(true) },
-            apply = { changes ->
-                if (onApplyModelSettings(changes)) showModels = false
-            },
+            apply = onApplyModelSettings,
         )
     }
     if (showQuickInputs && isActive) {

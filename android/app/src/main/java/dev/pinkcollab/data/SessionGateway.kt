@@ -225,9 +225,10 @@ internal class SessionGateway(
         return withContext(Dispatchers.Default) { parseUsage(JSONObject(response)) }
     }
 
-    suspend fun models(hostId: String, id: String): ModelCatalog {
-        val p = paired(hostId)
-        val response = api.request(p.url, p.credential, "/api/v4/sessions/$id/models")
+    suspend fun models(session: Session): ModelCatalog {
+        val p = paired(session.hostId)
+        val resource = if (session.runtimeAttached) "models" else "model-catalog"
+        val response = api.request(p.url, p.credential, "/api/v4/sessions/${session.id}/$resource")
         return withContext(Dispatchers.Default) {
             val raw = JSONObject(response)
             ModelCatalog(raw.getJSONArray("models").objects().map { it.modelInfo() }, raw.getJSONArray("thinkingLevels").strings())

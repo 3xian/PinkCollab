@@ -19,12 +19,12 @@ class UsageDeviceTest {
             "available", listOf(UsageLimit("weekly", "7 days", null, null, "7 days",
                 1791351322000, 0.62, 62.0, 100.0, 38.0, "percent", "ok")))
         compose.setContent { PinkCollabTheme {
-            ModelPickerSheet(state = null, current = null, enabled = false, runtimeAttached = false,
-                runtimeStarting = false, canStartRuntime = false, startRuntime = {}, dismiss = {},
-                retry = {}, refresh = {}, apply = {}, usageState = LoadState.Ready(UsageSnapshot(1790781273269, listOf(account))),
+            ModelPickerSheet(state = LoadState.Ready(ModelCatalog(emptyList(), emptyList())),
+                current = null, enabled = true, dismiss = {}, refresh = {}, apply = {},
+                usageState = LoadState.Ready(UsageSnapshot(1790781273269, listOf(account))),
                 loadUsage = { loads++ })
         } }
-        compose.onNodeWithText("Reload").assertDoesNotExist()
+        compose.onNodeWithText("Reload").assertIsEnabled()
         pauseForInspection()
         compose.onNodeWithContentDescription("Close model settings").assertDoesNotExist()
         compose.onNodeWithText("Usage").performClick()

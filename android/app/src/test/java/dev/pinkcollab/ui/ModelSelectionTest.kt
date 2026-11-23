@@ -97,6 +97,35 @@ class ModelSelectionTest {
         assertEquals(listOf("off", "low", "xhigh"), thinkingLevelsForModel(catalog, current, current))
     }
 
+    @Test fun replacement_catalog_never_inherits_levels_from_the_edited_descriptor() {
+        val old = models[1].copy(thinkingLevels = listOf("high"))
+        val draft = ModelSettingsDraft(old, "high")
+        val current = models[0].copy(thinkingLevel = "high")
+        val catalog = ModelCatalog(listOf(models[1]), listOf("high"))
+        val candidate = resolveModelDraft(catalog, current, draft)
+        // Even though the level matches the current model, the switch cannot promise it on the candidate.
+        assertEquals(emptyList<String>(), candidate.thinkingLevels)
+        assertTrue(candidate.unavailable.orEmpty().contains("Thinking level high"))
+
+        val supported = models[1].copy(name = "Renamed", thinkingLevels = listOf("high"))
+        val refreshed = resolveModelDraft(catalog.copy(models = listOf(supported)), current, draft)
+        assertNull(refreshed.unavailable)
+        assertEquals(ModelSettingsChanges(supported, null), refreshed.changes)
+    }
+
+    @Test fun unlisted_active_model_can_use_live_levels_but_a_removed_candidate_cannot() {
+        val old = models[0].copy(thinkingLevels = listOf("old"))
+        val catalog = ModelCatalog(emptyList(), listOf("new"))
+        val active = resolveModelDraft(catalog, old, ModelSettingsDraft(old, "new"))
+        assertNull(active.unavailable)
+        assertEquals(ModelSettingsChanges(null, "new"), active.changes)
+        val missing = resolveModelDraft(catalog, null, ModelSettingsDraft(old, "new"))
+        assertTrue(missing.unavailable.orEmpty().contains("no longer available"))
+        assertTrue(missing.thinkingLevels.isEmpty())
+        val detached = resolveModelDraft(ModelCatalog(emptyList(), emptyList()), null, ModelSettingsDraft(null, "new"))
+        assertTrue(detached.unavailable.orEmpty().contains("Thinking level new"))
+    }
+
     @Test fun model_parser_reads_per_model_thinking_levels() {
         val parsed = JSONObject("""{"provider":"fixture","id":"med","name":"Med","thinkingLevels":["off","med","high"]}""").modelInfo()
         assertEquals(listOf("off", "med", "high"), parsed.thinkingLevels)

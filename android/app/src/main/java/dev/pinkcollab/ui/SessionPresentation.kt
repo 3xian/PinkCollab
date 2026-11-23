@@ -32,7 +32,6 @@ internal data class SessionPageState(
     val historyItems: List<TimelineItem>? = null,
     val summary: Session? = null,
     val usage: LoadState<dev.pinkcollab.data.UsageSnapshot>? = null,
-    val runtimeStart: RuntimeStartAttempt? = null,
     val commands: LoadState<SessionCommands>? = null,
 )
 

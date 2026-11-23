@@ -88,7 +88,7 @@ class SessionHistoryDeviceTest {
                 SessionPage(
                     SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                         SessionActivity(), null, null),
-                    onAction = {}, onApplyModelSettings = { true },
+                    onAction = {}, onApplyModelSettings = {},
                 )
             }
         }
@@ -116,7 +116,7 @@ class SessionHistoryDeviceTest {
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
                 SessionActivity(), null, null, historyItems = listOf(saved)),
-                onAction = {}, onApplyModelSettings = { true })
+                onAction = {}, onApplyModelSettings = {})
         }
         timelineMessage("Earlier question").assertIsDisplayed()
         compose.onNodeWithTag("historyLoading").assertDoesNotExist()
@@ -134,7 +134,7 @@ class SessionHistoryDeviceTest {
                 SessionActivity(), null, null), onAction = {
                     if (it is SessionAction.DraftChanged) draft.value = draft.value.copy(text = it.text)
                     else submitted.add(it)
-                }, onApplyModelSettings = { true })
+                }, onApplyModelSettings = {})
         }
         val input = compose.onNodeWithTag("sessionInput")
         compose.runOnIdle { detail.value = detail.value.copy(snapshotToken = null) }
@@ -163,7 +163,7 @@ class SessionHistoryDeviceTest {
         compose.setContent {
             SessionPage(SessionPageState(load.value, host, SessionDraft(text = "Unsent draft"), 0,
                 SessionActivity(), null, null, summary = session),
-                onAction = {}, onApplyModelSettings = { true })
+                onAction = {}, onApplyModelSettings = {})
         }
         val input = compose.onNodeWithTag("sessionInput")
         input.assertIsDisplayed().assertIsEnabled().assertTextEquals("Unsent draft")
@@ -196,7 +196,7 @@ class SessionHistoryDeviceTest {
             Box(Modifier.fillMaxSize().navigationBarsPadding()) {
                 SessionPage(SessionPageState(LoadState.Ready(SessionDetail(session, snapshotToken = "sub", liveItems = listOf(live))),
                     host, SessionDraft(), 0, SessionActivity(), null, null),
-                    onAction = {}, onApplyModelSettings = { true })
+                    onAction = {}, onApplyModelSettings = {})
             }
         }
         val input = compose.onNode(hasSetTextAction())
@@ -227,7 +227,7 @@ class SessionHistoryDeviceTest {
         val detail = SessionDetail(session, snapshotToken = "sub", liveItems = messages)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true },
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = {},
                 isActive = active.value)
         }
         timelineMessage("Question 40").assertIsDisplayed()
@@ -246,7 +246,7 @@ class SessionHistoryDeviceTest {
             liveItems = listOf(live))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = {})
         }
 
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("Earlier question"))
@@ -270,7 +270,7 @@ class SessionHistoryDeviceTest {
                     requests++
                     activity.value = SessionActivity(history = true)
                 }
-            }, onApplyModelSettings = { true })
+            }, onApplyModelSettings = {})
         }
         val timeline = compose.onNodeWithTag("sessionTimeline")
         timeline.performTouchInput { swipeDown() }
@@ -309,7 +309,7 @@ class SessionHistoryDeviceTest {
                         requests++
                         activity.value = SessionActivity(history = true)
                     }
-                }, onApplyModelSettings = { true }, isActive = active.value)
+                }, onApplyModelSettings = {}, isActive = active.value)
         }
         val timeline = compose.onNodeWithTag("sessionTimeline")
         timeline.performTouchInput { swipeDown() }
@@ -352,7 +352,7 @@ class SessionHistoryDeviceTest {
             SessionPage(SessionPageState(LoadState.Ready(detail.value), host.copy(connection = connection.value),
                 SessionDraft(), 0, SessionActivity(), null, null),
                 onAction = { if (it == SessionAction.LoadEarlierHistory) requests++ },
-                onApplyModelSettings = { true }, isActive = active.value)
+                onApplyModelSettings = {}, isActive = active.value)
         }
         val timeline = compose.onNodeWithTag("sessionTimeline")
         timeline.performTouchInput { swipeDown() }
@@ -376,7 +376,7 @@ class SessionHistoryDeviceTest {
             generation = null), savedHistory = SavedHistory.Loading)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = {})
         }
 
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
@@ -388,7 +388,7 @@ class SessionHistoryDeviceTest {
             generation = null), snapshotToken = "subscription", savedHistory = SavedHistory.Failed)
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = {})
         }
 
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
@@ -403,7 +403,7 @@ class SessionHistoryDeviceTest {
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail.value), host.copy(connection = connection.value),
                 SessionDraft(), 0, SessionActivity(), null, null, refreshError = "Old snapshot timeout"),
-                onAction = {}, onApplyModelSettings = { true })
+                onAction = {}, onApplyModelSettings = {})
         }
         for (state in listOf(ConnectionState.Connecting, ConnectionState.Synchronizing)) {
             compose.runOnIdle { connection.value = state }
@@ -428,7 +428,7 @@ class SessionHistoryDeviceTest {
         val detail = mutableStateOf(SessionDetail(session, snapshotToken = "sub", savedHistory = SavedHistory.Loading))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = {})
         }
         compose.onNodeWithTag("historyLoading").assertIsDisplayed()
         compose.runOnIdle {
@@ -443,7 +443,7 @@ class SessionHistoryDeviceTest {
             generation = null))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = {})
         }
 
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
@@ -454,7 +454,7 @@ class SessionHistoryDeviceTest {
             generation = null), savedHistory = SavedHistory.Ready(null, listOf(saved), null))
         compose.setContent {
             SessionPage(SessionPageState(LoadState.Ready(detail), host, SessionDraft(), 0,
-                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = { true })
+                SessionActivity(), null, null), onAction = {}, onApplyModelSettings = {})
         }
 
         timelineMessage("Earlier question").assertExists()

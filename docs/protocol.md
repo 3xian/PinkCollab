@@ -104,8 +104,11 @@ Deletion is serialized with command admission and uploads for that session, and 
 | `select_model` | `generation`, `provider`, `modelId` |
 | `set_thinking_level` | `generation`, `level` |
 | `set_fast_mode` | `generation`, `enabled` (boolean) |
+| `apply_model_settings` | optional `generation`; at least one of `model:{provider,id}`, `thinkingLevel`, `fastModeEnabled` |
 
 Generation guards target one process lifetime. A mismatch fails without affecting a newer runtime. A prompt with no generation means the caller observed **no runtime**: Gateway starts one only if still absent. An attached runtime requires its generation. Gateway routes idle prompts normally and running prompts as steering; Android sends no delivery choice. Starting/stopping runtimes and pending input reject inappropriate work. Stop confirms process-tree exit before releasing its slot; Interrupt keeps the process.
+
+`apply_model_settings` with no generation is an explicit request to attach only if there is still no runtime. It checks external ownership before adopting or resuming a host conversation. One receipt covers model, thinking level and Fast mode in that order. A later setting can fail after an earlier setting took effect (`settings_partially_applied`); inspect refreshed runtime state rather than assuming rollback. `pending` is not successful application.
 
 After a valid `respond` frame is successfully written to OMP's stdin, Gateway commits and publishes exactly one durable feedback item. A successful Operation confirms transport delivery only. Invalid options, missing confirmation booleans, expired inputs, generation mismatches and failed writes produce no feedback. If delivery succeeded but its durable receipt cannot be committed, the Operation is unknown rather than claiming a saved response. Respond can be delivered while the originating prompt's RPC acknowledgement is still pending.
 
@@ -126,6 +129,8 @@ Command identity is `(clientId,sessionId,commandId)`. Repeating the same semanti
 Gateway persists a receipt before dispatch and records the external-send boundary. Public `pending` covers its internal accepted/dispatching/running stages. On restart, accepted work is cancelled; work that may have reached OMP becomes `unknown`. Neither is automatically replayed. Unknown means the effect cannot be proven; it must not be presented as successful or safe to retry.
 
 Android persists encrypted commands before POST, recovers by receipt lookup, and retains a stable ID for each prompt intent. Stop is lookup-only after its first send attempt. A storage failure may allow emergency Stop with `receiptStored:false`; inspect runtime state, never automatically resend it. Only HTTP 404 with `operation_not_found` proves a receipt is absent. During the protocol upgrade, Android discards never-sent old payloads and makes all previously sent outbox entries lookup-only.
+
+Each explicit Apply has a new command ID, even when it requests the same settings as an earlier Apply. Only receipt reconciliation reuses that ID. An admission response of `external_session_busy` or `history_unavailable` rejects the request before receipt creation; this is not an unknown delivery outcome.
 
 ## History and files
 
@@ -150,6 +155,8 @@ Before a prompt or attention response reaches OMP, Gateway durably protects its 
 `PUT /sessions/:id/files/:fileId?name=...` uploads raw `application/octet-stream` bytes. IDs are `file_` plus 32 hex digits; each file is 1 byte–10 MiB, with up to five files per prompt. Identical retries are idempotent. References are scoped to the session. Idle prompts use quoted host file mentions; steering uses host paths and embeds recognized images up to 512 KiB. Frames exceeding the 1 MiB OMP limit fail. Uploaded files remain in the Gateway data directory until the session is deleted or the files are removed there.
 
 Other core reads: `GET /fs/list?path=...` returns `{path,parent,directories}` within allowed roots; `GET /sessions/:id/models` returns `{models,thinkingLevels}` from the attached runtime.
+`GET /sessions/:id/model-catalog` uses the same authentication and response shape but reads the host CLI catalog in the session's allowed workspace. It does not adopt, start or check ownership. Per-model capabilities describe candidates only; top-level `thinkingLevels` is empty because there is no active-model fallback. A busy or unavailable CLI catalog returns 503.
+The detached catalog honors the effective `enabledModels` setting for exact provider/model selections. If the CLI cannot reproduce the runtime's selection, credentials, or extension policy, the endpoint returns `503 model_catalog_unsupported` before offering choices. Use the attached runtime’s `/models` endpoint in that case.
 
 When restoring a detached transcript, Gateway reads the new OMP process's default model before loading history, then selects that model before sending a prompt. The attached runtime reports the actual model name; later explicit model changes apply for that runtime.
 
@@ -163,7 +170,7 @@ Inspection APIs use the same public DTOs: `GET /host`, `GET /workspaces`, `GET /
 
 Existing host OMP sessions share `/sessions` pagination, host snapshots, session snapshots, history and commands. `origin: discovered` always has `runtime: null`; its session snapshot has `hasHistory: true`, empty `timeline` and empty `operations`. Timestamps describe stored metadata only. No transcript path or OMP-specific representation is exposed. Display it as On host: a source label, not a claim that the external process is running, idle, or exited. A null runtime means no Gateway-owned runtime, not proof that an external OMP process is absent.
 
-A generation-less `prompt` or `start_runtime` lazily adopts it and publishes the normal flattened `session_upsert` followed by normal runtime/session events. Its ID does not change; `origin` becomes `managed`, replacing the existing card. Uploading an attachment or reading a snapshot/history does not adopt. Command IDs, outbox scope, receipt lookup and cursor binding are unchanged.
+A generation-less `prompt`, `start_runtime` or `apply_model_settings` lazily adopts it and publishes the normal flattened `session_upsert` followed by normal runtime/session events. Its ID does not change; `origin` becomes `managed`, replacing the existing card. Uploads and read-only catalog, snapshot and history requests do not adopt. Command IDs, outbox scope, receipt lookup and cursor binding are unchanged.
 
 Admission can return HTTP 409 `external_session_busy` (close external OMP and retry), HTTP 503 `history_unavailable`, or HTTP 404 `session_not_found`. No receipt exists if admission fails before command persistence. Startup after adoption can fail its durable operation with `external_session_busy` or `history_unavailable`; the managed mapping is retained.
 

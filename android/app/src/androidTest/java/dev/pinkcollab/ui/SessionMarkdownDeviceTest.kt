@@ -296,7 +296,7 @@ class SessionMarkdownDeviceTest {
             PinkCollabTheme {
                 Box(Modifier.fillMaxSize()) {
                     SessionPage(SessionPageState(LoadState.Ready(detail.value), host, SessionDraft(), 0,
-                        SessionActivity(), null, null), {}, { true })
+                        SessionActivity(), null, null), {}, {})
                 }
             }
         }

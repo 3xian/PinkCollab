@@ -32,6 +32,8 @@ import dev.pinkcollab.data.AppState
 import dev.pinkcollab.data.ConnectionState
 import dev.pinkcollab.data.Host
 import dev.pinkcollab.data.HostState
+import dev.pinkcollab.data.ModelCatalog
+import dev.pinkcollab.data.ModelInfo
 import dev.pinkcollab.data.PairedHost
 import dev.pinkcollab.data.Session
 import dev.pinkcollab.data.SessionKey
@@ -45,6 +47,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.abs
+import kotlinx.coroutines.CompletableDeferred
 
 @RunWith(AndroidJUnit4::class)
 class TasksPagerBarDeviceTest {
@@ -66,7 +69,7 @@ class TasksPagerBarDeviceTest {
                         deletes++
                         operations = setOf(SessionOperationKey(SessionKey("host", target.id), SessionLane.Action))
                     }
-                }, { _, _ -> true }, clearSelection = { selected = null }))
+                }, { _, _ -> }, clearSelection = { selected = null }))
         }
         compose.onNodeWithTag("sessionCard:s0").performClick()
         compose.onNodeWithTag("deleteSessionFromInfo").performClick()
@@ -95,7 +98,7 @@ class TasksPagerBarDeviceTest {
         compose.setContent {
             TasksScreen(TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
                 emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), SessionKey("host", "s0")),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }))
         }
         compose.onNodeWithTag("sessionCard:s0").performClick()
         compose.onNodeWithTag("deleteSessionFromInfo").assertIsNotEnabled()
@@ -129,7 +132,7 @@ class TasksPagerBarDeviceTest {
                     sessionListState(AppState(hosts = mapOf("host" to host))),
                     emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), selected,
                 ),
-                TasksScreenActions({ selected = it; selections += it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({ selected = it; selections += it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.onNodeWithTag("sessionCard:s1").performClick()
@@ -215,7 +218,7 @@ class TasksPagerBarDeviceTest {
             TasksScreen(
                 TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.waitForIdle()
@@ -241,7 +244,7 @@ class TasksPagerBarDeviceTest {
             if (showTasks) TasksScreen(
                 TasksScreenState(sessionListState(app), app.details, emptyMap(), emptyMap(), emptySet(), emptyMap(),
                     emptyMap(), emptyMap(), key),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }), retainedDisplay = cache)
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }), retainedDisplay = cache)
         }
         timelineMessage("Retained conversation").assertIsDisplayed()
         compose.runOnIdle { showTasks = false; app = app.copy(details = emptyMap()) }
@@ -262,7 +265,7 @@ class TasksPagerBarDeviceTest {
         compose.setContent {
             TasksScreen(TasksScreenState(sessionListState(app), app.details, emptyMap(), emptyMap(), emptySet(), emptyMap(),
                 emptyMap(), emptyMap(), key),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }))
         }
         timelineMessage("Keep this visible").assertIsDisplayed()
         compose.runOnIdle { app = app.copy(details = emptyMap()) }
@@ -284,7 +287,7 @@ class TasksPagerBarDeviceTest {
         compose.setContent {
             TasksScreen(TasksScreenState(sessionListState(app), app.details, emptyMap(), emptyMap(), emptySet(), emptyMap(),
                 emptyMap(), emptyMap(), key),
-                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
+                TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }))
         }
         compose.onNodeWithText("No saved messages yet").assertDoesNotExist()
         compose.runOnIdle { app = app.copy(details = mapOf(key to detail.copy(savedHistory = SavedHistory.Loading))) }
@@ -304,7 +307,7 @@ class TasksPagerBarDeviceTest {
         compose.setContent {
             TasksScreen(TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                 emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }))
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }))
             LaunchedEffect(Unit) {
                 snapshotFlow { sessionListState(AppState(hosts = mapOf("host" to host))) }
                     .followTaskFocus(snapshotFlow { selected }) { requests += it.id }
@@ -337,7 +340,7 @@ class TasksPagerBarDeviceTest {
             TasksScreen(
                 TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))), emptyMap(), emptyMap(), emptyMap(),
                     emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.waitForIdle()
@@ -393,7 +396,7 @@ class TasksPagerBarDeviceTest {
                 TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
                     emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
                 TasksScreenActions({ selections += it; selected = it }, {}, {}, {}, {},
-                    { _, _ -> }, { _, _ -> true }),
+                    { _, _ -> }, { _, _ -> }),
             )
         }
         compose.waitForIdle()
@@ -421,7 +424,7 @@ class TasksPagerBarDeviceTest {
             TasksScreen(
                 TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
                     emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(), selected),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
             )
         }
         compose.waitForIdle()
@@ -430,7 +433,7 @@ class TasksPagerBarDeviceTest {
         assertEquals(SessionKey("host", "s1"), selected)
     }
 
-    @Test fun model_picker_survives_runtime_start_and_failure_reordering() {
+    @Test fun model_picker_keeps_selected_session_and_draft_when_apply_reorders_pages() {
         val target = sessions.last()
         val targetKey = SessionKey("host", target.id)
         var selected by mutableStateOf<SessionKey?>(targetKey)
@@ -438,38 +441,47 @@ class TasksPagerBarDeviceTest {
             PairedHost(Host("host", "Desktop", "", "", ""), "", "", ""),
             connection = ConnectionState.Online(1L), sessions = sessions))
         var detail by mutableStateOf(SessionDetail(target, snapshotToken = "subscription"))
-        var operations by mutableStateOf(emptySet<SessionOperationKey>())
-        var runtimeStart by mutableStateOf<RuntimeStartAttempt?>(null)
+        val model = ModelInfo("provider", "chosen", "Chosen")
+        val catalog = LoadState.Ready(ModelCatalog(listOf(model), emptyList()))
+        val finishStart = CompletableDeferred<Unit>()
+        val attempts = mutableListOf<SessionKey>()
+        val loads = mutableListOf<SessionAction>()
         compose.setContent {
             TasksScreen(
                 TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
-                    mapOf(targetKey to detail), emptyMap(), emptyMap(), operations,
-                    emptyMap(), emptyMap(), emptyMap(), selected,
-                    runtimeStarts = runtimeStart?.let { mapOf(targetKey to it) } ?: emptyMap()),
-                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, action ->
-                    if (action == SessionAction.Command(SessionUserCommand.Start)) {
-                        operations = setOf(SessionOperationKey(targetKey, SessionLane.Action))
-                        runtimeStart = RuntimeStartAttempt.Pending(null)
-                        val starting = target.copy(status = SessionStatus.Starting)
-                        detail = detail.copy(session = starting)
-                        host = host.copy(sessions = sessions.dropLast(1) + starting)
-                    }
-                }, { _, _ -> true }),
+                    mapOf(targetKey to detail), emptyMap(), mapOf(targetKey to catalog), emptySet(),
+                    emptyMap(), emptyMap(), emptyMap(), selected),
+                TasksScreenActions({ selected = it }, {}, {}, {}, {}, { _, action -> loads += action },
+                    { session, changes ->
+                        attempts += SessionKey(session.hostId, session.id)
+                        assertEquals(ModelSettingsChanges(model, null), changes)
+                        if (attempts.size == 1) {
+                            val starting = target.copy(status = SessionStatus.Starting)
+                            detail = detail.copy(session = starting)
+                            host = host.copy(sessions = sessions.dropLast(1) + starting)
+                            finishStart.await()
+                            detail = detail.copy(session = target)
+                            host = host.copy(sessions = sessions)
+                            error("Close the session on your computer, then tap Apply.")
+                        }
+                    }),
             )
         }
         compose.onNode(hasContentDescription("Choose model: model") and isEnabled()).performClick()
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.onNodeWithTag("provider:provider").performClick()
+        compose.onNode(hasContentDescription("Chosen, provider")).performClick()
         compose.runOnIdle {
-            assertEquals(targetKey, selected)
-            operations = emptySet()
-            detail = detail.copy(session = target)
-            runtimeStart = RuntimeStartAttempt.Failed("OMP did not load stored session")
-            host = host.copy(sessions = sessions)
+            assertEquals(listOf(SessionAction.LoadModels(false)), loads)
+            assertTrue(attempts.isEmpty())
         }
-        compose.onNodeWithText("Could not start OMP\nOMP did not load stored session").assertIsDisplayed()
-        compose.runOnIdle { assertEquals(targetKey, selected) }
-        compose.onNodeWithText("Retry").performClick()
-        compose.onNodeWithText("Starting OMP…").assertIsDisplayed()
+        compose.onNodeWithText("Apply").performClick()
+        compose.onNodeWithText("Applying model settings…").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(targetKey, selected); finishStart.complete(Unit) }
+        compose.onNodeWithText("Close the session on your computer, then tap Apply.").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf(targetKey), attempts) }
+        compose.onNodeWithText("Apply").performClick()
+        compose.onNodeWithText("Models").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(targetKey, selected); assertEquals(listOf(targetKey, targetKey), attempts) }
     }
 
     @Test fun long_status_stays_in_the_corner_without_covering_the_project() {
@@ -484,7 +496,7 @@ class TasksPagerBarDeviceTest {
                         TasksScreenState(sessionListState(AppState(hosts = mapOf("host" to host))),
                             emptyMap(), emptyMap(), emptyMap(), emptySet(), emptyMap(), emptyMap(), emptyMap(),
                             SessionKey("host", session.id)),
-                        TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> true }),
+                        TasksScreenActions({}, {}, {}, {}, {}, { _, _ -> }, { _, _ -> }),
                     )
                 }
             }

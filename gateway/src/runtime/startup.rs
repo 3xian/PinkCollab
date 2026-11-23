@@ -49,7 +49,7 @@ impl SessionController {
             let source =
                 crate::discovery::validate_mapping(&session, expected, self.browser.clone())
                     .await?;
-            crate::discovery::ensure_quiet(&source.path).await?;
+            crate::discovery::ensure_resumable(&source, &self.executable, &self.args).await?;
             crate::history::history_page(&source.path, &session.id, None, 1).await?;
         }
         let generation = storage::id("run_");
