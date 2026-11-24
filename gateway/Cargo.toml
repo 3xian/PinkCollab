@@ -1,6 +1,6 @@
 [package]
 name = "pinkcollab-gateway"
-version = "4.4.0"
+version = "4.5.0"
 default-run = "pinkcollab-gateway"
 edition = "2024"
 rust-version = "1.89"
